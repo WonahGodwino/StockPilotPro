@@ -110,14 +110,18 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
           </div>
 
           {/* Margin indicator */}
-          {form.costPrice > 0 && form.sellingPrice > 0 && (
-            <div className="bg-gray-50 rounded-lg p-3 text-sm">
-              <span className="text-gray-500">Margin: </span>
-              <span className={`font-semibold ${form.sellingPrice > form.costPrice ? 'text-success-600' : 'text-danger-600'}`}>
-                ${(form.sellingPrice - form.costPrice).toFixed(2)} ({(((form.sellingPrice - form.costPrice) / form.costPrice) * 100).toFixed(1)}%)
-              </span>
-            </div>
-          )}
+          {form.costPrice > 0 && form.sellingPrice > 0 && (() => {
+            const marginPct = ((form.sellingPrice - form.costPrice) / form.costPrice) * 100
+            const color = marginPct >= 30 ? 'text-success-600' : marginPct >= 15 ? 'text-warning-600' : 'text-danger-600'
+            return (
+              <div className="bg-gray-50 rounded-lg p-3 text-sm">
+                <span className="text-gray-500">Margin: </span>
+                <span className={`font-semibold ${color}`}>
+                  ${(form.sellingPrice - form.costPrice).toFixed(2)} ({marginPct.toFixed(1)}%)
+                </span>
+              </div>
+            )
+          })()}
 
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
