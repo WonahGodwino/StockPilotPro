@@ -52,7 +52,7 @@ export default function SsoCallback() {
       subsidiaryId: subsidiaryId || null,
       tenant:
         tenantId && tenantName && tenantSlug
-          ? { id: tenantId, name: tenantName, slug: tenantSlug }
+          ? { id: tenantId, name: tenantName, slug: tenantSlug, baseCurrency: 'USD' }
           : null,
     }
 

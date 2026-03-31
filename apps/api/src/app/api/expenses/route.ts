@@ -11,6 +11,8 @@ const createSchema = z.object({
   amount: z.number().positive(),
   category: z.enum(EXPENSE_CATEGORIES),
   date: z.string().datetime(),
+  currency: z.string().length(3).toUpperCase().default('USD'),
+  fxRate: z.number().positive().default(1),
   notes: z.string().optional(),
   subsidiaryId: z.string(),
 })
@@ -102,6 +104,8 @@ export async function POST(req: NextRequest) {
         amount: expense.amount,
         category: expense.category,
         date: expense.date,
+        currency: expense.currency,
+        fxRate: expense.fxRate,
         subsidiaryId: expense.subsidiaryId,
       },
       req,

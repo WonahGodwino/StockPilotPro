@@ -5,27 +5,29 @@ import api from '@/lib/api'
 import { useAuthStore } from '@/store/auth.store'
 import { TrendingUp, TrendingDown, DollarSign, Package, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { makeCurrencyFormatter } from '@/lib/currency'
 
 type Period = 'daily' | 'monthly' | 'quarterly' | 'yearly' | 'custom'
 const EXPENSE_COLORS = ['#6366f1','#f59e0b','#10b981','#ef4444','#3b82f6','#8b5cf6','#ec4899','#14b8a6']
 
+interface ReportSummary {
+  totalSales: number
+  totalExpenses: number
+  cogs: number
+  grossProfit: number
+  netProfit: number
+  totalProductWorth: number
+  salesCount: number
+}
+
 interface ReportsResponse {
   data: {
-    summary: {
-      totalSales: number
-      totalExpenses: number
-      cogs: number
-      grossProfit: number
-      netProfit: number
-      totalProductWorth: number
-      salesCount: number
-    }
+    summary: ReportSummary
+    baseCurrency: string
     topProducts: Array<{ name: string; totalRevenue: number }>
     expenseByCategory: Array<{ category: string; total: number }>
   }
 }
-
-const fmt = (n: number) => n.toLocaleString('en-NG', { style: 'currency', currency: 'NGN', maximumFractionDigits: 0 })
 
 export default function Reports() {
   const user = useAuthStore((s) => s.user)
@@ -53,6 +55,9 @@ export default function Reports() {
 
   if (!user || user.role === 'SALESPERSON') return <Navigate to="/dashboard" replace />
 
+  const baseCurrency = report?.baseCurrency || user?.tenant?.baseCurrency || 'USD'
+  const fmt = makeCurrencyFormatter(baseCurrency, { maximumFractionDigits: 0 })
+
   const expenseByCat = report?.expenseByCategory
     ? report.expenseByCategory.map((e) => ({ name: e.category, value: e.total }))
     : []
@@ -61,7 +66,17 @@ export default function Reports() {
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold text-gray-900">Reports</h1><p className="text-sm text-gray-500 mt-0.5">Profit & Loss Overview</p></div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Profit &amp; Loss Overview
+            {baseCurrency && (
+              <span className="ml-2 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 text-xs font-medium">
+                {baseCurrency}
+              </span>
+            )}
+          </p>
+        </div>
         <div className="flex gap-2 flex-wrap justify-end">
           {(['daily','monthly','quarterly','yearly','custom'] as Period[]).map((p) => (
             <button key={p} onClick={() => setPeriod(p)} className={`px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition-colors ${period === p ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'}`}>{p}</button>
@@ -119,7 +134,7 @@ export default function Reports() {
                 </div>
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart data={report.topProducts.map((p) => ({ name: p.name, revenue: p.totalRevenue }))} layout="vertical">
-                    <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => `₦${(v/1000).toFixed(0)}k`} />
+                    <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => fmt(v)} />
                     <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={90} />
                     <Tooltip formatter={(v: number) => fmt(v)} />
                     <Bar dataKey="revenue" fill="#6366f1" radius={[0, 4, 4, 0]} />

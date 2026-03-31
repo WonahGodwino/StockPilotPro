@@ -47,6 +47,12 @@ export async function GET(req: NextRequest) {
       ? searchParams.get('tenantId') || undefined
       : user.tenantId!
 
+    // Fetch tenant base currency
+    const tenant = tenantId
+      ? await prisma.tenant.findUnique({ where: { id: tenantId }, select: { baseCurrency: true } })
+      : null
+    const baseCurrency = tenant?.baseCurrency || 'USD'
+
     const dateRange = getDateRange(period, from, to)
     const baseWhere = {
       tenantId,
@@ -54,95 +60,135 @@ export async function GET(req: NextRequest) {
       ...(subsidiaryId ? { subsidiaryId } : {}),
     }
 
-    // Aggregate sales
-    const salesAgg = await prisma.sale.aggregate({
+    // Aggregate sales (with currency/fxRate for conversion)
+    const sales = await prisma.sale.findMany({
       where: { ...baseWhere, ...(dateRange ? { createdAt: dateRange } : {}) },
-      _sum: { totalAmount: true, discount: true },
-      _count: { id: true },
+      select: { totalAmount: true, discount: true, currency: true, fxRate: true, id: true },
     })
 
-    // Cost of goods sold
-    const saleItems = await prisma.saleItem.findMany({
-      where: {
-        sale: { ...baseWhere, ...(dateRange ? { createdAt: dateRange } : {}) },
-      },
-      select: { quantity: true, costPrice: true, subtotal: true },
+    // Convert each sale's totalAmount to base currency
+    const totalSales = (sales as Array<{ totalAmount: unknown; discount: unknown; currency: string; fxRate: unknown; id: string }>).reduce((s: number, sale) => {
+      const amount = Number(sale.totalAmount)
+      const rate = Number(sale.fxRate)
+      return s + (sale.currency === baseCurrency ? amount : amount / rate)
+    }, 0)
+
+    const salesCount = sales.length
+
+    // Cost of goods sold — fetch all sale items once for both COGS and top products
+    const saleIds = (sales as Array<{ id: string }>).map((s) => s.id)
+
+    // Build a lookup of fxRate per saleId
+    const saleFxMap: Record<string, { currency: string; fxRate: number }> = Object.fromEntries(
+      (sales as Array<{ id: string; currency: string; fxRate: unknown }>).map((s) => [s.id, { currency: s.currency, fxRate: Number(s.fxRate) }])
+    )
+
+    const saleItemsAll = await prisma.saleItem.findMany({
+      where: { saleId: { in: saleIds } },
+      select: { productId: true, quantity: true, costPrice: true, subtotal: true, saleId: true },
     })
 
-    const cogs = saleItems.reduce((s, i) => s + Number(i.quantity) * Number(i.costPrice), 0)
-    const totalSales = Number(salesAgg._sum.totalAmount || 0)
+    const cogs = (saleItemsAll as Array<{ quantity: unknown; costPrice: unknown; saleId: string; productId: string; subtotal: unknown }>).reduce((s: number, i) => {
+      const itemCogs = Number(i.quantity) * Number(i.costPrice)
+      const { currency, fxRate } = saleFxMap[i.saleId] || { currency: baseCurrency, fxRate: 1 }
+      return s + (currency === baseCurrency ? itemCogs : itemCogs / fxRate)
+    }, 0)
 
-    // Expenses
-    const expensesAgg = await prisma.expense.aggregate({
+    // Expenses (converted to base currency)
+    const expensesRaw = await prisma.expense.findMany({
       where: { ...baseWhere, ...(dateRange ? { date: dateRange } : {}) },
-      _sum: { amount: true },
+      select: { amount: true, category: true, currency: true, fxRate: true },
     })
-    const totalExpenses = Number(expensesAgg._sum.amount || 0)
 
-    // Product inventory worth
+    const totalExpenses = (expensesRaw as Array<{ amount: unknown; category: string; currency: string; fxRate: unknown }>).reduce((s: number, e) => {
+      const amount = Number(e.amount)
+      const rate = Number(e.fxRate)
+      return s + (e.currency === baseCurrency ? amount : amount / rate)
+    }, 0)
+
+    // Expense breakdown by category (in base currency)
+    const expenseByCatMap: Record<string, number> = {}
+    for (const e of expensesRaw) {
+      const amount = Number(e.amount)
+      const rate = Number(e.fxRate)
+      const converted = e.currency === baseCurrency ? amount : amount / rate
+      expenseByCatMap[e.category] = (expenseByCatMap[e.category] || 0) + converted
+    }
+
+    // Product inventory worth (products are always in base currency)
     const products = await prisma.product.findMany({
       where: { ...baseWhere, status: { in: ['ACTIVE', 'DRAFT'] } },
       select: { quantity: true, costPrice: true },
     })
-    const totalProductWorth = products.reduce(
-      (s, p) => s + Number(p.quantity) * Number(p.costPrice),
+    const totalProductWorth = (products as Array<{ quantity: unknown; costPrice: unknown }>).reduce(
+      (s: number, p) => s + Number(p.quantity) * Number(p.costPrice),
       0
     )
 
     const grossProfit = totalSales - cogs
     const netProfit = grossProfit - totalExpenses
 
-    // Top products by revenue (subtotal) descending
-    const topProducts = await prisma.saleItem.groupBy({
-      by: ['productId'],
-      where: {
-        sale: { ...baseWhere, ...(dateRange ? { createdAt: dateRange } : {}) },
-      },
-      _sum: { quantity: true, subtotal: true },
-      orderBy: { _sum: { subtotal: 'desc' } },
-      take: 10,
-    })
+    // Top products by converted revenue
+    const allSaleItems = saleItemsAll
+    const productRevenueMap: Record<string, { quantity: number; revenue: number }> = {}
+    for (const item of allSaleItems) {
+      const { currency, fxRate } = saleFxMap[item.saleId] || { currency: baseCurrency, fxRate: 1 }
+      const subtotal = Number(item.subtotal)
+      const converted = currency === baseCurrency ? subtotal : subtotal / fxRate
+      if (!productRevenueMap[item.productId]) {
+        productRevenueMap[item.productId] = { quantity: 0, revenue: 0 }
+      }
+      productRevenueMap[item.productId].quantity += Number(item.quantity)
+      productRevenueMap[item.productId].revenue += converted
+    }
+
+    const sortedProductIds = Object.entries(productRevenueMap)
+      .sort((a, b) => b[1].revenue - a[1].revenue)
+      .slice(0, 10)
+      .map(([id]) => id)
 
     const topProductDetails = await Promise.all(
-      topProducts.map(async (tp) => {
+      sortedProductIds.map(async (productId) => {
         const product = await prisma.product.findUnique({
-          where: { id: tp.productId },
+          where: { id: productId },
           select: { name: true, unit: true },
         })
         return {
-          productId: tp.productId,
+          productId,
           name: product?.name || 'Unknown',
           unit: product?.unit || 'pcs',
-          totalQuantity: Number(tp._sum.quantity),
-          totalRevenue: Number(tp._sum.subtotal),
+          totalQuantity: productRevenueMap[productId].quantity,
+          totalRevenue: productRevenueMap[productId].revenue,
         }
       })
     )
 
-    // Expense breakdown by category
-    const expenseByCategory = await prisma.expense.groupBy({
-      by: ['category'],
-      where: { ...baseWhere, ...(dateRange ? { date: dateRange } : {}) },
-      _sum: { amount: true },
-      orderBy: { _sum: { amount: 'desc' } },
-    })
-
-    const expensesByCategory = expenseByCategory.reduce<Record<string, number>>((acc, e) => {
-      acc[e.category] = Number(e._sum.amount)
-      return acc
-    }, {})
-
     return NextResponse.json({
       data: {
+        summary: {
+          totalSales,
+          costOfGoods: cogs,
+          cogs,
+          grossProfit,
+          totalExpenses,
+          netProfit,
+          totalProductWorth,
+          salesCount,
+        },
+        baseCurrency,
+        topProducts: topProductDetails,
+        expenseByCategory: Object.entries(expenseByCatMap).map(([category, total]) => ({
+          category,
+          total,
+        })),
+        // Legacy fields for backward compatibility
         totalSales,
         costOfGoods: cogs,
         grossProfit,
         totalExpenses,
         netProfit,
         totalProductWorth,
-        salesCount: salesAgg._count.id,
-        expensesByCategory,
-        topProducts: topProductDetails,
+        expensesByCategory: expenseByCatMap,
         period,
       },
     })

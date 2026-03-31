@@ -17,6 +17,7 @@ const Users = lazy(() => import('@/pages/Users'))
 const Notifications = lazy(() => import('@/pages/Notifications'))
 const TenantsPage = lazy(() => import('@/pages/superadmin/Tenants'))
 const PlansPage = lazy(() => import('@/pages/superadmin/Plans'))
+const SettingsPage = lazy(() => import('@/pages/Settings'))
 
 function PageLoader() {
   return (
@@ -73,6 +74,7 @@ export default function App() {
             <Route path="subsidiaries" element={<Subsidiaries />} />
             <Route path="users" element={<Users />} />
             <Route path="notifications" element={<Notifications />} />
+            <Route path="settings" element={<SettingsPage />} />
             {/* Super Admin routes */}
             <Route
               path="admin/tenants"

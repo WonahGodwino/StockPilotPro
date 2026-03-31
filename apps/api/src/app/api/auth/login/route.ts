@@ -133,7 +133,7 @@ export async function POST(req: NextRequest) {
         role: user.role,
         tenantId: user.tenantId,
         subsidiaryId: user.subsidiaryId,
-        tenant: user.tenant ? { id: user.tenant.id, name: user.tenant.name, slug: user.tenant.slug } : null,
+        tenant: user.tenant ? { id: user.tenant.id, name: user.tenant.name, slug: user.tenant.slug, baseCurrency: user.tenant.baseCurrency } : null,
       },
     })
   } catch (err) {

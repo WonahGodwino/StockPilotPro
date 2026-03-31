@@ -6,11 +6,14 @@ import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/auth.store'
 import ExpenseModal from '@/components/expenses/ExpenseModal'
 import Pagination from '@/components/Pagination'
+import { makeCurrencyFormatter, getCurrencySymbol } from '@/lib/currency'
 
 const CATEGORIES = ['Rent', 'Utilities', 'Salaries', 'Marketing', 'Transportation', 'Maintenance', 'Supplies', 'Other']
 
 export default function Expenses() {
   const user = useAuthStore((s) => s.user)
+  const baseCurrency = user?.tenant?.baseCurrency || 'USD'
+  const fmt = makeCurrencyFormatter(baseCurrency)
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -76,7 +79,7 @@ export default function Expenses() {
         <div>
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Total Expenses</p>
           <p className="text-2xl font-bold text-danger-600">
-            ${total.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            {fmt(total_amount)}
           </p>
           <p className="text-xs text-gray-400 mt-0.5">{total} {total === 1 ? 'record' : 'records'}</p>
         </div>
@@ -162,7 +165,10 @@ export default function Expenses() {
                       <span className="badge bg-gray-100 text-gray-600">{e.category}</span>
                     </td>
                     <td className="px-4 py-3 text-right font-medium text-danger-600">
-                      ${Number(e.amount).toFixed(2)}
+                      {e.currency && e.currency !== baseCurrency
+                        ? `${getCurrencySymbol(e.currency)}${Number(e.amount).toFixed(2)} (${fmt(Number(e.amount) / Number(e.fxRate || 1))})`
+                        : fmt(Number(e.amount))
+                      }
                     </td>
                     <td className="px-4 py-3 text-gray-500 text-xs">{new Date(e.date).toLocaleDateString()}</td>
                     <td className="px-4 py-3 text-gray-500 text-xs">
