@@ -1,6 +1,30 @@
 import Dexie, { type Table } from 'dexie'
 import type { Product, Sale, Expense, CartItem } from '@/types'
 
+// Typed API payloads for offline-pending records
+export interface SalePayload {
+  subsidiaryId: string
+  paymentMethod: string
+  discount: number
+  amountPaid: number
+  items: {
+    productId: string
+    quantity: number
+    unitPrice: number
+    costPrice: number
+    discount: number
+  }[]
+}
+
+export interface ExpensePayload {
+  title: string
+  amount: number
+  category: string
+  date: string
+  notes?: string
+  subsidiaryId: string
+}
+
 // Offline-pending record wrapper
 export interface PendingRecord<T> {
   id?: number
@@ -15,7 +39,7 @@ export class StockPilotDB extends Dexie {
   products!: Table<Product>
   sales!: Table<Sale>
   expenses!: Table<Expense>
-  pendingRecords!: Table<PendingRecord<Sale | Expense>>
+  pendingRecords!: Table<PendingRecord<SalePayload | ExpensePayload>>
   cart!: Table<CartItem & { id: number }>
 
   constructor() {
@@ -55,12 +79,24 @@ export async function getProductByBarcode(barcode: string): Promise<Product | un
   return db.products.where('barcode').equals(barcode).first()
 }
 
-export async function addPendingSale(data: Omit<Sale, 'id' | 'createdAt' | 'updatedAt'>) {
+export async function addPendingSale(data: SalePayload) {
   const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2)}`
   await db.pendingRecords.add({
     localId,
     type: 'sale',
-    data: data as Sale,
+    data,
+    synced: false,
+    createdAt: new Date().toISOString(),
+  })
+  return localId
+}
+
+export async function addPendingExpense(data: ExpensePayload) {
+  const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2)}`
+  await db.pendingRecords.add({
+    localId,
+    type: 'expense',
+    data,
     synced: false,
     createdAt: new Date().toISOString(),
   })

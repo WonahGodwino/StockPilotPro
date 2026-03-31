@@ -4,11 +4,12 @@ import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { isSuperAdmin, isBusinessAdmin } from '@/lib/rbac'
 import { logAudit } from '@/lib/audit'
+import { EXPENSE_CATEGORIES } from '@/lib/expenses'
 
 const updateSchema = z.object({
   title: z.string().min(1).optional(),
   amount: z.number().positive().optional(),
-  category: z.string().optional(),
+  category: z.enum(EXPENSE_CATEGORIES).optional(),
   date: z.string().datetime().optional(),
   notes: z.string().optional(),
 })
@@ -75,27 +76,50 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     if (!expense) return apiError('Not found', 404)
     if (!isSuperAdmin(user) && expense.tenantId !== user.tenantId) return apiError('Forbidden', 403)
 
-    await prisma.expense.update({
-      where: { id: params.id },
-      data: { archived: true, updatedBy: user.userId },
-    })
+    if (isSuperAdmin(user)) {
+      // Hard delete for SUPER_ADMIN
+      await prisma.expense.delete({ where: { id: params.id } })
 
-    await logAudit({
-      tenantId: expense.tenantId,
-      userId: user.userId,
-      action: 'DELETE',
-      entity: 'expense',
-      entityId: expense.id,
-      oldValues: {
-        title: expense.title,
-        amount: expense.amount,
-        archived: expense.archived,
-      },
-      newValues: { archived: true },
-      req,
-    })
+      await logAudit({
+        tenantId: expense.tenantId,
+        userId: user.userId,
+        action: 'DELETE',
+        entity: 'expense',
+        entityId: expense.id,
+        oldValues: {
+          title: expense.title,
+          amount: expense.amount,
+          archived: expense.archived,
+        },
+        newValues: { deleted: true },
+        req,
+      })
 
-    return NextResponse.json({ message: 'Expense archived' })
+      return NextResponse.json({ message: 'Expense deleted' })
+    } else {
+      // Soft delete for BUSINESS_ADMIN
+      await prisma.expense.update({
+        where: { id: params.id },
+        data: { archived: true, updatedBy: user.userId },
+      })
+
+      await logAudit({
+        tenantId: expense.tenantId,
+        userId: user.userId,
+        action: 'DELETE',
+        entity: 'expense',
+        entityId: expense.id,
+        oldValues: {
+          title: expense.title,
+          amount: expense.amount,
+          archived: expense.archived,
+        },
+        newValues: { archived: true },
+        req,
+      })
+
+      return NextResponse.json({ message: 'Expense archived' })
+    }
   } catch (err) {
     console.error('[EXPENSE DELETE]', err)
     return apiError('Internal server error', 500)

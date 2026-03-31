@@ -55,4 +55,13 @@ assertSubsidiaryAccess(admin, 'any-sub')
 assertSubsidiaryAccess(salesperson, 's1')
 mustThrow(() => assertSubsidiaryAccess(salesperson, 's2'), 'subsidiary mismatch')
 
+// Sales view permission checks
+assert.equal(hasPermission(superAdmin, 'view:sales'), true)
+assert.equal(hasPermission(admin, 'view:sales'), true)
+assert.equal(hasPermission(salesperson, 'view:sales'), true)
+
+// Salesperson cannot access admin-only permissions
+mustThrow(() => requirePermission(salesperson, 'view:reports'), 'Forbidden')
+mustThrow(() => requirePermission(salesperson, 'manage:users'), 'Forbidden')
+
 console.log('RBAC checks passed')
