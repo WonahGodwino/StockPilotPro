@@ -6,6 +6,7 @@ import { initSyncListener } from '@/lib/sync'
 import AppLayout from '@/components/layout/AppLayout'
 
 const Login = lazy(() => import('@/pages/Login'))
+const SsoCallback = lazy(() => import('@/pages/SsoCallback'))
 const Dashboard = lazy(() => import('@/pages/Dashboard'))
 const Products = lazy(() => import('@/pages/Products'))
 const SalesPage = lazy(() => import('@/pages/Sales'))
@@ -54,6 +55,7 @@ export default function App() {
       <Suspense fallback={<PageLoader />}>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/sso-callback" element={<SsoCallback />} />
           <Route
             path="/"
             element={
