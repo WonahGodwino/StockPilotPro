@@ -77,6 +77,8 @@ model Tenant {
   address         String?
   logo            String?
   isActive        Boolean  @default(true)
+  ssoEnabled      Boolean  @default(false)
+  ssoProviders    Json     @default("[]")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   createdBy       String?
@@ -91,6 +93,7 @@ model Tenant {
   subscriptions   Subscription[]
   notifications   Notification[]
   auditLogs       AuditLog[]
+  ssoAccounts     SsoAccount[]
 }
 
 // ──────────────────────────────────────────────
@@ -127,7 +130,7 @@ model User {
   tenantId        String?
   subsidiaryId    String?
   email           String       @unique
-  password        String
+  password        String?
   firstName       String
   lastName        String
   role            UserRole
@@ -145,10 +148,35 @@ model User {
   sales           Sale[]
   expenses        Expense[]
   refreshTokens   RefreshToken[]
+  ssoAccounts     SsoAccount[]
 
   @@index([tenantId])
   @@index([email])
   @@index([role])
+}
+
+// ──────────────────────────────────────────────
+// SSO ACCOUNTS (linked OAuth identities)
+// ──────────────────────────────────────────────
+
+model SsoAccount {
+  id              String   @id @default(cuid())
+  userId          String
+  tenantId        String
+  provider        String   // google | microsoft
+  providerUserId  String
+  email           String
+  displayName     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@unique([provider, userId])
+  @@index([userId])
+  @@index([tenantId])
 }
 
 // ──────────────────────────────────────────────

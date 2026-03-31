@@ -2,18 +2,15 @@ import { useState, useEffect } from 'react'
 import api from '@/lib/api'
 import type { Tenant } from '@/types'
 import toast from 'react-hot-toast'
-import { Plus, Building, Edit, X, Loader2, ChevronDown, ChevronUp, ToggleLeft, ToggleRight } from 'lucide-react'
+import { Plus, Building, Edit, X, Loader2, ChevronDown, ChevronUp, ToggleLeft, ToggleRight, Shield } from 'lucide-react'
 
 interface TenantForm { name: string; email: string; phone: string; address: string }
 const emptyForm: TenantForm = { name: '', email: '', phone: '', address: '' }
 
+interface SsoSettings { ssoEnabled: boolean; ssoProviders: string[] }
+
 function makeSlug(input: string) {
-  return input
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
+  return input.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-')
 }
 
 export default function TenantsPage() {
@@ -25,16 +22,56 @@ export default function TenantsPage() {
   const [form, setForm] = useState<TenantForm>(emptyForm)
   const [saving, setSaving] = useState(false)
 
+  // SSO management state per tenant
+  const [ssoSettings, setSsoSettings] = useState<Record<string, SsoSettings>>({})
+  const [ssoSaving, setSsoSaving] = useState<string | null>(null)
+
   const load = async () => {
     setLoading(true)
     try {
       const res = await api.get<{ data: Tenant[] }>('/tenants')
       setTenants(res.data.data)
-    }
-    catch { toast.error('Failed to load tenants') } finally { setLoading(false) }
+    } catch { toast.error('Failed to load tenants') } finally { setLoading(false) }
   }
 
   useEffect(() => { load() }, [])
+
+  const loadSsoSettings = async (tenantId: string) => {
+    if (ssoSettings[tenantId]) return
+    try {
+      const res = await api.get<{ data: SsoSettings }>(`/tenants/${tenantId}/sso`)
+      setSsoSettings((prev) => ({ ...prev, [tenantId]: res.data.data }))
+    } catch {
+      setSsoSettings((prev) => ({ ...prev, [tenantId]: { ssoEnabled: false, ssoProviders: [] } }))
+    }
+  }
+
+  const handleExpand = (id: string) => {
+    const next = expanded === id ? null : id
+    setExpanded(next)
+    if (next) loadSsoSettings(next)
+  }
+
+  const handleSsoToggle = async (tenantId: string, provider: string, checked: boolean) => {
+    const current = ssoSettings[tenantId] || { ssoEnabled: false, ssoProviders: [] }
+    const newProviders = checked
+      ? [...new Set([...current.ssoProviders, provider])]
+      : current.ssoProviders.filter((p) => p !== provider)
+    const newEnabled = newProviders.length > 0
+    setSsoSettings((prev) => ({ ...prev, [tenantId]: { ssoEnabled: newEnabled, ssoProviders: newProviders } }))
+  }
+
+  const saveSsoSettings = async (tenantId: string) => {
+    const settings = ssoSettings[tenantId]
+    if (!settings) return
+    setSsoSaving(tenantId)
+    try {
+      await api.patch(`/tenants/${tenantId}/sso`, { ssoEnabled: settings.ssoEnabled, ssoProviders: settings.ssoProviders })
+      toast.success('SSO settings saved')
+    } catch (err: unknown) {
+      toast.error((err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to save SSO settings')
+    } finally { setSsoSaving(null) }
+  }
 
   const openCreate = () => { setForm(emptyForm); setModal({ open: true, tenant: null }) }
   const openEdit = (t: Tenant) => { setForm({ name: t.name, email: t.email || '', phone: t.phone || '', address: '' }); setModal({ open: true, tenant: t }) }
@@ -87,10 +124,11 @@ export default function TenantsPage() {
           {filtered.map((t) => {
             const { label, color } = subStatus(t)
             const sub = t.subscriptions?.[0]
+            const sso = ssoSettings[t.id]
             return (
               <div key={t.id} className={`card transition-opacity ${!t.isActive ? 'opacity-60' : ''}`}>
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => setExpanded(expanded === t.id ? null : t.id)}>
+                  <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => handleExpand(t.id)}>
                     <div className="p-2 bg-indigo-50 rounded-xl"><Building className="w-5 h-5 text-indigo-600" /></div>
                     <div>
                       <p className="font-semibold text-gray-800">{t.name}</p>
@@ -104,17 +142,60 @@ export default function TenantsPage() {
                     <button onClick={() => toggleArchive(t)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500" title={t.isActive ? 'Suspend' : 'Activate'}>
                       {t.isActive ? <ToggleRight className="w-4 h-4 text-emerald-500" /> : <ToggleLeft className="w-4 h-4" />}
                     </button>
-                    <button onClick={() => setExpanded(expanded === t.id ? null : t.id)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
+                    <button onClick={() => handleExpand(t.id)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
                       {expanded === t.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                     </button>
                   </div>
                 </div>
                 {expanded === t.id && (
-                  <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                    <div><p className="text-gray-400 text-xs">Phone</p><p className="text-gray-700">{t.phone || '—'}</p></div>
-                    <div><p className="text-gray-400 text-xs">Address</p><p className="text-gray-700">—</p></div>
-                    <div><p className="text-gray-400 text-xs">Plan</p><p className="text-gray-700">{sub?.plan?.name || '—'}</p></div>
-                    <div><p className="text-gray-400 text-xs">Expires</p><p className="text-gray-700">{sub?.expiryDate ? new Date(sub.expiryDate).toLocaleDateString() : '—'}</p></div>
+                  <div className="mt-4 pt-4 border-t border-gray-100 space-y-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                      <div><p className="text-gray-400 text-xs">Phone</p><p className="text-gray-700">{t.phone || '—'}</p></div>
+                      <div><p className="text-gray-400 text-xs">Address</p><p className="text-gray-700">—</p></div>
+                      <div><p className="text-gray-400 text-xs">Plan</p><p className="text-gray-700">{sub?.plan?.name || '—'}</p></div>
+                      <div><p className="text-gray-400 text-xs">Expires</p><p className="text-gray-700">{sub?.expiryDate ? new Date(sub.expiryDate).toLocaleDateString() : '—'}</p></div>
+                    </div>
+
+                    {/* SSO Settings */}
+                    <div className="bg-gray-50 rounded-xl p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Shield className="w-4 h-4 text-indigo-500" />
+                        <span className="text-sm font-semibold text-gray-700">SSO Authentication</span>
+                      </div>
+                      {!sso ? (
+                        <div className="flex items-center gap-2 text-xs text-gray-400"><Loader2 className="w-3 h-3 animate-spin" /> Loading…</div>
+                      ) : (
+                        <div className="space-y-3">
+                          <p className="text-xs text-gray-500">Enable Single Sign-On for BUSINESS_ADMIN accounts in this tenant.</p>
+                          <div className="flex flex-wrap gap-4">
+                            {['google', 'microsoft'].map((provider) => (
+                              <label key={provider} className="flex items-center gap-2 cursor-pointer select-none">
+                                <input
+                                  type="checkbox"
+                                  className="w-4 h-4 rounded accent-indigo-600"
+                                  checked={sso.ssoProviders.includes(provider)}
+                                  onChange={(e) => handleSsoToggle(t.id, provider, e.target.checked)}
+                                />
+                                <span className="text-sm text-gray-700 capitalize">{provider}</span>
+                              </label>
+                            ))}
+                          </div>
+                          <div className="flex items-center gap-3 pt-1">
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${sso.ssoEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-500'}`}>
+                              {sso.ssoEnabled ? 'SSO Enabled' : 'SSO Disabled'}
+                            </span>
+                            <button
+                              onClick={() => saveSsoSettings(t.id)}
+                              disabled={ssoSaving === t.id}
+                              className="btn-primary text-xs px-3 py-1.5"
+                            >
+                              {ssoSaving === t.id && <Loader2 className="w-3 h-3 animate-spin" />}
+                              Save SSO Settings
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
