@@ -77,6 +77,22 @@ export interface CartItem {
   discount: number
 }
 
+// Checkout payload sent to POST /sales (and stored for offline sync)
+export interface SaleCheckoutPayload {
+  subsidiaryId: string
+  paymentMethod: PaymentMethod
+  discount: number
+  amountPaid: number
+  notes?: string
+  items: {
+    productId: string
+    quantity: number
+    unitPrice: number
+    costPrice: number
+    discount: number
+  }[]
+}
+
 // ── Expenses ──────────────────────────────────────────────────────────────────
 
 export interface Expense {

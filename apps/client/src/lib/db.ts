@@ -1,20 +1,5 @@
 import Dexie, { type Table } from 'dexie'
-import type { Product, Sale, Expense, CartItem } from '@/types'
-
-// Typed API payloads for offline-pending records
-export interface SalePayload {
-  subsidiaryId: string
-  paymentMethod: string
-  discount: number
-  amountPaid: number
-  items: {
-    productId: string
-    quantity: number
-    unitPrice: number
-    costPrice: number
-    discount: number
-  }[]
-}
+import type { Product, Expense, CartItem, SaleCheckoutPayload } from '@/types'
 
 export interface ExpensePayload {
   title: string
@@ -79,7 +64,7 @@ export async function getProductByBarcode(barcode: string): Promise<Product | un
   return db.products.where('barcode').equals(barcode).first()
 }
 
-export async function addPendingSale(data: SalePayload) {
+export async function addPendingSale(data: SaleCheckoutPayload) {
   const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2)}`
   await db.pendingRecords.add({
     localId,
