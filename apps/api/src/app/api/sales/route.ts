@@ -18,7 +18,7 @@ const createSaleSchema = z.object({
   subsidiaryId: z.string(),
   items: z.array(saleItemSchema).min(1),
   discount: z.number().min(0).default(0),
-  paymentMethod: z.enum(['CASH', 'TRANSFER', 'POS']).default('CASH'),
+  paymentMethod: z.enum(['CASH', 'CARD', 'TRANSFER', 'POS']).default('CASH'),
   amountPaid: z.number().min(0),
   notes: z.string().optional(),
 })
@@ -119,9 +119,10 @@ export async function POST(req: NextRequest) {
     const grossTotal = subtotals.reduce((s, i) => s + i.subtotal, 0)
     const totalAmount = Math.max(0, grossTotal - data.discount)
 
-    const receiptNumber = generateReceiptNumber()
-
     const sale = await prisma.$transaction(async (tx) => {
+      // Generate unique sequential receipt number inside the transaction
+      const receiptNumber = await generateReceiptNumber(tx, user.tenantId!)
+
       // Deduct stock
       for (const item of data.items) {
         const product = products.find((p) => p.id === item.productId)!

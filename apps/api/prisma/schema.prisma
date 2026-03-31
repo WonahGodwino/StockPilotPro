@@ -39,6 +39,7 @@ enum ProductStatus {
 
 enum PaymentMethod {
   CASH
+  CARD
   TRANSFER
   POS
 }
