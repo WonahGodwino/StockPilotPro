@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Plus, Search, Edit2, Archive, Package, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Plus, Search, Edit2, Archive, Package } from 'lucide-react'
 import api from '@/lib/api'
 import type { Product } from '@/types'
 import { useAuthStore } from '@/store/auth.store'
 import toast from 'react-hot-toast'
 import ProductModal from '@/components/products/ProductModal'
+import Pagination from '@/components/Pagination'
 import { cacheProducts } from '@/lib/db'
 
 const PAGE_SIZE = 20
@@ -65,8 +66,6 @@ export default function Products() {
     } catch { toast.error('Failed to archive product') }
   }
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-
   const totalWorth = products
     .filter((p) => p.status === 'ACTIVE')
     .reduce((s, p) => s + p.quantity * Number(p.costPrice), 0)
@@ -77,7 +76,7 @@ export default function Products() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Products</h1>
           <p className="text-sm text-gray-500 mt-1">
-            {products.length} items &nbsp;·&nbsp; Inventory worth:{' '}
+            {total} items &nbsp;·&nbsp; Inventory worth:{' '}
             <span className="font-semibold text-gray-700">
               ${totalWorth.toLocaleString('en-US', { minimumFractionDigits: 2 })}
             </span>
@@ -98,15 +97,15 @@ export default function Products() {
             className="input pl-9"
             placeholder="Search by name or barcode..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setPage(1) }}
           />
         </div>
-        <select className="input w-36" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+        <select className="input w-36" value={typeFilter} onChange={(e) => { setTypeFilter(e.target.value); setPage(1) }}>
           <option value="">All Types</option>
           <option value="GOODS">Goods</option>
           <option value="SERVICE">Service</option>
         </select>
-        <select className="input w-40" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+        <select className="input w-40" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}>
           <option value="">All Status</option>
           <option value="ACTIVE">Active</option>
           <option value="DRAFT">Draft</option>
@@ -200,31 +199,7 @@ export default function Products() {
             </tbody>
           </table>
         </div>
-
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
-            <p className="text-sm text-gray-500">
-              Page {page} of {totalPages} &nbsp;·&nbsp; {total} total
-            </p>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
+        <Pagination page={page} limit={PAGE_SIZE} total={total} onPageChange={setPage} />
       </div>
 
       {modalOpen && (

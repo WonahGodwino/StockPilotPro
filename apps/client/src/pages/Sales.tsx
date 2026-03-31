@@ -1,14 +1,16 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Search, Barcode, Trash2, Minus, Plus, ShoppingCart, Printer } from 'lucide-react'
+import { Search, Barcode, Trash2, Minus, Plus, ShoppingCart, History, ShoppingBag } from 'lucide-react'
 import { useCartStore } from '@/store/cart.store'
-import type { Product } from '@/types'
+import type { Product, Sale } from '@/types'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { getProductByBarcode, searchCachedProducts, addPendingSale } from '@/lib/db'
 import Receipt from '@/components/sales/Receipt'
+import Pagination from '@/components/Pagination'
 
 export default function SalesPage() {
   const cart = useCartStore()
+  const [tab, setTab] = useState<'pos' | 'history'>('pos')
   const [products, setProducts] = useState<Product[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'TRANSFER' | 'POS'>('CASH')
@@ -18,6 +20,30 @@ export default function SalesPage() {
   const [completedSale, setCompletedSale] = useState<{ id: string; receiptNumber: string } | null>(null)
   const barcodeBuffer = useRef('')
   const barcodeTimer = useRef<ReturnType<typeof setTimeout>>()
+
+  // Sales history state
+  const HISTORY_LIMIT = 20
+  const [sales, setSales] = useState<Sale[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyPage, setHistoryPage] = useState(1)
+  const [historyTotal, setHistoryTotal] = useState(0)
+
+  const loadHistory = async () => {
+    setHistoryLoading(true)
+    try {
+      const params = new URLSearchParams()
+      params.set('page', String(historyPage))
+      params.set('limit', String(HISTORY_LIMIT))
+      const { data } = await api.get(`/sales?${params}`)
+      setSales(data.data)
+      setHistoryTotal(data.total)
+    } catch { toast.error('Failed to load sales history') }
+    finally { setHistoryLoading(false) }
+  }
+
+  useEffect(() => {
+    if (tab === 'history') loadHistory()
+  }, [tab, historyPage])
 
   const loadProducts = useCallback(async (q: string) => {
     if (!q) { setProducts([]); return }
@@ -128,7 +154,82 @@ export default function SalesPage() {
   }
 
   return (
-    <div className="flex gap-6 h-[calc(100vh-9rem)]">
+    <div className="space-y-4">
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 border-b border-gray-200">
+        <button
+          onClick={() => setTab('pos')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'pos'
+              ? 'border-primary-600 text-primary-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <ShoppingBag className="w-4 h-4" />
+          Point of Sale
+        </button>
+        <button
+          onClick={() => setTab('history')}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'history'
+              ? 'border-primary-600 text-primary-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          <History className="w-4 h-4" />
+          Sales History
+        </button>
+      </div>
+
+      {tab === 'history' ? (
+        /* ── Sales History ── */
+        <div className="card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Receipt #</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">By</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Payment</th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {historyLoading ? (
+                  <tr><td colSpan={5} className="text-center py-10 text-gray-400">Loading...</td></tr>
+                ) : sales.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="text-center py-12">
+                      <ShoppingCart className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                      <p className="text-gray-400 text-sm">No sales recorded yet</p>
+                    </td>
+                  </tr>
+                ) : (
+                  sales.map((s) => (
+                    <tr key={s.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 font-medium text-gray-900">{s.receiptNumber}</td>
+                      <td className="px-4 py-3 text-gray-500 text-xs">{new Date(s.createdAt).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-gray-500 text-xs">
+                        {s.user ? `${s.user.firstName} ${s.user.lastName}` : '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="badge bg-gray-100 text-gray-600">{s.paymentMethod}</span>
+                      </td>
+                      <td className="px-4 py-3 text-right font-semibold text-gray-900">
+                        ${Number(s.totalAmount).toFixed(2)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          <Pagination page={historyPage} limit={HISTORY_LIMIT} total={historyTotal} onPageChange={setHistoryPage} />
+        </div>
+      ) : (
+      /* ── Point of Sale ── */
+    <div className="flex gap-6 h-[calc(100vh-12rem)]">
       {/* Products panel */}
       <div className="flex-1 flex flex-col min-w-0">
         <div className="flex items-center justify-between mb-4">
@@ -298,6 +399,8 @@ export default function SalesPage() {
           </button>
         </div>
       </div>
+    </div>
+      )}
     </div>
   )
 }

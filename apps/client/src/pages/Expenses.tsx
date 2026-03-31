@@ -5,6 +5,7 @@ import type { Expense } from '@/types'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/auth.store'
 import ExpenseModal from '@/components/expenses/ExpenseModal'
+import Pagination from '@/components/Pagination'
 
 const CATEGORIES = ['Rent', 'Utilities', 'Salaries', 'Marketing', 'Transportation', 'Maintenance', 'Supplies', 'Other']
 
@@ -22,20 +23,28 @@ export default function Expenses() {
 
   const canDelete = user?.role === 'BUSINESS_ADMIN' || user?.role === 'SUPER_ADMIN'
 
+  const LIMIT = 20
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+
   const load = async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
       if (category) params.set('category', category)
+      if (search) params.set('search', search)
       if (dateFrom) params.set('from', new Date(dateFrom).toISOString())
       if (dateTo) params.set('to', new Date(dateTo + 'T23:59:59').toISOString())
+      params.set('page', String(page))
+      params.set('limit', String(LIMIT))
       const { data } = await api.get(`/expenses?${params}`)
       setExpenses(data.data)
+      setTotal(data.total)
     } catch { toast.error('Failed to load expenses') }
     finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [category, dateFrom, dateTo])
+  useEffect(() => { load() }, [page, search, category, dateFrom, dateTo])
 
   const confirmDelete = async () => {
     if (!confirmId) return
@@ -47,11 +56,7 @@ export default function Expenses() {
     } catch { toast.error('Failed to archive') }
   }
 
-  const filtered = expenses.filter((e) =>
-    !search || e.title.toLowerCase().includes(search.toLowerCase())
-  )
-
-  const total = filtered.reduce((s, e) => s + Number(e.amount), 0)
+  const total_amount = expenses.reduce((s, e) => s + Number(e.amount), 0)
 
   return (
     <div className="space-y-6">
@@ -73,7 +78,7 @@ export default function Expenses() {
           <p className="text-2xl font-bold text-danger-600">
             ${total.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </p>
-          <p className="text-xs text-gray-400 mt-0.5">{filtered.length} {filtered.length === 1 ? 'record' : 'records'}</p>
+          <p className="text-xs text-gray-400 mt-0.5">{total} {total === 1 ? 'record' : 'records'}</p>
         </div>
       </div>
 
@@ -104,14 +109,14 @@ export default function Expenses() {
       <div className="flex flex-wrap gap-3">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input className="input pl-9" placeholder="Search expenses..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className="input pl-9" placeholder="Search expenses..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} />
         </div>
         <div className="flex items-center gap-2">
           <input
             className="input w-36"
             type="date"
             value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
+            onChange={(e) => { setDateFrom(e.target.value); setPage(1) }}
             title="From date"
           />
           <span className="text-gray-400 text-sm">–</span>
@@ -119,7 +124,7 @@ export default function Expenses() {
             className="input w-36"
             type="date"
             value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
+            onChange={(e) => { setDateTo(e.target.value); setPage(1) }}
             title="To date"
           />
         </div>
@@ -142,7 +147,7 @@ export default function Expenses() {
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr><td colSpan={6} className="text-center py-10 text-gray-400">Loading...</td></tr>
-              ) : filtered.length === 0 ? (
+              ) : expenses.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="text-center py-12">
                     <Receipt className="w-10 h-10 text-gray-300 mx-auto mb-2" />
@@ -150,7 +155,7 @@ export default function Expenses() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((e) => (
+                expenses.map((e) => (
                   <tr key={e.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium text-gray-900">{e.title}</td>
                     <td className="px-4 py-3">
@@ -181,6 +186,7 @@ export default function Expenses() {
             </tbody>
           </table>
         </div>
+        <Pagination page={page} limit={LIMIT} total={total} onPageChange={setPage} />
       </div>
 
       {/* Expense create/edit modal */}
