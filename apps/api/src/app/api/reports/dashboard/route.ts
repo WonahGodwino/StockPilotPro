@@ -24,71 +24,92 @@ export async function GET(req: NextRequest) {
       ...(subsidiaryId ? { subsidiaryId } : {}),
     }
 
-    // This month
-    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+    const now = new Date()
 
-    const [salesThisMonth, expensesThisMonth, lowStockCount, totalProducts, activeSubsidiaries, unreadNotifications] =
-      await Promise.all([
+    // Today's date range
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
+
+    // This month's start
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+
+    // Build the 7-day trend date ranges (oldest first)
+    const trendDays = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (6 - i))
+      return {
+        date: d.toISOString().slice(0, 10),
+        start: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0),
+        end: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999),
+      }
+    })
+
+    // All aggregates fired in parallel — single round-trip batch
+    const [
+      [todaySales, monthSales, monthExpenses, allActiveProducts, activeSubsidiaries, unreadNotifications],
+      trendAggregates,
+    ] = await Promise.all([
+      Promise.all([
+        // Today's sales (count + total)
         prisma.sale.aggregate({
-          where: { ...baseWhere, createdAt: { gte: monthStart } },
+          where: { ...baseWhere, createdAt: { gte: todayStart, lte: todayEnd } },
           _sum: { totalAmount: true },
           _count: { id: true },
         }),
+        // This month's revenue
+        prisma.sale.aggregate({
+          where: { ...baseWhere, createdAt: { gte: monthStart } },
+          _sum: { totalAmount: true },
+        }),
+        // This month's expenses
         prisma.expense.aggregate({
           where: { ...baseWhere, date: { gte: monthStart } },
           _sum: { amount: true },
         }),
-        prisma.product.count({
-          where: {
-            ...baseWhere,
-            status: 'ACTIVE',
-            // Low stock: where quantity <= lowStockThreshold
-            // Prisma doesn't directly support column comparison, so we do it in app
-          },
+        // All non-archived products — used for both totalProducts and lowStockCount
+        // (Prisma doesn't support column-vs-column comparisons, so we filter in app)
+        prisma.product.findMany({
+          where: { ...baseWhere },
+          select: { quantity: true, lowStockThreshold: true, status: true },
         }),
-        prisma.product.count({ where: { ...baseWhere, archived: false } }),
+        // Active subsidiaries count
         prisma.subsidiary.count({ where: { tenantId, archived: false, isActive: true } }),
-        prisma.notification.count({
-          where: { tenantId, isRead: false },
-        }),
-      ])
-
-    // Get all products to calculate low stock in app
-    const products = await prisma.product.findMany({
-      where: { ...baseWhere, status: 'ACTIVE', archived: false },
-      select: { quantity: true, lowStockThreshold: true },
-    })
-    const lowStock = products.filter((p) => Number(p.quantity) <= Number(p.lowStockThreshold)).length
-
-    // Sales trend (last 7 days)
-    const salesTrend = await Promise.all(
-      Array.from({ length: 7 }, (_, i) => {
-        const d = new Date()
-        d.setDate(d.getDate() - i)
-        const start = new Date(d.setHours(0, 0, 0, 0))
-        const end = new Date(d.setHours(23, 59, 59, 999))
-        return prisma.sale
-          .aggregate({
+        // Unread notifications count
+        prisma.notification.count({ where: { tenantId, isRead: false } }),
+      ]),
+      // 7-day sales trend (one aggregate per day, fired in parallel with the main queries)
+      Promise.all(
+        trendDays.map(({ start, end }) =>
+          prisma.sale.aggregate({
             where: { ...baseWhere, createdAt: { gte: start, lte: end } },
             _sum: { totalAmount: true },
           })
-          .then((r) => ({
-            date: start.toISOString().slice(0, 10),
-            total: Number(r._sum.totalAmount || 0),
-          }))
-      })
-    )
+        )
+      ),
+    ])
+
+    // Derive product stats from the single products query
+    const totalProducts = allActiveProducts.length
+    const lowStockCount = allActiveProducts.filter(
+      (p) => p.status === 'ACTIVE' && Number(p.quantity) <= Number(p.lowStockThreshold)
+    ).length
+
+    // Map trend aggregates back to { date, revenue } — zero-filled for days with no sales
+    const salesTrend = trendDays.map(({ date }, i) => ({
+      date,
+      revenue: Number(trendAggregates[i]._sum.totalAmount || 0),
+    }))
 
     return NextResponse.json({
       data: {
-        salesThisMonth: Number(salesThisMonth._sum.totalAmount || 0),
-        salesCount: salesThisMonth._count.id,
-        expensesThisMonth: Number(expensesThisMonth._sum.amount || 0),
-        lowStockCount: lowStock,
+        todaySalesCount: todaySales._count.id,
+        todaySalesTotal: Number(todaySales._sum.totalAmount || 0),
+        revenueThisMonth: Number(monthSales._sum.totalAmount || 0),
+        expensesThisMonth: Number(monthExpenses._sum.amount || 0),
         totalProducts,
+        lowStockCount,
         activeSubsidiaries,
         unreadNotifications,
-        salesTrend: salesTrend.reverse(),
+        salesTrend,
       },
     })
   } catch (err) {
