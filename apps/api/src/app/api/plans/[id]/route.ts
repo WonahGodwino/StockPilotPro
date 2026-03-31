@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Prisma } from '@prisma/client'
+import { Prisma, BillingCycle } from '@prisma/client'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
@@ -10,14 +10,27 @@ const updatePlanSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
   price: z.number().positive().optional(),
+  billingCycle: z.nativeEnum(BillingCycle).optional(),
   maxSubsidiaries: z.number().int().min(1).optional(),
   extraSubsidiaryPrice: z.number().min(0).optional(),
-  features: z.record(z.unknown()).optional(),
+  features: z.array(z.string()).optional(),
   isActive: z.boolean().optional(),
 })
 
 export async function OPTIONS() {
   return handleOptions()
+}
+
+export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const plan = await prisma.plan.findUnique({ where: { id: params.id } })
+    if (!plan) return apiError('Plan not found', 404)
+
+    return NextResponse.json({ data: plan })
+  } catch (err) {
+    console.error('[PLANS GET]', err)
+    return apiError('Internal server error', 500)
+  }
 }
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
@@ -35,6 +48,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       name: data.name,
       description: data.description,
       price: data.price,
+      billingCycle: data.billingCycle,
       maxSubsidiaries: data.maxSubsidiaries,
       extraSubsidiaryPrice: data.extraSubsidiaryPrice,
       isActive: data.isActive,
@@ -58,12 +72,14 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       oldValues: {
         name: before.name,
         price: before.price,
+        billingCycle: before.billingCycle,
         maxSubsidiaries: before.maxSubsidiaries,
         isActive: before.isActive,
       },
       newValues: {
         name: plan.name,
         price: plan.price,
+        billingCycle: plan.billingCycle,
         maxSubsidiaries: plan.maxSubsidiaries,
         isActive: plan.isActive,
       },
@@ -74,6 +90,44 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   } catch (err) {
     if (err instanceof z.ZodError) return NextResponse.json({ error: err.errors }, { status: 422 })
     console.error('[PLANS PUT]', err)
+    return apiError('Internal server error', 500)
+  }
+}
+
+export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const user = authenticate(req)
+    if (!isSuperAdmin(user)) return apiError('Forbidden', 403)
+
+    const plan = await prisma.plan.findUnique({ where: { id: params.id } })
+    if (!plan) return apiError('Plan not found', 404)
+
+    // Soft-delete: mark as inactive rather than hard delete to preserve subscription history
+    const updated = await prisma.plan.update({
+      where: { id: params.id },
+      data: { isActive: false, updatedBy: user.userId },
+    })
+
+    await logAudit({
+      tenantId: user.tenantId,
+      userId: user.userId,
+      action: 'DELETE',
+      entity: 'plan',
+      entityId: plan.id,
+      oldValues: {
+        name: plan.name,
+        price: plan.price,
+        billingCycle: plan.billingCycle,
+        maxSubsidiaries: plan.maxSubsidiaries,
+        isActive: plan.isActive,
+      },
+      newValues: { isActive: false },
+      req,
+    })
+
+    return NextResponse.json({ data: updated })
+  } catch (err) {
+    console.error('[PLANS DELETE]', err)
     return apiError('Internal server error', 500)
   }
 }

@@ -44,23 +44,29 @@ enum PaymentMethod {
   POS
 }
 
+enum BillingCycle {
+  MONTHLY
+  YEARLY
+}
+
 // ──────────────────────────────────────────────
 // PLANS (created by SUPER_ADMIN)
 // ──────────────────────────────────────────────
 
 model Plan {
-  id              String   @id @default(cuid())
-  name            String
-  description     String?
-  price           Decimal  @db.Decimal(12, 2)
-  maxSubsidiaries Int      @default(1)
-  extraSubsidiaryPrice Decimal @db.Decimal(12, 2) @default(0)
-  features        Json     @default("{}")
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  createdBy       String?
-  updatedBy       String?
+  id                   String       @id @default(cuid())
+  name                 String
+  description          String?
+  price                Decimal      @db.Decimal(12, 2)
+  billingCycle         BillingCycle @default(MONTHLY)
+  maxSubsidiaries      Int          @default(1)
+  extraSubsidiaryPrice Decimal      @db.Decimal(12, 2) @default(0)
+  features             Json         @default("[]")
+  isActive             Boolean      @default(true)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  createdBy            String?
+  updatedBy            String?
 
   subscriptions   Subscription[]
 }
