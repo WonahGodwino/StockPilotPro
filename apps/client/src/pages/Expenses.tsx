@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Search, Edit2, Trash2, Receipt } from 'lucide-react'
+import { Plus, Search, Edit2, Trash2, Receipt, AlertTriangle } from 'lucide-react'
 import api from '@/lib/api'
 import type { Expense } from '@/types'
 import toast from 'react-hot-toast'
@@ -14,8 +14,11 @@ export default function Expenses() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<Expense | null>(null)
+  const [confirmId, setConfirmId] = useState<string | null>(null)
 
   const canDelete = user?.role === 'BUSINESS_ADMIN' || user?.role === 'SUPER_ADMIN'
 
@@ -24,19 +27,22 @@ export default function Expenses() {
     try {
       const params = new URLSearchParams()
       if (category) params.set('category', category)
+      if (dateFrom) params.set('from', new Date(dateFrom).toISOString())
+      if (dateTo) params.set('to', new Date(dateTo + 'T23:59:59').toISOString())
       const { data } = await api.get(`/expenses?${params}`)
       setExpenses(data.data)
     } catch { toast.error('Failed to load expenses') }
     finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [category])
+  useEffect(() => { load() }, [category, dateFrom, dateTo])
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Archive this expense?')) return
+  const confirmDelete = async () => {
+    if (!confirmId) return
     try {
-      await api.delete(`/expenses/${id}`)
+      await api.delete(`/expenses/${confirmId}`)
       toast.success('Expense archived')
+      setConfirmId(null)
       load()
     } catch { toast.error('Failed to archive') }
   }
@@ -49,30 +55,77 @@ export default function Expenses() {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Expenses</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {filtered.length} records · Total:{' '}
-            <span className="font-semibold text-danger-600">${total.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
-          </p>
-        </div>
+        <h1 className="text-2xl font-bold text-gray-900">Expenses</h1>
         <button className="btn-primary" onClick={() => { setEditing(null); setModalOpen(true) }}>
           <Plus className="w-4 h-4" /> Add Expense
         </button>
       </div>
 
+      {/* Summary card */}
+      <div className="card p-4 flex items-center gap-4">
+        <div className="p-2.5 bg-danger-50 rounded-lg shrink-0">
+          <Receipt className="w-5 h-5 text-danger-600" />
+        </div>
+        <div>
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Total Expenses</p>
+          <p className="text-2xl font-bold text-danger-600">
+            ${total.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5">{filtered.length} {filtered.length === 1 ? 'record' : 'records'}</p>
+        </div>
+      </div>
+
+      {/* Category filter pills */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => setCategory('')}
+          className={`badge px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors ${
+            category === '' ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          All
+        </button>
+        {CATEGORIES.map((c) => (
+          <button
+            key={c}
+            onClick={() => setCategory(c === category ? '' : c)}
+            className={`badge px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors ${
+              category === c ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            {c}
+          </button>
+        ))}
+      </div>
+
+      {/* Search + date range filters */}
       <div className="flex flex-wrap gap-3">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input className="input pl-9" placeholder="Search expenses..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-        <select className="input w-44" value={category} onChange={(e) => setCategory(e.target.value)}>
-          <option value="">All Categories</option>
-          {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-        </select>
+        <div className="flex items-center gap-2">
+          <input
+            className="input w-36"
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            title="From date"
+          />
+          <span className="text-gray-400 text-sm">–</span>
+          <input
+            className="input w-36"
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            title="To date"
+          />
+        </div>
       </div>
 
+      {/* Table */}
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -116,7 +169,7 @@ export default function Expenses() {
                           <Edit2 className="w-4 h-4" />
                         </button>
                         {canDelete && (
-                          <button onClick={() => handleDelete(e.id)} className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-danger-600">
+                          <button onClick={() => setConfirmId(e.id)} className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-danger-600">
                             <Trash2 className="w-4 h-4" />
                           </button>
                         )}
@@ -130,8 +183,30 @@ export default function Expenses() {
         </div>
       </div>
 
+      {/* Expense create/edit modal */}
       {modalOpen && (
         <ExpenseModal expense={editing} onClose={() => setModalOpen(false)} onSaved={() => { setModalOpen(false); load() }} />
+      )}
+
+      {/* Confirmation dialog */}
+      {confirmId && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="p-2 bg-danger-50 rounded-lg">
+                <AlertTriangle className="w-5 h-5 text-danger-600" />
+              </div>
+              <h3 className="text-base font-semibold text-gray-900">Archive Expense?</h3>
+            </div>
+            <p className="text-sm text-gray-500 mb-6">
+              This expense will be archived and removed from the active list.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setConfirmId(null)} className="btn-secondary flex-1">Cancel</button>
+              <button onClick={confirmDelete} className="btn-danger flex-1">Archive</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
