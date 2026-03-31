@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "test:rbac": "ts-node -P tests/tsconfig.json tests/rbac.spec.ts",
+    "test:jwt": "ts-node -P tests/tsconfig.json tests/jwt.spec.ts",
     "test:observability": "ts-node -P tests/tsconfig.json tests/observability.spec.ts",
     "test:sso": "ts-node -P tests/tsconfig.json tests/sso.spec.ts",
     "db:migrate": "prisma migrate dev",

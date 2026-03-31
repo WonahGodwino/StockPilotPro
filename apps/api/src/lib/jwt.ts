@@ -41,9 +41,15 @@ export async function revokeRefreshToken(token: string) {
 }
 
 export async function rotateRefreshToken(oldToken: string, payload: JWTPayload) {
-  await revokeRefreshToken(oldToken)
   const newRefresh = signRefreshToken(payload)
-  await storeRefreshToken(payload.userId, newRefresh)
+  const expiresAt = new Date()
+  expiresAt.setDate(expiresAt.getDate() + 7)
+
+  await prisma.$transaction([
+    prisma.refreshToken.deleteMany({ where: { token: oldToken } }),
+    prisma.refreshToken.create({ data: { userId: payload.userId, token: newRefresh, expiresAt } }),
+  ])
+
   const newAccess = signAccessToken(payload)
   return { accessToken: newAccess, refreshToken: newRefresh }
 }

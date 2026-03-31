@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
-import { verifyRefreshToken, signAccessToken, signRefreshToken, revokeRefreshToken, storeRefreshToken } from '@/lib/jwt'
+import { verifyRefreshToken, rotateRefreshToken } from '@/lib/jwt'
 import { getClientIp, handleOptions } from '@/lib/auth'
 import { consumeRateLimitDistributed } from '@/lib/rate-limit'
 
@@ -32,21 +32,9 @@ export async function POST(req: NextRequest) {
 
     const payload = verifyRefreshToken(refreshToken)
 
-    await revokeRefreshToken(refreshToken)
+    const { accessToken, refreshToken: newRefresh } = await rotateRefreshToken(refreshToken, payload)
 
-    const newPayload = {
-      userId: payload.userId,
-      email: payload.email,
-      role: payload.role,
-      tenantId: payload.tenantId,
-      subsidiaryId: payload.subsidiaryId,
-    }
-
-    const newAccess = signAccessToken(newPayload)
-    const newRefresh = signRefreshToken(newPayload)
-    await storeRefreshToken(newPayload.userId, newRefresh)
-
-    return NextResponse.json({ accessToken: newAccess, refreshToken: newRefresh })
+    return NextResponse.json({ accessToken, refreshToken: newRefresh })
   } catch (err) {
     if (err instanceof z.ZodError) {
       return NextResponse.json({ error: err.errors }, { status: 422 })
