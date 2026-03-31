@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyAccessToken, JWTPayload } from './jwt'
+import { logger } from './logger'
+import { getRequestId, setRequestIdHeader } from './tracing'
 
 export function getTokenFromRequest(req: NextRequest): string | null {
   const authHeader = req.headers.get('Authorization')
@@ -31,11 +33,32 @@ export function requireAuth(
   handler: (req: NextRequest, user: JWTPayload, ...args: unknown[]) => Promise<NextResponse>
 ) {
   return async (req: NextRequest, ...args: unknown[]) => {
+    const requestId = getRequestId(req)
+    const start = Date.now()
+    const method = req.method
+    const path = new URL(req.url).pathname
+
+    logger.info('request received', { requestId, method, path })
+
     try {
       const user = authenticate(req)
-      return handler(req, user, ...args)
+      const response = await handler(req, user, ...args)
+      const durationMs = Date.now() - start
+      logger.info('request completed', {
+        requestId,
+        method,
+        path,
+        statusCode: response.status,
+        durationMs,
+        userId: user.userId,
+        tenantId: user.tenantId ?? undefined,
+      })
+      return setRequestIdHeader(response, requestId)
     } catch {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      const durationMs = Date.now() - start
+      logger.warn('request unauthorized', { requestId, method, path, durationMs, statusCode: 401 })
+      const response = NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return setRequestIdHeader(response, requestId)
     }
   }
 }

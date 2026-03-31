@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { Prisma } from '@prisma/client'
 import { prisma } from './prisma'
 import { getClientIp, getUserAgent } from './auth'
+import { logger } from './logger'
 
 type AuditInput = {
   tenantId: string | null | undefined
@@ -38,6 +39,6 @@ export async function logAudit(input: AuditInput) {
     })
   } catch (err) {
     // Audit logging must never block core operations.
-    console.error('[AUDIT LOGGING]', err)
+    logger.error('audit log write failed', { err, action: input.action, entity: input.entity })
   }
 }
