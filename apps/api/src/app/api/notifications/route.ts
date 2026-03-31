@@ -11,17 +11,25 @@ export async function GET(req: NextRequest) {
   try {
     const user = authenticate(req)
 
-    const tenantId = isSuperAdmin(user)
-      ? new URL(req.url).searchParams.get('tenantId') || undefined
-      : user.tenantId!
+    const { searchParams } = new URL(req.url)
 
-    const type = new URL(req.url).searchParams.get('type') || undefined
-    const page = parseInt(new URL(req.url).searchParams.get('page') || '1')
-    const limit = parseInt(new URL(req.url).searchParams.get('limit') || '20')
+    const tenantId = isSuperAdmin(user)
+      ? searchParams.get('tenantId') || undefined
+      : user.tenantId!
+    const type = searchParams.get('type') || undefined
+    const unreadOnly = searchParams.get('unread') === 'true'
+    const page = parseInt(searchParams.get('page') || '1')
+    const limit = parseInt(searchParams.get('limit') || '20')
+
+    const baseWhere = {
+      ...(tenantId ? { tenantId } : {}),
+      ...(type ? { type } : {}),
+      ...(unreadOnly ? { isRead: false } : {}),
+    }
 
     const [notifications, total, unreadCount] = await Promise.all([
       prisma.notification.findMany({
-        where: { ...(tenantId ? { tenantId } : {}), ...(type ? { type } : {}) },
+        where: baseWhere,
         include: {
           product: { select: { name: true, unit: true } },
         },
@@ -29,7 +37,7 @@ export async function GET(req: NextRequest) {
         skip: (page - 1) * limit,
         take: limit,
       }),
-      prisma.notification.count({ where: { ...(tenantId ? { tenantId } : {}), ...(type ? { type } : {}) } }),
+      prisma.notification.count({ where: baseWhere }),
       prisma.notification.count({ where: { ...(tenantId ? { tenantId } : {}), isRead: false } }),
     ])
 
