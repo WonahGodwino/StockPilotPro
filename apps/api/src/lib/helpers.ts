@@ -1,5 +1,6 @@
 import { prisma } from './prisma'
 import { ProductStatus } from '@prisma/client'
+import { logger } from './logger'
 
 /**
  * Checks all products in a subsidiary for low stock and
@@ -43,9 +44,25 @@ export async function checkLowStockAlerts(tenantId: string, subsidiaryId: string
           message: `"${product.name}" is running low. Current stock: ${product.quantity} ${product.unit}`,
         },
       })
+      logger.warn('low stock alert raised', {
+        tenantId,
+        subsidiaryId,
+        entityId: product.id,
+        entity: 'product',
+        action: 'LOW_STOCK_ALERT',
+        productName: product.name,
+        quantity: Number(product.quantity),
+        threshold: Number(product.lowStockThreshold),
+      })
     }
   }
 
+  logger.info('low stock check completed', {
+    tenantId,
+    subsidiaryId,
+    action: 'LOW_STOCK_CHECK',
+    alertsRaised: lowStockProducts.length,
+  })
   return lowStockProducts.length
 }
 
@@ -55,21 +72,45 @@ export async function checkLowStockAlerts(tenantId: string, subsidiaryId: string
 export async function checkSubscriptionExpiry() {
   const now = new Date()
 
-  await prisma.subscription.updateMany({
+  const result = await prisma.subscription.updateMany({
     where: {
       expiryDate: { lt: now },
       status: 'ACTIVE',
     },
     data: { status: 'EXPIRED' },
   })
+
+  if (result.count > 0) {
+    logger.info('subscription expiry check completed', {
+      action: 'SUBSCRIPTION_EXPIRY_CHECK',
+      expiredCount: result.count,
+    })
+  }
 }
 
 /**
- * Generate a unique receipt number.
+ * Generate a unique sequential receipt number scoped to tenant + calendar day.
+ * Must be called inside a Prisma $transaction to guarantee uniqueness.
+ * Format: RCP-YYYYMMDD-NNNNN
  */
-export function generateReceiptNumber(): string {
-  const date = new Date()
-  const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '')
-  const random = Math.floor(Math.random() * 100000).toString().padStart(5, '0')
-  return `RCP-${dateStr}-${random}`
+export async function generateReceiptNumber(
+  tx: { sale: { count: (args: { where: { tenantId: string; createdAt: { gte: Date; lt: Date } } }) => Promise<number> } },
+  tenantId: string
+): Promise<string> {
+  const now = new Date()
+  const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '')
+
+  // Build day boundaries in UTC to avoid timezone edge cases
+  const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const dayEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1))
+
+  const countToday = await tx.sale.count({
+    where: {
+      tenantId,
+      createdAt: { gte: dayStart, lt: dayEnd },
+    },
+  })
+
+  const seq = String(countToday + 1).padStart(5, '0')
+  return `RCP-${dateStr}-${seq}`
 }

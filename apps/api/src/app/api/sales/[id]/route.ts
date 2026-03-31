@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
-import { isSuperAdmin } from '@/lib/rbac'
+import { isSuperAdmin, requirePermission } from '@/lib/rbac'
 
 export async function OPTIONS() {
   return handleOptions()
@@ -10,6 +10,7 @@ export async function OPTIONS() {
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const user = authenticate(req)
+    requirePermission(user, 'view:sales')
 
     const sale = await prisma.sale.findUnique({
       where: { id: params.id },
@@ -25,9 +26,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     if (!sale) return apiError('Sale not found', 404)
     if (!isSuperAdmin(user) && sale.tenantId !== user.tenantId) return apiError('Forbidden', 403)
+    // Salesperson can only access their own sales
+    if (user.role === 'SALESPERSON' && sale.userId !== user.userId) return apiError('Forbidden', 403)
 
     return NextResponse.json({ data: sale })
   } catch (err) {
+    if ((err as Error).message?.includes('Forbidden')) return apiError((err as Error).message, 403)
     console.error('[SALE GET]', err)
     return apiError('Internal server error', 500)
   }

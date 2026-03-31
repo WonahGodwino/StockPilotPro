@@ -4,7 +4,7 @@ import { useCartStore } from '@/store/cart.store'
 import type { Product, Sale } from '@/types'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { getProductByBarcode, searchCachedProducts } from '@/lib/db'
+import { getProductByBarcode, searchCachedProducts, addPendingSale } from '@/lib/db'
 import Receipt from '@/components/sales/Receipt'
 import Pagination from '@/components/Pagination'
 
@@ -119,6 +119,15 @@ export default function SalesPage() {
           costPrice: Number(i.product.costPrice),
           discount: i.discount,
         })),
+      }
+
+      if (!navigator.onLine) {
+        await addPendingSale(payload)
+        cart.clearCart()
+        setDiscount(0)
+        setAmountPaid(0)
+        toast.success('Sale saved offline. Will sync when reconnected.')
+        return
       }
 
       const { data } = await api.post('/sales', payload)

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Search, Edit2, Trash2, Archive, Package } from 'lucide-react'
+import { Plus, Search, Edit2, Archive, Package } from 'lucide-react'
 import api from '@/lib/api'
 import type { Product } from '@/types'
 import { useAuthStore } from '@/store/auth.store'
@@ -8,52 +8,61 @@ import ProductModal from '@/components/products/ProductModal'
 import Pagination from '@/components/Pagination'
 import { cacheProducts } from '@/lib/db'
 
+const PAGE_SIZE = 20
+
 const statusColors: Record<string, string> = {
   ACTIVE: 'bg-success-50 text-success-600',
   DRAFT: 'bg-warning-50 text-warning-600',
   ARCHIVED: 'bg-gray-100 text-gray-500',
 }
 
+function marginColor(pct: number): string {
+  if (pct >= 30) return 'text-success-600'
+  if (pct >= 15) return 'text-warning-600'
+  return 'text-danger-600'
+}
+
 export default function Products() {
   const user = useAuthStore((s) => s.user)
   const [products, setProducts] = useState<Product[]>([])
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<Product | null>(null)
 
   const canManage = user?.role !== 'SALESPERSON'
   const canDelete = user?.role === 'BUSINESS_ADMIN' || user?.role === 'SUPER_ADMIN'
 
-  const LIMIT = 20
-  const [page, setPage] = useState(1)
-  const [total, setTotal] = useState(0)
-
-  const load = async () => {
+  const load = async (p = page) => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
       if (search) params.set('search', search)
       if (statusFilter) params.set('status', statusFilter)
-      params.set('page', String(page))
-      params.set('limit', String(LIMIT))
+      if (typeFilter) params.set('type', typeFilter)
+      params.set('page', String(p))
+      params.set('limit', String(PAGE_SIZE))
       const { data } = await api.get(`/products?${params}`)
       setProducts(data.data)
-      setTotal(data.total)
+      setTotal(data.total ?? data.data.length)
       await cacheProducts(data.data) // cache for offline
     } catch { toast.error('Failed to load products') }
     finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [page, search, statusFilter])
+  useEffect(() => { setPage(1); load(1) }, [search, statusFilter, typeFilter])
+  useEffect(() => { load(page) }, [page])
 
   const handleDelete = async (id: string) => {
     if (!confirm('Archive this product?')) return
     try {
       await api.delete(`/products/${id}`)
       toast.success('Product archived')
-      load()
+      load(page)
     } catch { toast.error('Failed to archive product') }
   }
 
@@ -91,6 +100,11 @@ export default function Products() {
             onChange={(e) => { setSearch(e.target.value); setPage(1) }}
           />
         </div>
+        <select className="input w-36" value={typeFilter} onChange={(e) => { setTypeFilter(e.target.value); setPage(1) }}>
+          <option value="">All Types</option>
+          <option value="GOODS">Goods</option>
+          <option value="SERVICE">Service</option>
+        </select>
         <select className="input w-40" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}>
           <option value="">All Status</option>
           <option value="ACTIVE">Active</option>
@@ -127,7 +141,9 @@ export default function Products() {
                 </tr>
               ) : (
                 products.map((p) => {
-                  const profit = Number(p.sellingPrice) - Number(p.costPrice)
+                  const cost = Number(p.costPrice)
+                  const sell = Number(p.sellingPrice)
+                  const marginPct = cost > 0 ? ((sell - cost) / cost) * 100 : 0
                   const isLow = p.type === 'GOODS' && p.quantity <= p.lowStockThreshold
                   return (
                     <tr key={p.id} className="hover:bg-gray-50 transition-colors">
@@ -142,13 +158,15 @@ export default function Products() {
                         <span className={`font-medium ${isLow ? 'text-danger-600' : 'text-gray-900'}`}>
                           {p.quantity} {p.unit}
                         </span>
-                        {isLow && <span className="ml-1 text-xs text-danger-500">·low</span>}
+                        {isLow && (
+                          <span className="ml-1.5 badge bg-danger-50 text-danger-600">Low</span>
+                        )}
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-600">${Number(p.costPrice).toFixed(2)}</td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-900">${Number(p.sellingPrice).toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right text-gray-600">${cost.toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right font-medium text-gray-900">${sell.toFixed(2)}</td>
                       <td className="px-4 py-3 text-right">
-                        <span className={profit >= 0 ? 'text-success-600 font-medium' : 'text-danger-600'}>
-                          ${profit.toFixed(2)}
+                        <span className={`font-medium ${marginColor(marginPct)}`}>
+                          {marginPct.toFixed(1)}%
                         </span>
                       </td>
                       <td className="px-4 py-3">
@@ -181,14 +199,14 @@ export default function Products() {
             </tbody>
           </table>
         </div>
-        <Pagination page={page} limit={LIMIT} total={total} onPageChange={setPage} />
+        <Pagination page={page} limit={PAGE_SIZE} total={total} onPageChange={setPage} />
       </div>
 
       {modalOpen && (
         <ProductModal
           product={editing}
           onClose={() => setModalOpen(false)}
-          onSaved={() => { setModalOpen(false); load() }}
+          onSaved={() => { setModalOpen(false); load(page) }}
         />
       )}
     </div>

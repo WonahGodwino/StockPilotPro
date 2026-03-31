@@ -4,6 +4,7 @@ import type { Expense } from '@/types'
 import toast from 'react-hot-toast'
 import { X, Loader2 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth.store'
+import { addPendingExpense } from '@/lib/db'
 
 const CATEGORIES = ['Rent', 'Utilities', 'Salaries', 'Marketing', 'Transportation', 'Maintenance', 'Supplies', 'Other']
 
@@ -29,6 +30,9 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
       if (expense) {
         await api.put(`/expenses/${expense.id}`, payload)
         toast.success('Expense updated')
+      } else if (!navigator.onLine) {
+        await addPendingExpense(payload)
+        toast.success('Expense saved offline. Will sync when reconnected.')
       } else {
         await api.post('/expenses', payload)
         toast.success('Expense recorded')

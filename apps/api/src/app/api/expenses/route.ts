@@ -4,11 +4,12 @@ import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { isSuperAdmin, assertSubsidiaryAccess } from '@/lib/rbac'
 import { logAudit } from '@/lib/audit'
+import { EXPENSE_CATEGORIES } from '@/lib/expenses'
 
 const createSchema = z.object({
   title: z.string().min(1),
   amount: z.number().positive(),
-  category: z.string().min(1),
+  category: z.enum(EXPENSE_CATEGORIES),
   date: z.string().datetime(),
   notes: z.string().optional(),
   subsidiaryId: z.string(),
