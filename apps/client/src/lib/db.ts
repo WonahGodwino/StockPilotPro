@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie'
-import type { Product, Expense, CartItem, SaleCheckoutPayload } from '@/types'
+import type { Product, Expense, CartItem, Sale, SaleCheckoutPayload } from '@/types'
 
 export interface ExpensePayload {
   title: string
@@ -24,7 +24,7 @@ export class StockPilotDB extends Dexie {
   products!: Table<Product>
   sales!: Table<Sale>
   expenses!: Table<Expense>
-  pendingRecords!: Table<PendingRecord<SalePayload | ExpensePayload>>
+  pendingRecords!: Table<PendingRecord<SaleCheckoutPayload | ExpensePayload>>
   cart!: Table<CartItem & { id: number }>
 
   constructor() {
