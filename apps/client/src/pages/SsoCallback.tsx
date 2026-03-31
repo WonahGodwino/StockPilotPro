@@ -35,6 +35,7 @@ export default function SsoCallback() {
     const subsidiaryId = params.get('subsidiaryId')
     const tenantName = params.get('tenantName')
     const tenantSlug = params.get('tenantSlug')
+    const baseCurrency = params.get('baseCurrency') || 'USD'
 
     if (!accessToken || !refreshToken || !userId || !email || !role) {
       toast.error('SSO login failed. Missing session data.')
@@ -52,7 +53,7 @@ export default function SsoCallback() {
       subsidiaryId: subsidiaryId || null,
       tenant:
         tenantId && tenantName && tenantSlug
-          ? { id: tenantId, name: tenantName, slug: tenantSlug, baseCurrency: 'USD' }
+          ? { id: tenantId, name: tenantName, slug: tenantSlug, baseCurrency }
           : null,
     }
 

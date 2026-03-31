@@ -190,7 +190,6 @@ export interface ReportSummary {
   totalSales: number
   totalExpenses: number
   cogs: number
-  costOfGoods?: number
   grossProfit: number
   netProfit: number
   totalProductWorth: number

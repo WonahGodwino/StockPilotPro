@@ -6,8 +6,8 @@ import { isSuperAdmin, hasPermission } from '@/lib/rbac'
 import { logAudit } from '@/lib/audit'
 
 const createRateSchema = z.object({
-  fromCurrency: z.string().length(3).toUpperCase(),
-  toCurrency: z.string().length(3).toUpperCase(),
+  fromCurrency: z.string().length(3).transform((v) => v.toUpperCase()),
+  toCurrency: z.string().length(3).transform((v) => v.toUpperCase()),
   rate: z.number().positive(),
   date: z.string().datetime().optional(),
 })

@@ -20,7 +20,7 @@ const createSaleSchema = z.object({
   discount: z.number().min(0).default(0),
   paymentMethod: z.enum(['CASH', 'TRANSFER', 'POS']).default('CASH'),
   amountPaid: z.number().min(0),
-  currency: z.string().length(3).toUpperCase().default('USD'),
+  currency: z.string().length(3).transform((v) => v.toUpperCase()).default('USD'),
   fxRate: z.number().positive().default(1),
   notes: z.string().optional(),
 })

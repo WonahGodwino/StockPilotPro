@@ -11,7 +11,7 @@ const createSchema = z.object({
   amount: z.number().positive(),
   category: z.enum(EXPENSE_CATEGORIES),
   date: z.string().datetime(),
-  currency: z.string().length(3).toUpperCase().default('USD'),
+  currency: z.string().length(3).transform((v) => v.toUpperCase()).default('USD'),
   fxRate: z.number().positive().default(1),
   notes: z.string().optional(),
   subsidiaryId: z.string(),

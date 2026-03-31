@@ -59,7 +59,7 @@ export default function Expenses() {
     } catch { toast.error('Failed to archive') }
   }
 
-  const total_amount = expenses.reduce((s, e) => s + Number(e.amount), 0)
+  const totalAmount = expenses.reduce((s, e) => s + Number(e.amount), 0)
 
   return (
     <div className="space-y-6">
@@ -79,7 +79,7 @@ export default function Expenses() {
         <div>
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Total Expenses</p>
           <p className="text-2xl font-bold text-danger-600">
-            {fmt(total_amount)}
+            {fmt(totalAmount)}
           </p>
           <p className="text-xs text-gray-400 mt-0.5">{total} {total === 1 ? 'record' : 'records'}</p>
         </div>

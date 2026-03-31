@@ -170,7 +170,7 @@ export async function GET(
       role: user.role,
       ...(user.tenantId ? { tenantId: user.tenantId } : {}),
       ...(user.subsidiaryId ? { subsidiaryId: user.subsidiaryId } : {}),
-      ...(user.tenant ? { tenantName: user.tenant.name, tenantSlug: user.tenant.slug } : {}),
+      ...(user.tenant ? { tenantName: user.tenant.name, tenantSlug: user.tenant.slug, baseCurrency: user.tenant.baseCurrency || 'USD' } : {}),
     })
 
     return NextResponse.redirect(

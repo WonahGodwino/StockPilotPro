@@ -12,11 +12,11 @@ const updateSchema = z.object({
   address: z.string().optional(),
   logo: z.string().optional(),
   isActive: z.boolean().optional(),
-  baseCurrency: z.string().length(3).toUpperCase().optional(),
+  baseCurrency: z.string().length(3).transform((v) => v.toUpperCase()).optional(),
 })
 
 const patchCurrencySchema = z.object({
-  baseCurrency: z.string().length(3).toUpperCase(),
+  baseCurrency: z.string().length(3).transform((v) => v.toUpperCase()),
 })
 
 export async function OPTIONS() {
