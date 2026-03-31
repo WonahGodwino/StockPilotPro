@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
+import { Navigate } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts'
 import api from '@/lib/api'
 import { useAuthStore } from '@/store/auth.store'
-import { TrendingUp, TrendingDown, DollarSign, Package, FileText, Download } from 'lucide-react'
+import { TrendingUp, TrendingDown, DollarSign, Package, Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 type Period = 'daily' | 'monthly' | 'quarterly' | 'yearly' | 'custom'
@@ -50,13 +51,7 @@ export default function Reports() {
 
   useEffect(() => { if (period !== 'custom') fetchReport() }, [period, fetchReport])
 
-  const canView = user?.role !== 'SALESPERSON'
-
-  if (!canView) return (
-    <div className="flex items-center justify-center h-64 text-gray-500">
-      <div className="text-center"><FileText className="w-12 h-12 mx-auto mb-2 opacity-30" /><p>Access restricted</p></div>
-    </div>
-  )
+  if (!user || user.role === 'SALESPERSON') return <Navigate to="/dashboard" replace />
 
   const expenseByCat = report?.expenseByCategory
     ? report.expenseByCategory.map((e) => ({ name: e.category, value: e.total }))

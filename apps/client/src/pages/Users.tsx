@@ -3,7 +3,7 @@ import api from '@/lib/api'
 import type { AuthUser, Subsidiary } from '@/types'
 import { useAuthStore } from '@/store/auth.store'
 import toast from 'react-hot-toast'
-import { Plus, User, Edit, Shield, X, Loader2, KeyRound } from 'lucide-react'
+import { Plus, Edit, Shield, X, Loader2, KeyRound } from 'lucide-react'
 
 const ROLES = ['BUSINESS_ADMIN', 'SALESPERSON'] as const
 const ROLE_LABELS: Record<string, string> = { BUSINESS_ADMIN: 'Admin', SALESPERSON: 'Salesperson', SUPER_ADMIN: 'Super Admin' }
@@ -12,16 +12,77 @@ const ROLE_COLORS: Record<string, string> = { BUSINESS_ADMIN: 'badge-warning', S
 interface UserForm { name: string; email: string; password: string; role: string; subsidiaryId: string }
 const emptyForm: UserForm = { name: '', email: '', password: '', role: 'SALESPERSON', subsidiaryId: '' }
 
+interface SsoSettings { ssoEnabled: boolean; ssoProviders: string[] }
+
 function splitName(name: string) {
   const parts = name.trim().split(/\s+/)
-  return {
-    firstName: parts[0] || '',
-    lastName: parts.slice(1).join(' ') || 'User',
-  }
+  return { firstName: parts[0] || '', lastName: parts.slice(1).join(' ') || 'User' }
 }
 
 function fullName(u: AuthUser) {
   return `${u.firstName} ${u.lastName}`.trim()
+}
+
+function SsoPanel({ tenantId }: { tenantId: string }) {
+  const [sso, setSso] = useState<SsoSettings | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    api.get<{ data: SsoSettings }>(`/tenants/${tenantId}/sso`)
+      .then((res) => setSso(res.data.data))
+      .catch(() => setSso({ ssoEnabled: false, ssoProviders: [] }))
+  }, [tenantId])
+
+  const toggleProvider = (provider: string, checked: boolean) => {
+    if (!sso) return
+    const newProviders = checked
+      ? [...new Set([...sso.ssoProviders, provider])]
+      : sso.ssoProviders.filter((p) => p !== provider)
+    setSso({ ssoEnabled: newProviders.length > 0, ssoProviders: newProviders })
+  }
+
+  const save = async () => {
+    if (!sso) return
+    setSaving(true)
+    try {
+      await api.patch(`/tenants/${tenantId}/sso`, { ssoEnabled: sso.ssoEnabled, ssoProviders: sso.ssoProviders })
+      toast.success('SSO settings saved')
+    } catch (err: unknown) {
+      toast.error((err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to save SSO settings')
+    } finally { setSaving(false) }
+  }
+
+  if (!sso) return <div className="flex items-center gap-2 text-xs text-gray-400"><Loader2 className="w-3 h-3 animate-spin" /> Loading SSO settings…</div>
+
+  return (
+    <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <Shield className="w-4 h-4 text-indigo-500" />
+        <span className="text-sm font-semibold text-gray-700">SSO Authentication</span>
+        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ml-auto ${sso.ssoEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-200 text-gray-500'}`}>
+          {sso.ssoEnabled ? 'Enabled' : 'Disabled'}
+        </span>
+      </div>
+      <p className="text-xs text-gray-500">Allow BUSINESS_ADMIN accounts to sign in via an external identity provider. Only admins may use SSO.</p>
+      <div className="flex flex-wrap gap-4">
+        {['google', 'microsoft'].map((provider) => (
+          <label key={provider} className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              className="w-4 h-4 rounded accent-indigo-600"
+              checked={sso.ssoProviders.includes(provider)}
+              onChange={(e) => toggleProvider(provider, e.target.checked)}
+            />
+            <span className="text-sm text-gray-700 capitalize">{provider}</span>
+          </label>
+        ))}
+      </div>
+      <button onClick={save} disabled={saving} className="btn-primary text-xs px-3 py-1.5 mt-1">
+        {saving && <Loader2 className="w-3 h-3 animate-spin" />}
+        Save SSO Settings
+      </button>
+    </div>
+  )
 }
 
 export default function Users() {
@@ -34,6 +95,7 @@ export default function Users() {
   const [saving, setSaving] = useState(false)
 
   const canManage = currentUser?.role === 'BUSINESS_ADMIN' || currentUser?.role === 'SUPER_ADMIN'
+  const isBusinessAdmin = currentUser?.role === 'BUSINESS_ADMIN'
 
   const load = async () => {
     setLoading(true)
@@ -59,13 +121,7 @@ export default function Users() {
     e.preventDefault(); setSaving(true)
     try {
       const { firstName, lastName } = splitName(form.name)
-      const payload: Record<string, unknown> = {
-        firstName,
-        lastName,
-        email: form.email,
-        role: form.role,
-        subsidiaryId: form.subsidiaryId || undefined,
-      }
+      const payload: Record<string, unknown> = { firstName, lastName, email: form.email, role: form.role, subsidiaryId: form.subsidiaryId || undefined }
       if (form.password) payload.password = form.password
       if (modal.user) { await api.put(`/users/${modal.user.id}`, payload); toast.success('User updated') }
       else { await api.post('/users', { ...payload, password: form.password }); toast.success('User created') }
@@ -80,6 +136,11 @@ export default function Users() {
         <div><h1 className="text-2xl font-bold text-gray-900">Users</h1><p className="text-sm text-gray-500 mt-0.5">{users.length} team member{users.length !== 1 ? 's' : ''}</p></div>
         {canManage && <button onClick={openCreate} className="btn-primary"><Plus className="w-4 h-4" /> Add User</button>}
       </div>
+
+      {/* SSO panel for BUSINESS_ADMIN */}
+      {isBusinessAdmin && currentUser?.tenantId && (
+        <SsoPanel tenantId={currentUser.tenantId} />
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center h-48"><Loader2 className="w-8 h-8 animate-spin text-indigo-600" /></div>

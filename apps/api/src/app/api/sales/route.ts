@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
-import { isSuperAdmin, assertSubsidiaryAccess } from '@/lib/rbac'
+import { isSuperAdmin, assertSubsidiaryAccess, requirePermission } from '@/lib/rbac'
 import { checkLowStockAlerts, generateReceiptNumber } from '@/lib/helpers'
 import { logAudit } from '@/lib/audit'
 
@@ -18,7 +18,7 @@ const createSaleSchema = z.object({
   subsidiaryId: z.string(),
   items: z.array(saleItemSchema).min(1),
   discount: z.number().min(0).default(0),
-  paymentMethod: z.enum(['CASH', 'TRANSFER', 'POS']).default('CASH'),
+  paymentMethod: z.enum(['CASH', 'CARD', 'TRANSFER', 'POS']).default('CASH'),
   amountPaid: z.number().min(0),
   notes: z.string().optional(),
 })
@@ -30,6 +30,7 @@ export async function OPTIONS() {
 export async function GET(req: NextRequest) {
   try {
     const user = authenticate(req)
+    requirePermission(user, 'view:sales')
     const { searchParams } = new URL(req.url)
 
     const subsidiaryId = searchParams.get('subsidiaryId')
@@ -41,6 +42,8 @@ export async function GET(req: NextRequest) {
     const where = {
       archived: false,
       tenantId: isSuperAdmin(user) ? undefined : user.tenantId!,
+      // Salesperson can only see their own sales
+      ...(user.role === 'SALESPERSON' ? { userId: user.userId } : {}),
       ...(subsidiaryId
         ? { subsidiaryId }
         : user.role === 'SALESPERSON' && user.subsidiaryId
@@ -75,6 +78,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ data: sales, total, page, limit })
   } catch (err) {
+    if ((err as Error).message?.includes('Forbidden')) return apiError((err as Error).message, 403)
     console.error('[SALES GET]', err)
     return apiError('Internal server error', 500)
   }
@@ -119,9 +123,10 @@ export async function POST(req: NextRequest) {
     const grossTotal = subtotals.reduce((s, i) => s + i.subtotal, 0)
     const totalAmount = Math.max(0, grossTotal - data.discount)
 
-    const receiptNumber = generateReceiptNumber()
-
     const sale = await prisma.$transaction(async (tx) => {
+      // Generate unique sequential receipt number inside the transaction
+      const receiptNumber = await generateReceiptNumber(tx, user.tenantId!)
+
       // Deduct stock
       for (const item of data.items) {
         const product = products.find((p) => p.id === item.productId)!

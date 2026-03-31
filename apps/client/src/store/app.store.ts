@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Notification, Subsidiary } from '@/types'
+import { DARK_MODE_KEY, getInitialDarkMode, applyDarkMode } from '@/lib/darkMode'
 
 interface AppState {
   sidebarOpen: boolean
@@ -7,6 +8,7 @@ interface AppState {
   subsidiaries: Subsidiary[]
   notifications: Notification[]
   unreadNotificationCount: number
+  darkMode: boolean
 
   toggleSidebar: () => void
   setSidebarOpen: (open: boolean) => void
@@ -15,6 +17,7 @@ interface AppState {
   setNotifications: (notifications: Notification[]) => void
   setUnreadCount: (count: number) => void
   markNotificationRead: (id: string) => void
+  toggleDarkMode: () => void
 }
 
 export const useAppStore = create<AppState>()((set) => ({
@@ -23,6 +26,7 @@ export const useAppStore = create<AppState>()((set) => ({
   subsidiaries: [],
   notifications: [],
   unreadNotificationCount: 0,
+  darkMode: getInitialDarkMode(),
 
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
@@ -35,4 +39,11 @@ export const useAppStore = create<AppState>()((set) => ({
       notifications: s.notifications.map((n) => (n.id === id ? { ...n, isRead: true } : n)),
       unreadNotificationCount: Math.max(0, s.unreadNotificationCount - 1),
     })),
+  toggleDarkMode: () =>
+    set((s) => {
+      const next = !s.darkMode
+      localStorage.setItem(DARK_MODE_KEY, String(next))
+      applyDarkMode(next)
+      return { darkMode: next }
+    }),
 }))

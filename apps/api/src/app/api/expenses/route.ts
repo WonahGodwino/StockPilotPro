@@ -4,11 +4,12 @@ import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { isSuperAdmin, assertSubsidiaryAccess } from '@/lib/rbac'
 import { logAudit } from '@/lib/audit'
+import { EXPENSE_CATEGORIES } from '@/lib/expenses'
 
 const createSchema = z.object({
   title: z.string().min(1),
   amount: z.number().positive(),
-  category: z.string().min(1),
+  category: z.enum(EXPENSE_CATEGORIES),
   date: z.string().datetime(),
   notes: z.string().optional(),
   subsidiaryId: z.string(),
@@ -25,6 +26,7 @@ export async function GET(req: NextRequest) {
 
     const subsidiaryId = searchParams.get('subsidiaryId')
     const category = searchParams.get('category')
+    const search = searchParams.get('search')
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '20')
     const from = searchParams.get('from')
@@ -39,6 +41,7 @@ export async function GET(req: NextRequest) {
         ? { subsidiaryId: user.subsidiaryId }
         : {}),
       ...(category ? { category } : {}),
+      ...(search ? { title: { contains: search, mode: 'insensitive' as const } } : {}),
       ...(from || to
         ? {
             date: {

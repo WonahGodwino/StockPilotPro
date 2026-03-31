@@ -1,5 +1,14 @@
 import Dexie, { type Table } from 'dexie'
-import type { Product, Sale, Expense, CartItem, SaleCheckoutPayload } from '@/types'
+import type { Product, Expense, CartItem, SaleCheckoutPayload } from '@/types'
+
+export interface ExpensePayload {
+  title: string
+  amount: number
+  category: string
+  date: string
+  notes?: string
+  subsidiaryId: string
+}
 
 // Offline-pending record wrapper
 export interface PendingRecord<T> {
@@ -15,7 +24,7 @@ export class StockPilotDB extends Dexie {
   products!: Table<Product>
   sales!: Table<Sale>
   expenses!: Table<Expense>
-  pendingRecords!: Table<PendingRecord<Sale | Expense>>
+  pendingRecords!: Table<PendingRecord<SalePayload | ExpensePayload>>
   cart!: Table<CartItem & { id: number }>
 
   constructor() {
@@ -60,7 +69,19 @@ export async function addPendingSale(data: SaleCheckoutPayload) {
   await db.pendingRecords.add({
     localId,
     type: 'sale',
-    data: data as unknown as Sale,
+    data,
+    synced: false,
+    createdAt: new Date().toISOString(),
+  })
+  return localId
+}
+
+export async function addPendingExpense(data: ExpensePayload) {
+  const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2)}`
+  await db.pendingRecords.add({
+    localId,
+    type: 'expense',
+    data,
     synced: false,
     createdAt: new Date().toISOString(),
   })

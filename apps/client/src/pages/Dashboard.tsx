@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, BarChart, Bar, Legend,
@@ -9,10 +10,10 @@ import type { DashboardData, ReportSummary } from '@/types'
 import { useAuthStore } from '@/store/auth.store'
 
 function StatCard({
-  label, value, icon: Icon, color, subtext, trend,
+  label, value, icon: Icon, color, subtext, subtextHref, trend,
 }: {
   label: string; value: string; icon: React.ElementType
-  color: string; subtext?: string; trend?: 'up' | 'down'
+  color: string; subtext?: string; subtextHref?: string; trend?: 'up' | 'down'
 }) {
   return (
     <div className="card p-6">
@@ -20,7 +21,11 @@ function StatCard({
         <div>
           <p className="text-sm font-medium text-gray-500">{label}</p>
           <p className="mt-1 text-2xl font-bold text-gray-900">{value}</p>
-          {subtext && <p className="mt-1 text-xs text-gray-400">{subtext}</p>}
+          {subtext && subtextHref ? (
+            <Link to={subtextHref} aria-label="View products with low stock" className="mt-1 text-xs text-primary-600 hover:underline">{subtext}</Link>
+          ) : subtext ? (
+            <p className="mt-1 text-xs text-gray-400">{subtext}</p>
+          ) : null}
         </div>
         <div className={`p-3 rounded-xl ${color}`}>
           <Icon className="w-5 h-5" />
@@ -31,6 +36,47 @@ function StatCard({
           {trend === 'up' ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
         </div>
       )}
+    </div>
+  )
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-6 animate-pulse">
+      <div>
+        <div className="h-7 bg-gray-200 rounded w-36 mb-2" />
+        <div className="h-4 bg-gray-100 rounded w-56" />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={`stat-skeleton-${i}`} className="card p-6">
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <div className="h-3 bg-gray-200 rounded w-24 mb-3" />
+                <div className="h-7 bg-gray-300 rounded w-20 mb-2" />
+                <div className="h-3 bg-gray-100 rounded w-16" />
+              </div>
+              <div className="w-11 h-11 bg-gray-200 rounded-xl" />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={`metric-skeleton-${i}`} className="card p-5">
+            <div className="h-3 bg-gray-200 rounded w-20 mb-3" />
+            <div className="h-6 bg-gray-300 rounded w-24" />
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {[...Array(2)].map((_, i) => (
+          <div key={`chart-skeleton-${i}`} className="card p-6">
+            <div className="h-5 bg-gray-200 rounded w-40 mb-4" />
+            <div className="h-[220px] bg-gray-100 rounded" />
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -59,11 +105,7 @@ export default function Dashboard() {
   }, [])
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin w-8 h-8 border-4 border-primary-600 border-t-transparent rounded-full" />
-      </div>
-    )
+    return <DashboardSkeleton />
   }
 
   const canViewPL = user?.role !== 'SALESPERSON'
@@ -90,6 +132,7 @@ export default function Dashboard() {
           icon={Package}
           color="bg-success-50 text-success-600"
           subtext={`${dashboard?.lowStockCount ?? 0} low stock`}
+          subtextHref="/products?lowStock=true"
         />
         <StatCard
           label="Active Branches"
@@ -149,27 +192,24 @@ export default function Dashboard() {
               <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v) => v.slice(5)} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v}`} />
               <Tooltip formatter={(v: number) => fmt(v)} />
-              <Area type="monotone" dataKey="total" stroke="#2563eb" fill="url(#salesGrad)" strokeWidth={2} />
+              <Area isAnimationActive type="monotone" dataKey="total" stroke="#2563eb" fill="url(#salesGrad)" strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
 
-        {/* Product Worth */}
+        {/* Monthly Revenue vs Expenses */}
         {canViewPL && report && (
           <div className="card p-6">
-            <h3 className="font-semibold text-gray-900 mb-4">Financial Summary</h3>
+            <h3 className="font-semibold text-gray-900 mb-4">Monthly Revenue vs Expenses</h3>
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={[
-                { name: 'Sales', value: report.totalSales },
-                { name: 'COGS', value: report.cogs },
-                { name: 'Expenses', value: report.totalExpenses },
-                { name: 'Net Profit', value: report.netProfit },
-              ]}>
+              <BarChart data={[{ name: 'This Month', Revenue: report.totalSales, Expenses: report.totalExpenses }]}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v}`} />
                 <Tooltip formatter={(v: number) => fmt(v)} />
-                <Bar dataKey="value" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                <Legend />
+                <Bar isAnimationActive dataKey="Revenue" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                <Bar isAnimationActive dataKey="Expenses" fill="#ef4444" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

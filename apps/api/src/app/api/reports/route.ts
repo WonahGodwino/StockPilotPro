@@ -92,14 +92,14 @@ export async function GET(req: NextRequest) {
     const grossProfit = totalSales - cogs
     const netProfit = grossProfit - totalExpenses
 
-    // Top products by quantity sold (last 30 days max)
+    // Top products by revenue (subtotal) descending
     const topProducts = await prisma.saleItem.groupBy({
       by: ['productId'],
       where: {
         sale: { ...baseWhere, ...(dateRange ? { createdAt: dateRange } : {}) },
       },
       _sum: { quantity: true, subtotal: true },
-      orderBy: { _sum: { quantity: 'desc' } },
+      orderBy: { _sum: { subtotal: 'desc' } },
       take: 10,
     })
 
@@ -127,22 +127,22 @@ export async function GET(req: NextRequest) {
       orderBy: { _sum: { amount: 'desc' } },
     })
 
+    const expensesByCategory = expenseByCategory.reduce<Record<string, number>>((acc, e) => {
+      acc[e.category] = Number(e._sum.amount)
+      return acc
+    }, {})
+
     return NextResponse.json({
       data: {
-        summary: {
-          totalSales,
-          totalExpenses,
-          cogs,
-          grossProfit,
-          netProfit,
-          totalProductWorth,
-          salesCount: salesAgg._count.id,
-        },
+        totalSales,
+        costOfGoods: cogs,
+        grossProfit,
+        totalExpenses,
+        netProfit,
+        totalProductWorth,
+        salesCount: salesAgg._count.id,
+        expensesByCategory,
         topProducts: topProductDetails,
-        expenseByCategory: expenseByCategory.map((e) => ({
-          category: e.category,
-          total: Number(e._sum.amount),
-        })),
         period,
       },
     })
