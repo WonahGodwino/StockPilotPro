@@ -10,7 +10,7 @@
     "test:rbac": "ts-node -P tests/tsconfig.json tests/rbac.spec.ts",
     "test:observability": "ts-node -P tests/tsconfig.json tests/observability.spec.ts",
     "test:sso": "ts-node -P tests/tsconfig.json tests/sso.spec.ts",
-    "test:tenants": "ts-node -P tests/tsconfig.json tests/tenants.spec.ts",
+    "test:subscription": "ts-node -P tests/tsconfig.json tests/subscription.spec.ts",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "ts-node prisma/seed.ts",

@@ -76,8 +76,18 @@ export async function POST(req: NextRequest) {
 
     // Check subscription for non-super-admins
     if (user.tenantId && user.role !== 'SUPER_ADMIN') {
+      const now = new Date()
+      // Auto-expire any ACTIVE subscriptions whose expiry date has passed
+      await prisma.subscription.updateMany({
+        where: {
+          tenantId: user.tenantId,
+          status: 'ACTIVE',
+          expiryDate: { lt: now },
+        },
+        data: { status: 'EXPIRED' },
+      })
       const activeSubscription = await prisma.subscription.findFirst({
-        where: { tenantId: user.tenantId, status: 'ACTIVE' },
+        where: { tenantId: user.tenantId, status: 'ACTIVE', expiryDate: { gte: now } },
       })
       if (!activeSubscription) {
         return NextResponse.json({ error: 'Subscription expired or inactive. Contact your administrator.' }, { status: 403 })

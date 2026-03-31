@@ -285,7 +285,6 @@ export default function SalesPage() {
         <div className="flex-1 flex flex-col min-w-0">
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-xl font-bold text-gray-900">Point of Sale</h1>
-            <div className="flex items-center gap-2 text-xs text-gray-400">
             <div className={`flex items-center gap-2 text-xs transition-colors duration-200 ${
               scanState === 'success' ? 'text-success-600' :
               scanState === 'error' ? 'text-danger-500' :

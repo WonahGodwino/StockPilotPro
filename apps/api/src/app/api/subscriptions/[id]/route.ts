@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { isSuperAdmin } from '@/lib/rbac'
 import { logAudit } from '@/lib/audit'
+import { isAllowedStatusTransition } from '@/lib/subscription'
 
 const updateSchema = z.object({
   status: z.enum(['ACTIVE', 'EXPIRED', 'SUSPENDED']).optional(),
@@ -25,6 +26,15 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     const body = await req.json()
     const data = updateSchema.parse(body)
+
+    if (data.status && data.status !== before.status) {
+      if (!isAllowedStatusTransition(before.status, data.status)) {
+        return apiError(
+          `Invalid status transition from ${before.status} to ${data.status}`,
+          422
+        )
+      }
+    }
 
     const updated = await prisma.subscription.update({
       where: { id: params.id },

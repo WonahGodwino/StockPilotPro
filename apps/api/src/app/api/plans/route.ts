@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { Prisma } from '@prisma/client'
+import { Prisma, BillingCycle } from '@prisma/client'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
@@ -10,28 +10,26 @@ const createPlanSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   price: z.number().positive(),
+  billingCycle: z.nativeEnum(BillingCycle).default(BillingCycle.MONTHLY),
   maxSubsidiaries: z.number().int().min(1),
   extraSubsidiaryPrice: z.number().min(0).default(0),
-  features: z.record(z.unknown()).default({}),
+  features: z.array(z.string()).default([]),
 })
 
 export async function OPTIONS() {
   return handleOptions()
 }
 
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   try {
-    authenticate(req) // any authenticated user can see plans
-
     const plans = await prisma.plan.findMany({
       where: { isActive: true },
       orderBy: { price: 'asc' },
     })
     return NextResponse.json({ data: plans })
-  } catch {
-    // unauthenticated can also view plans
-    const plans = await prisma.plan.findMany({ where: { isActive: true }, orderBy: { price: 'asc' } })
-    return NextResponse.json({ data: plans })
+  } catch (err) {
+    console.error('[PLANS GET]', err)
+    return apiError('Internal server error', 500)
   }
 }
 
@@ -47,6 +45,7 @@ export async function POST(req: NextRequest) {
       name: data.name,
       description: data.description,
       price: data.price,
+      billingCycle: data.billingCycle,
       maxSubsidiaries: data.maxSubsidiaries,
       extraSubsidiaryPrice: data.extraSubsidiaryPrice,
       features: data.features as Prisma.InputJsonValue,
