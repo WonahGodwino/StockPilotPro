@@ -65,11 +65,28 @@ export async function checkSubscriptionExpiry() {
 }
 
 /**
- * Generate a unique receipt number.
+ * Generate a unique sequential receipt number scoped to tenant + calendar day.
+ * Must be called inside a Prisma $transaction to guarantee uniqueness.
+ * Format: RCP-YYYYMMDD-NNNNN
  */
-export function generateReceiptNumber(): string {
-  const date = new Date()
-  const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '')
-  const random = Math.floor(Math.random() * 100000).toString().padStart(5, '0')
-  return `RCP-${dateStr}-${random}`
+export async function generateReceiptNumber(
+  tx: { sale: { count: (args: { where: { tenantId: string; createdAt: { gte: Date; lt: Date } } }) => Promise<number> } },
+  tenantId: string
+): Promise<string> {
+  const now = new Date()
+  const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '')
+
+  // Build day boundaries in UTC to avoid timezone edge cases
+  const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const dayEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1))
+
+  const countToday = await tx.sale.count({
+    where: {
+      tenantId,
+      createdAt: { gte: dayStart, lt: dayEnd },
+    },
+  })
+
+  const seq = String(countToday + 1).padStart(5, '0')
+  return `RCP-${dateStr}-${seq}`
 }
