@@ -18,7 +18,14 @@ export default function Receipt({ saleId, onNewSale }: Props) {
   const user = useAuthStore((s) => s.user)
   const printRef = useRef<HTMLDivElement>(null)
 
-  const handlePrint = useReactToPrint({ content: () => printRef.current })
+  const handlePrint = useReactToPrint({
+    content: () => printRef.current,
+    documentTitle: sale ? `Receipt-${sale.receiptNumber}` : 'Receipt',
+    pageStyle: `
+      @page { size: 80mm auto; margin: 8mm; }
+      body { background: white; font-family: monospace; }
+    `,
+  })
 
   useEffect(() => {
     api.get(`/sales/${saleId}`).then((r) => setSale(r.data.data)).catch(console.error)
@@ -30,7 +37,7 @@ export default function Receipt({ saleId, onNewSale }: Props) {
     <div className="flex items-center justify-center min-h-[60vh]">
       <div className="w-full max-w-sm">
         {/* Action buttons */}
-        <div className="flex gap-3 mb-4">
+        <div className="no-print flex gap-3 mb-4">
           <button onClick={handlePrint} className="btn-secondary flex-1">
             <Printer className="w-4 h-4" /> Print Receipt
           </button>
@@ -40,7 +47,7 @@ export default function Receipt({ saleId, onNewSale }: Props) {
         </div>
 
         {/* Printable receipt */}
-        <div ref={printRef} className="bg-white border border-gray-200 rounded-xl p-6 font-mono text-sm shadow-sm">
+        <div ref={printRef} className="receipt-print-area bg-white border border-gray-200 rounded-xl p-6 font-mono text-sm shadow-sm">
           <div className="text-center mb-4 border-b pb-4">
             <p className="font-bold text-lg">{sale.tenant?.name || user?.tenant?.name}</p>
             {sale.subsidiary?.name && <p className="text-xs text-gray-500">{sale.subsidiary.name}</p>}
@@ -58,11 +65,18 @@ export default function Receipt({ saleId, onNewSale }: Props) {
               <span className="w-16 text-right">Total</span>
             </div>
             {sale.items.map((item) => (
-              <div key={item.id} className="flex text-xs items-center">
-                <span className="flex-1 truncate">{item.product?.name}</span>
-                <span className="w-12 text-center">{item.quantity}</span>
-                <span className="w-16 text-right">${Number(item.unitPrice).toFixed(2)}</span>
-                <span className="w-16 text-right">${Number(item.subtotal).toFixed(2)}</span>
+              <div key={item.id} className="text-xs">
+                <div className="flex items-center">
+                  <span className="flex-1 truncate">{item.product?.name}</span>
+                  <span className="w-12 text-center">{item.quantity}</span>
+                  <span className="w-16 text-right">${Number(item.unitPrice).toFixed(2)}</span>
+                  <span className="w-16 text-right">${Number(item.subtotal).toFixed(2)}</span>
+                </div>
+                {Number(item.discount) > 0 && (
+                  <div className="flex justify-end text-gray-400 italic">
+                    <span className="w-16 text-right">-${Number(item.discount).toFixed(2)} disc</span>
+                  </div>
+                )}
               </div>
             ))}
           </div>
