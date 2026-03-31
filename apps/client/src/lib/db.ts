@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie'
-import type { Product, Sale, Expense, CartItem } from '@/types'
+import type { Product, Sale, Expense, CartItem, SaleCheckoutPayload } from '@/types'
 
 // Offline-pending record wrapper
 export interface PendingRecord<T> {
@@ -55,12 +55,12 @@ export async function getProductByBarcode(barcode: string): Promise<Product | un
   return db.products.where('barcode').equals(barcode).first()
 }
 
-export async function addPendingSale(data: Omit<Sale, 'id' | 'createdAt' | 'updatedAt'>) {
+export async function addPendingSale(data: SaleCheckoutPayload) {
   const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2)}`
   await db.pendingRecords.add({
     localId,
     type: 'sale',
-    data: data as Sale,
+    data: data as unknown as Sale,
     synced: false,
     createdAt: new Date().toISOString(),
   })
