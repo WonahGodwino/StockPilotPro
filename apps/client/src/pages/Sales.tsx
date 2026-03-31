@@ -9,6 +9,34 @@ import { useAuthStore } from '@/store/auth.store'
 import Receipt from '@/components/sales/Receipt'
 import Pagination from '@/components/Pagination'
 
+let _audioCtx: AudioContext | null = null
+function getAudioContext(): AudioContext | null {
+  try {
+    if (!_audioCtx || _audioCtx.state === 'closed') {
+      _audioCtx = new AudioContext()
+    }
+    return _audioCtx
+  } catch { return null }
+}
+
+function playBeep(success: boolean) {
+  const ctx = getAudioContext()
+  if (!ctx) return
+  try {
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.frequency.value = success ? 1800 : 400
+    osc.type = 'sine'
+    const duration = success ? 0.12 : 0.25
+    gain.gain.setValueAtTime(0.3, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration)
+    osc.start(ctx.currentTime)
+    osc.stop(ctx.currentTime + duration)
+  } catch { /* ignore */ }
+}
+
 const MIN_SEARCH_LENGTH = 2
 
 
@@ -25,8 +53,10 @@ export default function SalesPage() {
   const [amountPaid, setAmountPaid] = useState(0)
   const [loading, setLoading] = useState(false)
   const [completedSale, setCompletedSale] = useState<{ id: string; receiptNumber: string; offline?: boolean } | null>(null)
+  const [scanState, setScanState] = useState<'idle' | 'success' | 'error'>('idle')
   const barcodeBuffer = useRef('')
   const barcodeTimer = useRef<ReturnType<typeof setTimeout>>()
+  const scanResetTimer = useRef<ReturnType<typeof setTimeout>>()
 
   // Sales history state
   const HISTORY_LIMIT = 20
@@ -84,6 +114,12 @@ export default function SalesPage() {
       if (e.key === 'Enter' && barcodeBuffer.current.length > 3) {
         const barcode = barcodeBuffer.current
         barcodeBuffer.current = ''
+        clearTimeout(barcodeTimer.current)
+        const flash = (state: 'success' | 'error') => {
+          setScanState(state)
+          clearTimeout(scanResetTimer.current)
+          scanResetTimer.current = setTimeout(() => setScanState('idle'), 800)
+        }
         try {
           let product: Product | undefined
           if (navigator.onLine) {
@@ -94,11 +130,19 @@ export default function SalesPage() {
           }
           if (product) {
             cart.addItem(product)
+            playBeep(true)
+            flash('success')
             toast.success(`Added: ${product.name}`)
           } else {
+            playBeep(false)
+            flash('error')
             toast.error(`Product not found: ${barcode}`)
           }
-        } catch { toast.error('Barcode lookup failed') }
+        } catch {
+          playBeep(false)
+          flash('error')
+          toast.error('Barcode lookup failed')
+        }
       } else if (e.key.length === 1) {
         barcodeBuffer.current += e.key
         clearTimeout(barcodeTimer.current)
@@ -106,7 +150,10 @@ export default function SalesPage() {
       }
     }
     window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
+    return () => {
+      window.removeEventListener('keydown', handleKey)
+      clearTimeout(scanResetTimer.current)
+    }
   }, [cart])
 
   const total = cart.items.reduce((s, i) => s + i.quantity * i.unitPrice - i.discount, 0) - discount
@@ -233,14 +280,19 @@ export default function SalesPage() {
       ) : (
       /* ── Point of Sale ── */
       <>
-      <div className="flex gap-6 h-[calc(100vh-12rem)]">
+      <div className="flex flex-col md:flex-row gap-6 md:h-[calc(100vh-12rem)]">
         {/* Products panel */}
         <div className="flex-1 flex flex-col min-w-0">
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-xl font-bold text-gray-900">Point of Sale</h1>
             <div className="flex items-center gap-2 text-xs text-gray-400">
-              <Barcode className="w-4 h-4" />
-              Barcode scanner ready
+            <div className={`flex items-center gap-2 text-xs transition-colors duration-200 ${
+              scanState === 'success' ? 'text-success-600' :
+              scanState === 'error' ? 'text-danger-500' :
+              'text-gray-400'
+            }`}>
+              <Barcode className={scanState !== 'idle' ? 'w-4 h-4 animate-pulse' : 'w-4 h-4'} />
+              {scanState === 'success' ? 'Item added!' : scanState === 'error' ? 'Not found' : 'Barcode scanner ready'}
             </div>
           </div>
 
@@ -260,7 +312,7 @@ export default function SalesPage() {
 
           {/* Product results */}
           {products.length > 0 && (
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 overflow-y-auto pb-2 mt-2">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:overflow-y-auto pb-2 mt-2">
               {products.map((p) => (
                 <button
                   key={p.id}
@@ -301,7 +353,7 @@ export default function SalesPage() {
         {/* end products panel */}
 
         {/* Cart panel */}
-        <div className="w-80 flex flex-col bg-white rounded-xl border border-gray-200 shadow-sm">
+        <div className="w-full md:w-80 flex flex-col bg-white rounded-xl border border-gray-200 shadow-sm">
           <div className="p-4 border-b border-gray-100">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -320,7 +372,7 @@ export default function SalesPage() {
           </div>
 
           {/* Cart items */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div className="max-h-48 md:flex-1 overflow-y-auto p-4 space-y-3">
             {cart.items.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-gray-300">
                 <ShoppingCart className="w-12 h-12 mb-2" />
