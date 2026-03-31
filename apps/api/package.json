@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 3000",
+    "dev": "ts-node -P tsconfig.server.json server.ts",
     "build": "next build",
-    "start": "next start",
+    "start": "NODE_ENV=production ts-node -P tsconfig.server.json server.ts",
     "lint": "next lint",
     "test:rbac": "ts-node -P tests/tsconfig.json tests/rbac.spec.ts",
     "db:migrate": "prisma migrate dev",

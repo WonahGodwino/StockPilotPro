@@ -6,6 +6,7 @@ import { useEffect } from 'react'
 import api from '@/lib/api'
 import { useAuthStore } from '@/store/auth.store'
 import { useAppStore as useApp } from '@/store/app.store'
+import { connect as connectWs, disconnect as disconnectWs } from '@/lib/websocket'
 
 export default function AppLayout() {
   const sidebarOpen = useAppStore((s) => s.sidebarOpen)
@@ -21,6 +22,9 @@ export default function AppLayout() {
       setNotifications(r.data.data)
       setUnreadCount(r.data.unreadCount)
     }).catch(() => {})
+    // Connect WebSocket for real-time notifications
+    connectWs()
+    return () => disconnectWs()
   }, [user])
 
   return (

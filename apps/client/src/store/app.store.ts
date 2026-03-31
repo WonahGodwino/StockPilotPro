@@ -15,6 +15,7 @@ interface AppState {
   setNotifications: (notifications: Notification[]) => void
   setUnreadCount: (count: number) => void
   markNotificationRead: (id: string) => void
+  addNotification: (notification: Notification) => void
 }
 
 export const useAppStore = create<AppState>()((set) => ({
@@ -34,5 +35,10 @@ export const useAppStore = create<AppState>()((set) => ({
     set((s) => ({
       notifications: s.notifications.map((n) => (n.id === id ? { ...n, isRead: true } : n)),
       unreadNotificationCount: Math.max(0, s.unreadNotificationCount - 1),
+    })),
+  addNotification: (notification) =>
+    set((s) => ({
+      notifications: [notification, ...s.notifications],
+      unreadNotificationCount: s.unreadNotificationCount + 1,
     })),
 }))

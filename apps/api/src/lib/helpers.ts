@@ -1,5 +1,6 @@
 import { prisma } from './prisma'
 import { ProductStatus } from '@prisma/client'
+import { broadcastToTenant } from './websocket'
 
 /**
  * Checks all products in a subsidiary for low stock and
@@ -33,7 +34,7 @@ export async function checkLowStockAlerts(tenantId: string, subsidiaryId: string
     })
 
     if (!existingToday) {
-      await prisma.notification.create({
+      const notification = await prisma.notification.create({
         data: {
           tenantId,
           subsidiaryId,
@@ -43,6 +44,7 @@ export async function checkLowStockAlerts(tenantId: string, subsidiaryId: string
           message: `"${product.name}" is running low. Current stock: ${product.quantity} ${product.unit}`,
         },
       })
+      broadcastToTenant(tenantId, { type: 'notification', data: notification })
     }
   }
 
@@ -51,17 +53,48 @@ export async function checkLowStockAlerts(tenantId: string, subsidiaryId: string
 
 /**
  * Checks and updates subscription status for expired subscriptions.
+ * Creates a SUBSCRIPTION_EXPIRING notification for each affected tenant
+ * and broadcasts it to connected WebSocket clients.
  */
 export async function checkSubscriptionExpiry() {
   const now = new Date()
 
+  const expiredSubscriptions = await prisma.subscription.findMany({
+    where: { expiryDate: { lt: now }, status: 'ACTIVE' },
+    select: { id: true, tenantId: true },
+  })
+
+  if (expiredSubscriptions.length === 0) return
+
   await prisma.subscription.updateMany({
-    where: {
-      expiryDate: { lt: now },
-      status: 'ACTIVE',
-    },
+    where: { expiryDate: { lt: now }, status: 'ACTIVE' },
     data: { status: 'EXPIRED' },
   })
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  for (const sub of expiredSubscriptions) {
+    const existingToday = await prisma.notification.findFirst({
+      where: {
+        tenantId: sub.tenantId,
+        type: 'SUBSCRIPTION_EXPIRING',
+        createdAt: { gte: today },
+      },
+    })
+
+    if (!existingToday) {
+      const notification = await prisma.notification.create({
+        data: {
+          tenantId: sub.tenantId,
+          type: 'SUBSCRIPTION_EXPIRING',
+          title: 'Subscription Expired',
+          message: 'Your subscription has expired. Please renew to continue accessing all features.',
+        },
+      })
+      broadcastToTenant(sub.tenantId, { type: 'notification', data: notification })
+    }
+  }
 }
 
 /**
