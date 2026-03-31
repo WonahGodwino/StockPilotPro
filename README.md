@@ -1090,20 +1090,6 @@ GET    /api/users
 POST   /api/users
 ```
 
----
-
-## Default Seed Credentials
-
-After running `npm run db:seed`:
-
-| Role | Email | Password |
-|---|---|---|
-| Super Admin | `superadmin@stockpilot.pro` | `SuperAdmin@123` |
-| Business Admin | `admin@demo.com` | `Admin@123` |
-| Salesperson | `sales@demo.com` | `Sales@123` |
-
----
-
 ## Deployment
 
 - API: Vercel / Railway / Render / AWS

@@ -89,25 +89,14 @@ export default function Login() {
           </form>
 
           <div className="mt-6 pt-6 border-t border-gray-100">
-            <p className="text-xs text-gray-400 text-center">Demo credentials</p>
-            <div className="mt-2 space-y-1.5">
-              {[
-                { role: 'Super Admin', email: 'superadmin@stockpilot.pro', password: 'SuperAdmin@123' },
-                { role: 'Business Admin', email: 'admin@demo.com', password: 'Admin@123' },
-                { role: 'Salesperson', email: 'sales@demo.com', password: 'Sales@123' },
-              ].map((d) => (
-                <button
-                  key={d.email}
-                  type="button"
-                  onClick={() => setForm({ email: d.email, password: d.password })}
-                  className="w-full text-left px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors"
-                >
-                  <span className="text-xs font-medium text-primary-600">{d.role}: </span>
-                  <span className="text-xs text-gray-500">{d.email}</span>
-                </button>
-              ))}
-            </div>
+            <p className="text-xs text-gray-500 text-center font-medium">Test credentials are managed in the seed file.</p>
+            <p className="text-xs text-gray-400 text-center mt-1">Use your provisioned account details to sign in.</p>
           </div>
+        </div>
+
+        <div className="mt-5 text-center text-xs text-gray-400 space-y-1">
+          <p>StockPilot Pro • Secure Business Operations Platform</p>
+          <p>Copyright {new Date().getFullYear()} StockPilot Pro. All rights reserved.</p>
         </div>
       </div>
     </div>

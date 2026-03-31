@@ -1,5 +1,30 @@
 import { PrismaClient, UserRole, SubscriptionStatus, ProductType, ProductStatus } from '@prisma/client'
 import bcrypt from 'bcryptjs'
+import * as fs from 'fs'
+import * as path from 'path'
+import { fileURLToPath } from 'url'
+
+// Get directory name in ES module
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+// Load .env from the nearest likely project root.
+const envCandidates = [
+  path.resolve(__dirname, '../../../.env'),
+  path.resolve(__dirname, '../../.env'),
+  path.resolve(process.cwd(), '.env'),
+]
+const envPath = envCandidates.find((p) => fs.existsSync(p))
+
+if (envPath) {
+  const envContent = fs.readFileSync(envPath, 'utf-8')
+  envContent.split('\n').forEach((line) => {
+    const match = line.match(/^([^=]+)=(.*)$/)
+    if (match && !process.env[match[1]]) {
+      process.env[match[1]] = match[2].replace(/^["']|["']$/g, '')
+    }
+  })
+}
 
 const prisma = new PrismaClient()
 
@@ -54,21 +79,29 @@ async function main() {
 
   console.log('✅ Plans created')
 
+  // ── Common Test Password ──────────────────────────────
+  const testPassword = await bcrypt.hash('Test@123', 12)
+
   // ── Super Admin ────────────────────────────────────────
-  const superAdminPassword = await bcrypt.hash('SuperAdmin@123', 12)
   await prisma.user.upsert({
     where: { email: 'superadmin@stockpilot.pro' },
-    update: {},
+    update: {
+      password: testPassword,
+      firstName: 'Super',
+      lastName: 'Admin',
+      role: UserRole.SUPER_ADMIN,
+      isActive: true,
+    },
     create: {
       email: 'superadmin@stockpilot.pro',
-      password: superAdminPassword,
+      password: testPassword,
       firstName: 'Super',
       lastName: 'Admin',
       role: UserRole.SUPER_ADMIN,
       isActive: true,
     },
   })
-  console.log('✅ Super Admin created: superadmin@stockpilot.pro / SuperAdmin@123')
+  console.log('✅ Super Admin created: superadmin@stockpilot.pro')
 
   // ── Demo Tenant ────────────────────────────────────────
   const demoTenant = await prisma.tenant.upsert({
@@ -129,16 +162,23 @@ async function main() {
 
   console.log('✅ Demo tenant & subsidiaries created')
 
-  // ── Demo Users ─────────────────────────────────────────
-  const adminPassword = await bcrypt.hash('Admin@123', 12)
+  // ── Demo Users (all with same Test@123 password) ────────
   await prisma.user.upsert({
     where: { email: 'admin@demo.com' },
-    update: {},
+    update: {
+      tenantId: demoTenant.id,
+      subsidiaryId: headOffice.id,
+      password: testPassword,
+      firstName: 'Business',
+      lastName: 'Admin',
+      role: UserRole.BUSINESS_ADMIN,
+      isActive: true,
+    },
     create: {
       tenantId: demoTenant.id,
       subsidiaryId: headOffice.id,
       email: 'admin@demo.com',
-      password: adminPassword,
+      password: testPassword,
       firstName: 'Business',
       lastName: 'Admin',
       role: UserRole.BUSINESS_ADMIN,
@@ -146,15 +186,22 @@ async function main() {
     },
   })
 
-  const salesPassword = await bcrypt.hash('Sales@123', 12)
   await prisma.user.upsert({
     where: { email: 'sales@demo.com' },
-    update: {},
+    update: {
+      tenantId: demoTenant.id,
+      subsidiaryId: headOffice.id,
+      password: testPassword,
+      firstName: 'John',
+      lastName: 'Sales',
+      role: UserRole.SALESPERSON,
+      isActive: true,
+    },
     create: {
       tenantId: demoTenant.id,
       subsidiaryId: headOffice.id,
       email: 'sales@demo.com',
-      password: salesPassword,
+      password: testPassword,
       firstName: 'John',
       lastName: 'Sales',
       role: UserRole.SALESPERSON,
@@ -162,9 +209,34 @@ async function main() {
     },
   })
 
-  console.log('✅ Demo users created')
-  console.log('   admin@demo.com / Admin@123')
-  console.log('   sales@demo.com / Sales@123')
+  await prisma.user.upsert({
+    where: { email: 'sales2@demo.com' },
+    update: {
+      tenantId: demoTenant.id,
+      subsidiaryId: branchLagos.id,
+      password: testPassword,
+      firstName: 'Jane',
+      lastName: 'Sales',
+      role: UserRole.SALESPERSON,
+      isActive: true,
+    },
+    create: {
+      tenantId: demoTenant.id,
+      subsidiaryId: branchLagos.id,
+      email: 'sales2@demo.com',
+      password: testPassword,
+      firstName: 'Jane',
+      lastName: 'Sales',
+      role: UserRole.SALESPERSON,
+      isActive: true,
+    },
+  })
+
+  console.log('✅ Demo users created (all with password: Test@123)')
+  console.log('   ├ superadmin@stockpilot.pro (SUPER_ADMIN)')
+  console.log('   ├ admin@demo.com (BUSINESS_ADMIN)')
+  console.log('   ├ sales@demo.com (SALESPERSON)')
+  console.log('   └ sales2@demo.com (SALESPERSON - Lagos Branch)')
 
   // ── Demo Products ──────────────────────────────────────
   const products = [
