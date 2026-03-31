@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
 
     const subsidiaryId = searchParams.get('subsidiaryId')
     const category = searchParams.get('category')
+    const search = searchParams.get('search')
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '20')
     const from = searchParams.get('from')
@@ -39,6 +40,7 @@ export async function GET(req: NextRequest) {
         ? { subsidiaryId: user.subsidiaryId }
         : {}),
       ...(category ? { category } : {}),
+      ...(search ? { title: { contains: search, mode: 'insensitive' as const } } : {}),
       ...(from || to
         ? {
             date: {

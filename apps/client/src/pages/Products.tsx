@@ -5,6 +5,7 @@ import type { Product } from '@/types'
 import { useAuthStore } from '@/store/auth.store'
 import toast from 'react-hot-toast'
 import ProductModal from '@/components/products/ProductModal'
+import Pagination from '@/components/Pagination'
 import { cacheProducts } from '@/lib/db'
 
 const statusColors: Record<string, string> = {
@@ -25,20 +26,27 @@ export default function Products() {
   const canManage = user?.role !== 'SALESPERSON'
   const canDelete = user?.role === 'BUSINESS_ADMIN' || user?.role === 'SUPER_ADMIN'
 
+  const LIMIT = 20
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+
   const load = async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
       if (search) params.set('search', search)
       if (statusFilter) params.set('status', statusFilter)
+      params.set('page', String(page))
+      params.set('limit', String(LIMIT))
       const { data } = await api.get(`/products?${params}`)
       setProducts(data.data)
+      setTotal(data.total)
       await cacheProducts(data.data) // cache for offline
     } catch { toast.error('Failed to load products') }
     finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [search, statusFilter])
+  useEffect(() => { load() }, [page, search, statusFilter])
 
   const handleDelete = async (id: string) => {
     if (!confirm('Archive this product?')) return
@@ -59,7 +67,7 @@ export default function Products() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Products</h1>
           <p className="text-sm text-gray-500 mt-1">
-            {products.length} items &nbsp;·&nbsp; Inventory worth:{' '}
+            {total} items &nbsp;·&nbsp; Inventory worth:{' '}
             <span className="font-semibold text-gray-700">
               ${totalWorth.toLocaleString('en-US', { minimumFractionDigits: 2 })}
             </span>
@@ -80,10 +88,10 @@ export default function Products() {
             className="input pl-9"
             placeholder="Search by name or barcode..."
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setPage(1) }}
           />
         </div>
-        <select className="input w-40" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+        <select className="input w-40" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1) }}>
           <option value="">All Status</option>
           <option value="ACTIVE">Active</option>
           <option value="DRAFT">Draft</option>
@@ -173,6 +181,7 @@ export default function Products() {
             </tbody>
           </table>
         </div>
+        <Pagination page={page} limit={LIMIT} total={total} onPageChange={setPage} />
       </div>
 
       {modalOpen && (

@@ -5,6 +5,7 @@ import type { Expense } from '@/types'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/auth.store'
 import ExpenseModal from '@/components/expenses/ExpenseModal'
+import Pagination from '@/components/Pagination'
 
 const CATEGORIES = ['Rent', 'Utilities', 'Salaries', 'Marketing', 'Transportation', 'Maintenance', 'Supplies', 'Other']
 
@@ -19,18 +20,26 @@ export default function Expenses() {
 
   const canDelete = user?.role === 'BUSINESS_ADMIN' || user?.role === 'SUPER_ADMIN'
 
+  const LIMIT = 20
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+
   const load = async () => {
     setLoading(true)
     try {
       const params = new URLSearchParams()
       if (category) params.set('category', category)
+      if (search) params.set('search', search)
+      params.set('page', String(page))
+      params.set('limit', String(LIMIT))
       const { data } = await api.get(`/expenses?${params}`)
       setExpenses(data.data)
+      setTotal(data.total)
     } catch { toast.error('Failed to load expenses') }
     finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [category])
+  useEffect(() => { load() }, [page, search, category])
 
   const handleDelete = async (id: string) => {
     if (!confirm('Archive this expense?')) return
@@ -41,11 +50,7 @@ export default function Expenses() {
     } catch { toast.error('Failed to archive') }
   }
 
-  const filtered = expenses.filter((e) =>
-    !search || e.title.toLowerCase().includes(search.toLowerCase())
-  )
-
-  const total = filtered.reduce((s, e) => s + Number(e.amount), 0)
+  const total_amount = expenses.reduce((s, e) => s + Number(e.amount), 0)
 
   return (
     <div className="space-y-6">
@@ -53,8 +58,8 @@ export default function Expenses() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Expenses</h1>
           <p className="text-sm text-gray-500 mt-1">
-            {filtered.length} records · Total:{' '}
-            <span className="font-semibold text-danger-600">${total.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+            {total} records · Total:{' '}
+            <span className="font-semibold text-danger-600">${total_amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
           </p>
         </div>
         <button className="btn-primary" onClick={() => { setEditing(null); setModalOpen(true) }}>
@@ -65,9 +70,9 @@ export default function Expenses() {
       <div className="flex flex-wrap gap-3">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input className="input pl-9" placeholder="Search expenses..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className="input pl-9" placeholder="Search expenses..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} />
         </div>
-        <select className="input w-44" value={category} onChange={(e) => setCategory(e.target.value)}>
+        <select className="input w-44" value={category} onChange={(e) => { setCategory(e.target.value); setPage(1) }}>
           <option value="">All Categories</option>
           {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
@@ -89,7 +94,7 @@ export default function Expenses() {
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr><td colSpan={6} className="text-center py-10 text-gray-400">Loading...</td></tr>
-              ) : filtered.length === 0 ? (
+              ) : expenses.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="text-center py-12">
                     <Receipt className="w-10 h-10 text-gray-300 mx-auto mb-2" />
@@ -97,7 +102,7 @@ export default function Expenses() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((e) => (
+                expenses.map((e) => (
                   <tr key={e.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium text-gray-900">{e.title}</td>
                     <td className="px-4 py-3">
@@ -128,6 +133,7 @@ export default function Expenses() {
             </tbody>
           </table>
         </div>
+        <Pagination page={page} limit={LIMIT} total={total} onPageChange={setPage} />
       </div>
 
       {modalOpen && (
