@@ -83,6 +83,7 @@ model Tenant {
   phone           String?
   address         String?
   logo            String?
+  baseCurrency    String   @default("USD")
   isActive        Boolean  @default(true)
   ssoEnabled      Boolean  @default(false)
   ssoProviders    Json     @default("[]")
@@ -101,6 +102,7 @@ model Tenant {
   notifications   Notification[]
   auditLogs       AuditLog[]
   ssoAccounts     SsoAccount[]
+  currencyRates   CurrencyRate[]
 }
 
 // ──────────────────────────────────────────────
@@ -279,6 +281,8 @@ model Sale {
   amountPaid      Decimal       @db.Decimal(12, 2)
   paymentMethod   PaymentMethod @default(CASH)
   receiptNumber   String        @unique
+  currency        String        @default("USD")
+  fxRate          Decimal       @db.Decimal(18, 8) @default(1)
   notes           String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
@@ -331,6 +335,8 @@ model Expense {
   amount          Decimal   @db.Decimal(12, 2)
   category        String
   date            DateTime
+  currency        String    @default("USD")
+  fxRate          Decimal   @db.Decimal(18, 8) @default(1)
   notes           String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -392,4 +398,25 @@ model AuditLog {
   @@index([userId])
   @@index([entity])
   @@index([createdAt])
+}
+
+// ──────────────────────────────────────────────
+// CURRENCY RATES (FX snapshots per tenant)
+// ──────────────────────────────────────────────
+
+model CurrencyRate {
+  id           String   @id @default(cuid())
+  tenantId     String
+  fromCurrency String
+  toCurrency   String
+  rate         Decimal  @db.Decimal(18, 8)
+  date         DateTime @default(now())
+  createdAt    DateTime @default(now())
+  createdBy    String?
+
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([date])
+  @@index([fromCurrency, toCurrency])
 }

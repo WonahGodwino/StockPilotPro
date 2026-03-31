@@ -5,6 +5,7 @@ import toast from 'react-hot-toast'
 import { X, Loader2 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth.store'
 import { addPendingExpense } from '@/lib/db'
+import { SUPPORTED_CURRENCIES } from '@/lib/currency'
 
 const CATEGORIES = ['Rent', 'Utilities', 'Salaries', 'Marketing', 'Transportation', 'Maintenance', 'Supplies', 'Other']
 
@@ -12,12 +13,15 @@ interface Props { expense: Expense | null; onClose: () => void; onSaved: () => v
 
 export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
   const user = useAuthStore((s) => s.user)
+  const baseCurrency = user?.tenant?.baseCurrency || 'USD'
   const [loading, setLoading] = useState(false)
   const [form, setForm] = useState({
     title: expense?.title || '',
     amount: expense?.amount ?? 0,
     category: expense?.category || 'Other',
     date: expense?.date ? expense.date.slice(0, 10) : new Date().toISOString().slice(0, 10),
+    currency: expense?.currency || baseCurrency,
+    fxRate: expense?.fxRate ?? 1,
     notes: expense?.notes || '',
     subsidiaryId: expense?.subsidiaryId || user?.subsidiaryId || '',
   })
@@ -26,7 +30,11 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
     e.preventDefault()
     setLoading(true)
     try {
-      const payload = { ...form, date: new Date(form.date).toISOString() }
+      const payload = {
+        ...form,
+        date: new Date(form.date).toISOString(),
+        fxRate: Number(form.fxRate),
+      }
       if (expense) {
         await api.put(`/expenses/${expense.id}`, payload)
         toast.success('Expense updated')
@@ -42,6 +50,8 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
       toast.error((err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed')
     } finally { setLoading(false) }
   }
+
+  const showFxRate = form.currency !== baseCurrency
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
@@ -64,6 +74,36 @@ export default function ExpenseModal({ expense, onClose, onSaved }: Props) {
               <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>
               <input className="input" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} required />
             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+              <select
+                className="input"
+                value={form.currency}
+                onChange={(e) => setForm({ ...form, currency: e.target.value, fxRate: e.target.value === baseCurrency ? 1 : form.fxRate })}
+              >
+                {SUPPORTED_CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>{c.code} — {c.name}</option>
+                ))}
+              </select>
+            </div>
+            {showFxRate && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  FX Rate <span className="text-gray-400 text-xs">({form.currency}/{baseCurrency})</span>
+                </label>
+                <input
+                  className="input"
+                  type="number"
+                  step="0.000001"
+                  min="0.000001"
+                  value={form.fxRate}
+                  onChange={(e) => setForm({ ...form, fxRate: parseFloat(e.target.value) || 1 })}
+                  required={showFxRate}
+                />
+              </div>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>

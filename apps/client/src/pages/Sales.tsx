@@ -8,6 +8,7 @@ import { getProductByBarcode, searchCachedProducts, addPendingSale } from '@/lib
 import { useAuthStore } from '@/store/auth.store'
 import Receipt from '@/components/sales/Receipt'
 import Pagination from '@/components/Pagination'
+import { makeCurrencyFormatter, getCurrencySymbol } from '@/lib/currency'
 
 let _audioCtx: AudioContext | null = null
 function getAudioContext(): AudioContext | null {
@@ -45,6 +46,9 @@ export default function SalesPage() {
   const setSubsidiaryId = useCartStore((s) => s.setSubsidiaryId)
   const cartSubsidiaryId = useCartStore((s) => s.subsidiaryId)
   const user = useAuthStore((s) => s.user)
+  const baseCurrency = user?.tenant?.baseCurrency || 'USD'
+  const fmt = makeCurrencyFormatter(baseCurrency)
+  const currencySymbol = getCurrencySymbol(baseCurrency)
   const [tab, setTab] = useState<'pos' | 'history'>('pos')
   const [products, setProducts] = useState<Product[]>([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -173,6 +177,8 @@ export default function SalesPage() {
         paymentMethod,
         discount,
         amountPaid,
+        currency: baseCurrency,
+        fxRate: 1,
         items: cart.items.map((i) => ({
           productId: i.product.id,
           quantity: i.quantity,
@@ -242,15 +248,16 @@ export default function SalesPage() {
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">By</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Payment</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Currency</th>
                   <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Total</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {historyLoading ? (
-                  <tr><td colSpan={5} className="text-center py-10 text-gray-400">Loading...</td></tr>
+                  <tr><td colSpan={6} className="text-center py-10 text-gray-400">Loading...</td></tr>
                 ) : sales.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="text-center py-12">
+                    <td colSpan={6} className="text-center py-12">
                       <ShoppingCart className="w-10 h-10 text-gray-300 mx-auto mb-2" />
                       <p className="text-gray-400 text-sm">No sales recorded yet</p>
                     </td>
@@ -266,8 +273,19 @@ export default function SalesPage() {
                       <td className="px-4 py-3">
                         <span className="badge bg-gray-100 text-gray-600">{s.paymentMethod}</span>
                       </td>
+                      <td className="px-4 py-3 text-xs">
+                        <span className="badge bg-indigo-50 text-indigo-600">
+                          {s.currency || baseCurrency}
+                          {s.currency && s.currency !== baseCurrency && s.fxRate && Number(s.fxRate) !== 1
+                            ? ` @${Number(s.fxRate).toFixed(4)}`
+                            : ''}
+                        </span>
+                      </td>
                       <td className="px-4 py-3 text-right font-semibold text-gray-900">
-                        ${Number(s.totalAmount).toFixed(2)}
+                        {s.currency && s.currency !== baseCurrency && s.fxRate && Number(s.fxRate) !== 1
+                          ? `${getCurrencySymbol(s.currency)}${Number(s.totalAmount).toFixed(2)} (${fmt(Number(s.totalAmount) / Number(s.fxRate))})`
+                          : fmt(Number(s.totalAmount))
+                        }
                       </td>
                     </tr>
                   ))
@@ -320,7 +338,7 @@ export default function SalesPage() {
                 >
                   <p className="font-medium text-sm text-gray-900 truncate">{p.name}</p>
                   <p className="text-xs text-gray-500 mt-0.5">{p.type} · {p.unit}</p>
-                  <p className="text-primary-600 font-semibold mt-2">${Number(p.sellingPrice).toFixed(2)}</p>
+                  <p className="text-primary-600 font-semibold mt-2">{fmt(Number(p.sellingPrice))}</p>
                   {p.type === 'GOODS' && (
                     <p className={`text-xs mt-1 ${p.quantity <= p.lowStockThreshold ? 'text-danger-500' : 'text-gray-400'}`}>
                       Stock: {p.quantity}
@@ -406,7 +424,7 @@ export default function SalesPage() {
                       </button>
                     </div>
                     <span className="text-sm font-semibold text-gray-900">
-                      ${(item.quantity * item.unitPrice - item.discount).toFixed(2)}
+                      {fmt(item.quantity * item.unitPrice - item.discount)}
                     </span>
                   </div>
                   {/* Per-item discount */}
@@ -429,7 +447,7 @@ export default function SalesPage() {
           <div className="p-4 border-t border-gray-100 space-y-3">
             <div className="flex items-center justify-between text-sm">
               <span className="text-gray-500">Subtotal</span>
-              <span>${cart.items.reduce((s, i) => s + i.quantity * i.unitPrice, 0).toFixed(2)}</span>
+              <span>{fmt(cart.items.reduce((s, i) => s + i.quantity * i.unitPrice, 0))}</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-500 w-20">Discount</span>
@@ -442,7 +460,7 @@ export default function SalesPage() {
             </div>
             <div className="flex items-center justify-between text-base font-bold border-t pt-2">
               <span>Total</span>
-              <span className="text-primary-600">${Math.max(0, total).toFixed(2)}</span>
+              <span className="text-primary-600">{fmt(Math.max(0, total))}</span>
             </div>
             <select
               className="input text-sm"
@@ -456,20 +474,20 @@ export default function SalesPage() {
             <input
               className="input text-sm"
               type="number" min="0" step="0.01"
-              placeholder="Amount Tendered"
+              placeholder={`Amount Tendered (${currencySymbol})`}
               value={amountPaid || ''}
               onChange={(e) => setAmountPaid(parseFloat(e.target.value) || 0)}
             />
             {amountPaid > 0 && amountPaid >= total && (
               <div className="flex items-center justify-between text-sm font-medium text-success-600 bg-success-50 rounded-lg px-3 py-2">
                 <span>Change</span>
-                <span>${change.toFixed(2)}</span>
+                <span>{fmt(change)}</span>
               </div>
             )}
             {amountPaid > 0 && amountPaid < total && (
               <div className="flex items-center justify-between text-sm font-medium text-danger-600 bg-danger-50 rounded-lg px-3 py-2">
                 <span>Short by</span>
-                <span>${(total - amountPaid).toFixed(2)}</span>
+                <span>{fmt(total - amountPaid)}</span>
               </div>
             )}
             <button

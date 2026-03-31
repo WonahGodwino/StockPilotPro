@@ -12,6 +12,11 @@ const updateSchema = z.object({
   address: z.string().optional(),
   logo: z.string().optional(),
   isActive: z.boolean().optional(),
+  baseCurrency: z.string().length(3).transform((v) => v.toUpperCase()).optional(),
+})
+
+const patchCurrencySchema = z.object({
+  baseCurrency: z.string().length(3).transform((v) => v.toUpperCase()),
 })
 
 export async function OPTIONS() {
@@ -120,6 +125,44 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     return NextResponse.json({ message: 'Tenant archived successfully' })
   } catch (err) {
     console.error('[TENANT DELETE]', err)
+    return apiError('Internal server error', 500)
+  }
+}
+
+// PATCH /api/tenants/[id] — BUSINESS_ADMIN updates their own tenant's base currency
+export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const user = authenticate(req)
+    // BUSINESS_ADMIN can only update their own tenant; SUPER_ADMIN can update any
+    if (!isSuperAdmin(user) && user.tenantId !== params.id) return apiError('Forbidden', 403)
+
+    const body = await req.json()
+    const data = patchCurrencySchema.parse(body)
+
+    const before = await prisma.tenant.findUnique({ where: { id: params.id } })
+    if (!before) return apiError('Tenant not found', 404)
+
+    const tenant = await prisma.tenant.update({
+      where: { id: params.id },
+      data: { baseCurrency: data.baseCurrency, updatedBy: user.userId },
+    })
+
+    await logAudit({
+      tenantId: tenant.id,
+      userId: user.userId,
+      action: 'UPDATE',
+      entity: 'tenant',
+      entityId: tenant.id,
+      oldValues: { baseCurrency: before.baseCurrency },
+      newValues: { baseCurrency: tenant.baseCurrency },
+      req,
+    })
+
+    return NextResponse.json({ data: tenant })
+  } catch (err) {
+    if (err instanceof z.ZodError) return NextResponse.json({ error: err.errors }, { status: 422 })
+    if ((err as Error).message?.includes('Forbidden')) return apiError((err as Error).message, 403)
+    console.error('[TENANT PATCH]', err)
     return apiError('Internal server error', 500)
   }
 }

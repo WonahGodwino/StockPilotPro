@@ -20,6 +20,8 @@ const createSaleSchema = z.object({
   discount: z.number().min(0).default(0),
   paymentMethod: z.enum(['CASH', 'TRANSFER', 'POS']).default('CASH'),
   amountPaid: z.number().min(0),
+  currency: z.string().length(3).transform((v) => v.toUpperCase()).default('USD'),
+  fxRate: z.number().positive().default(1),
   notes: z.string().optional(),
 })
 
@@ -147,6 +149,8 @@ export async function POST(req: NextRequest) {
           discount: data.discount,
           amountPaid: data.amountPaid,
           paymentMethod: data.paymentMethod,
+          currency: data.currency,
+          fxRate: data.fxRate,
           receiptNumber,
           notes: data.notes,
           createdBy: user.userId,
@@ -185,6 +189,8 @@ export async function POST(req: NextRequest) {
         amountPaid: sale.amountPaid,
         paymentMethod: sale.paymentMethod,
         receiptNumber: sale.receiptNumber,
+        currency: sale.currency,
+        fxRate: sale.fxRate,
         subsidiaryId: sale.subsidiaryId,
         itemsCount: sale.items.length,
       },

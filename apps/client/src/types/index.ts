@@ -10,7 +10,7 @@ export interface AuthUser {
   role: UserRole
   tenantId: string | null
   subsidiaryId: string | null
-  tenant: { id: string; name: string; slug: string } | null
+  tenant: { id: string; name: string; slug: string; baseCurrency: string } | null
 }
 
 // ── Products ─────────────────────────────────────────────────────────────────
@@ -62,6 +62,8 @@ export interface Sale {
   amountPaid: number
   paymentMethod: PaymentMethod
   receiptNumber: string
+  currency: string
+  fxRate: number
   notes?: string
   createdAt: string
   items: SaleItem[]
@@ -83,6 +85,8 @@ export interface SaleCheckoutPayload {
   paymentMethod: PaymentMethod
   discount: number
   amountPaid: number
+  currency: string
+  fxRate: number
   notes?: string
   items: {
     productId: string
@@ -104,6 +108,8 @@ export interface Expense {
   amount: number
   category: string
   date: string
+  currency: string
+  fxRate: number
   notes?: string
   createdAt: string
   user?: { firstName: string; lastName: string }
@@ -132,6 +138,7 @@ export interface Tenant {
   email: string
   phone?: string
   isActive: boolean
+  baseCurrency: string
   createdAt: string
   subscriptions?: Subscription[]
   _count?: { users: number; subsidiaries: number }

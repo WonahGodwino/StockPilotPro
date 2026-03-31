@@ -12,6 +12,7 @@
     "test:observability": "ts-node -P tests/tsconfig.json tests/observability.spec.ts",
     "test:sso": "ts-node -P tests/tsconfig.json tests/sso.spec.ts",
     "test:subscription": "ts-node -P tests/tsconfig.json tests/subscription.spec.ts",
+    "test:currency": "ts-node -P tests/tsconfig.json tests/currency.spec.ts",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "ts-node prisma/seed.ts",

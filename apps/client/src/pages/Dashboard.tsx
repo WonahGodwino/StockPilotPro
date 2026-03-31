@@ -8,6 +8,7 @@ import { TrendingUp, TrendingDown, Package, ShoppingCart, Building2, Bell } from
 import api from '@/lib/api'
 import type { DashboardData, ReportSummary } from '@/types'
 import { useAuthStore } from '@/store/auth.store'
+import { makeCurrencyFormatter } from '@/lib/currency'
 
 function StatCard({
   label, value, icon: Icon, color, subtext, subtextHref, trend,
@@ -81,12 +82,10 @@ function DashboardSkeleton() {
   )
 }
 
-function fmt(n: number) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(n)
-}
-
 export default function Dashboard() {
   const user = useAuthStore((s) => s.user)
+  const baseCurrency = user?.tenant?.baseCurrency || 'USD'
+  const fmt = makeCurrencyFormatter(baseCurrency, { minimumFractionDigits: 0 })
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [report, setReport] = useState<ReportSummary | null>(null)
   const [loading, setLoading] = useState(true)
@@ -190,7 +189,7 @@ export default function Dashboard() {
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v) => v.slice(5)} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v}`} />
+              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => fmt(v)} />
               <Tooltip formatter={(v: number) => fmt(v)} />
               <Area isAnimationActive type="monotone" dataKey="total" stroke="#2563eb" fill="url(#salesGrad)" strokeWidth={2} />
             </AreaChart>
@@ -205,7 +204,7 @@ export default function Dashboard() {
               <BarChart data={[{ name: 'This Month', Revenue: report.totalSales, Expenses: report.totalExpenses }]}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v}`} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => fmt(v)} />
                 <Tooltip formatter={(v: number) => fmt(v)} />
                 <Legend />
                 <Bar isAnimationActive dataKey="Revenue" fill="#2563eb" radius={[4, 4, 0, 0]} />
