@@ -1,0 +1,19 @@
+{
+  "name": "stockpilot-pro",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=apps/api\" \"npm run dev --workspace=apps/client\"",
+    "build": "npm run build --workspace=apps/api && npm run build --workspace=apps/client",
+    "lint": "npm run lint --workspace=apps/api && npm run lint --workspace=apps/client",
+    "db:migrate": "npm run db:migrate --workspace=apps/api",
+    "db:seed": "npm run db:seed --workspace=apps/api",
+    "db:studio": "npm run db:studio --workspace=apps/api"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

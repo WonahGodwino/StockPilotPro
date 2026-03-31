@@ -1,0 +1,79 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
+import { z } from 'zod'
+import { prisma } from '@/lib/prisma'
+import { authenticate, apiError, handleOptions } from '@/lib/auth'
+import { isSuperAdmin } from '@/lib/rbac'
+import { logAudit } from '@/lib/audit'
+
+const updatePlanSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  price: z.number().positive().optional(),
+  maxSubsidiaries: z.number().int().min(1).optional(),
+  extraSubsidiaryPrice: z.number().min(0).optional(),
+  features: z.record(z.unknown()).optional(),
+  isActive: z.boolean().optional(),
+})
+
+export async function OPTIONS() {
+  return handleOptions()
+}
+
+export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const user = authenticate(req)
+    if (!isSuperAdmin(user)) return apiError('Forbidden', 403)
+
+    const body = await req.json()
+    const data = updatePlanSchema.parse(body)
+
+    const before = await prisma.plan.findUnique({ where: { id: params.id } })
+    if (!before) return apiError('Plan not found', 404)
+
+    const updateData: Prisma.PlanUpdateInput = {
+      name: data.name,
+      description: data.description,
+      price: data.price,
+      maxSubsidiaries: data.maxSubsidiaries,
+      extraSubsidiaryPrice: data.extraSubsidiaryPrice,
+      isActive: data.isActive,
+      updatedBy: user.userId,
+    }
+    if (data.features !== undefined) {
+      updateData.features = data.features as Prisma.InputJsonValue
+    }
+
+    const plan = await prisma.plan.update({
+      where: { id: params.id },
+      data: updateData,
+    })
+
+    await logAudit({
+      tenantId: user.tenantId,
+      userId: user.userId,
+      action: 'UPDATE',
+      entity: 'plan',
+      entityId: plan.id,
+      oldValues: {
+        name: before.name,
+        price: before.price,
+        maxSubsidiaries: before.maxSubsidiaries,
+        isActive: before.isActive,
+      },
+      newValues: {
+        name: plan.name,
+        price: plan.price,
+        maxSubsidiaries: plan.maxSubsidiaries,
+        isActive: plan.isActive,
+      },
+      req,
+    })
+
+    return NextResponse.json({ data: plan })
+  } catch (err) {
+    if (err instanceof z.ZodError) return NextResponse.json({ error: err.errors }, { status: 422 })
+    console.error('[PLANS PUT]', err)
+    return apiError('Internal server error', 500)
+  }
+}

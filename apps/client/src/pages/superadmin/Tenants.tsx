@@ -1,0 +1,150 @@
+import { useState, useEffect } from 'react'
+import api from '@/lib/api'
+import type { Tenant } from '@/types'
+import toast from 'react-hot-toast'
+import { Plus, Building, Edit, X, Loader2, ChevronDown, ChevronUp, ToggleLeft, ToggleRight } from 'lucide-react'
+
+interface TenantForm { name: string; email: string; phone: string; address: string }
+const emptyForm: TenantForm = { name: '', email: '', phone: '', address: '' }
+
+function makeSlug(input: string) {
+  return input
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+}
+
+export default function TenantsPage() {
+  const [tenants, setTenants] = useState<Tenant[]>([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [modal, setModal] = useState<{ open: boolean; tenant: Tenant | null }>({ open: false, tenant: null })
+  const [form, setForm] = useState<TenantForm>(emptyForm)
+  const [saving, setSaving] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const res = await api.get<{ data: Tenant[] }>('/tenants')
+      setTenants(res.data.data)
+    }
+    catch { toast.error('Failed to load tenants') } finally { setLoading(false) }
+  }
+
+  useEffect(() => { load() }, [])
+
+  const openCreate = () => { setForm(emptyForm); setModal({ open: true, tenant: null }) }
+  const openEdit = (t: Tenant) => { setForm({ name: t.name, email: t.email || '', phone: t.phone || '', address: '' }); setModal({ open: true, tenant: t }) }
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault(); setSaving(true)
+    try {
+      if (modal.tenant) {
+        await api.put(`/tenants/${modal.tenant.id}`, { ...form, isActive: true })
+        toast.success('Tenant updated')
+      } else {
+        await api.post('/tenants', { ...form, slug: makeSlug(form.name) })
+        toast.success('Tenant created')
+      }
+      setModal({ open: false, tenant: null }); load()
+    } catch (err: unknown) { toast.error((err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed') }
+    finally { setSaving(false) }
+  }
+
+  const toggleArchive = async (t: Tenant) => {
+    try { await api.put(`/tenants/${t.id}`, { isActive: !t.isActive }); toast.success(t.isActive ? 'Tenant suspended' : 'Tenant activated'); load() }
+    catch { toast.error('Failed') }
+  }
+
+  const filtered = tenants.filter((t) => t.name.toLowerCase().includes(search.toLowerCase()) || (t.email || '').toLowerCase().includes(search.toLowerCase()))
+
+  const subStatus = (t: Tenant) => {
+    const sub = t.subscriptions?.[0]
+    if (!sub) return { label: 'No Plan', color: 'badge-danger' }
+    if (sub.status === 'ACTIVE') return { label: 'Active', color: 'badge-success' }
+    if (sub.status === 'SUSPENDED') return { label: 'Suspended', color: 'badge-warning' }
+    return { label: 'Expired', color: 'badge-danger' }
+  }
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div><h1 className="text-2xl font-bold text-gray-900">Tenants</h1><p className="text-sm text-gray-500 mt-0.5">{tenants.length} registered business{tenants.length !== 1 ? 'es' : ''}</p></div>
+        <button onClick={openCreate} className="btn-primary"><Plus className="w-4 h-4" /> Add Tenant</button>
+      </div>
+
+      <input className="input max-w-sm" placeholder="Search tenants..." value={search} onChange={(e) => setSearch(e.target.value)} />
+
+      {loading ? (
+        <div className="flex items-center justify-center h-48"><Loader2 className="w-8 h-8 animate-spin text-indigo-600" /></div>
+      ) : filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-64 text-gray-400"><Building className="w-12 h-12 mb-2 opacity-30" /><p>No tenants found</p></div>
+      ) : (
+        <div className="space-y-3">
+          {filtered.map((t) => {
+            const { label, color } = subStatus(t)
+            const sub = t.subscriptions?.[0]
+            return (
+              <div key={t.id} className={`card transition-opacity ${!t.isActive ? 'opacity-60' : ''}`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 cursor-pointer flex-1" onClick={() => setExpanded(expanded === t.id ? null : t.id)}>
+                    <div className="p-2 bg-indigo-50 rounded-xl"><Building className="w-5 h-5 text-indigo-600" /></div>
+                    <div>
+                      <p className="font-semibold text-gray-800">{t.name}</p>
+                      <p className="text-xs text-gray-500">{t.email}</p>
+                    </div>
+                    <span className={`badge ml-2 ${color}`}>{label}</span>
+                    {sub?.plan && <span className="badge badge-info ml-1">{sub.plan.name}</span>}
+                  </div>
+                  <div className="flex gap-1 ml-2">
+                    <button onClick={() => openEdit(t)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500"><Edit className="w-4 h-4" /></button>
+                    <button onClick={() => toggleArchive(t)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500" title={t.isActive ? 'Suspend' : 'Activate'}>
+                      {t.isActive ? <ToggleRight className="w-4 h-4 text-emerald-500" /> : <ToggleLeft className="w-4 h-4" />}
+                    </button>
+                    <button onClick={() => setExpanded(expanded === t.id ? null : t.id)} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
+                      {expanded === t.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+                {expanded === t.id && (
+                  <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div><p className="text-gray-400 text-xs">Phone</p><p className="text-gray-700">{t.phone || '—'}</p></div>
+                    <div><p className="text-gray-400 text-xs">Address</p><p className="text-gray-700">—</p></div>
+                    <div><p className="text-gray-400 text-xs">Plan</p><p className="text-gray-700">{sub?.plan?.name || '—'}</p></div>
+                    <div><p className="text-gray-400 text-xs">Expires</p><p className="text-gray-700">{sub?.expiryDate ? new Date(sub.expiryDate).toLocaleDateString() : '—'}</p></div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {modal.open && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
+            <div className="flex items-center justify-between p-6 border-b">
+              <h2 className="text-lg font-semibold">{modal.tenant ? 'Edit Tenant' : 'New Tenant'}</h2>
+              <button onClick={() => setModal({ open: false, tenant: null })} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400"><X className="w-5 h-5" /></button>
+            </div>
+            <form onSubmit={handleSave} className="p-6 space-y-4">
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Business Name *</label><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></div>
+              <div><label className="block text-sm font-medium text-gray-700 mb-1">Email</label><input className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Phone</label><input className="input" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Address</label><input className="input" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></div>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setModal({ open: false, tenant: null })} className="btn-secondary flex-1">Cancel</button>
+                <button type="submit" disabled={saving} className="btn-primary flex-1">{saving && <Loader2 className="w-4 h-4 animate-spin" />}{modal.tenant ? 'Save Changes' : 'Create Tenant'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
