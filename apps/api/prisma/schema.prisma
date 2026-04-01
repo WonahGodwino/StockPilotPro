@@ -58,6 +58,7 @@ model Plan {
   name                 String
   description          String?
   price                Decimal      @db.Decimal(12, 2)
+  priceCurrency        String       @default("USD")
   billingCycle         BillingCycle @default(MONTHLY)
   maxSubsidiaries      Int          @default(1)
   extraSubsidiaryPrice Decimal      @db.Decimal(12, 2) @default(0)
@@ -98,6 +99,7 @@ model Tenant {
   products        Product[]
   sales           Sale[]
   expenses        Expense[]
+  damageRecords   DamageRecord[]
   subscriptions   Subscription[]
   notifications   Notification[]
   auditLogs       AuditLog[]
@@ -117,6 +119,7 @@ model Subscription {
   startDate       DateTime
   expiryDate      DateTime
   amount          Decimal            @db.Decimal(12, 2)
+  billingCurrency String             @default("USD")
   notes           String?
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
@@ -146,6 +149,7 @@ model User {
   phone           String?
   isActive        Boolean      @default(true)
   lastLoginAt     DateTime?
+  lastSeenAt      DateTime?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
   createdBy       String?
@@ -156,12 +160,14 @@ model User {
   subsidiary      Subsidiary?  @relation(fields: [subsidiaryId], references: [id])
   sales           Sale[]
   expenses        Expense[]
+  damageRecords   DamageRecord[] @relation("DamageRecords")
   refreshTokens   RefreshToken[]
   ssoAccounts     SsoAccount[]
 
   @@index([tenantId])
   @@index([email])
   @@index([role])
+  @@index([lastSeenAt])
 }
 
 // ──────────────────────────────────────────────
@@ -228,6 +234,7 @@ model Subsidiary {
   products        Product[]
   sales           Sale[]
   expenses        Expense[]
+  damageRecords   DamageRecord[]
 
   @@index([tenantId])
 }
@@ -249,6 +256,7 @@ model Product {
   sellingPrice        Decimal       @db.Decimal(12, 2)
   barcode             String?
   lowStockThreshold   Decimal       @db.Decimal(12, 3) @default(10)
+  expiryDate          DateTime?
   status              ProductStatus @default(ACTIVE)
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
@@ -259,12 +267,14 @@ model Product {
   tenant              Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   subsidiary          Subsidiary    @relation(fields: [subsidiaryId], references: [id])
   saleItems           SaleItem[]
+  damageRecords       DamageRecord[]
   notifications       Notification[]
 
   @@index([tenantId])
   @@index([subsidiaryId])
   @@index([barcode])
   @@index([status])
+  @@index([expiryDate])
 }
 
 // ──────────────────────────────────────────────
@@ -283,6 +293,7 @@ model Sale {
   receiptNumber   String        @unique
   currency        String        @default("USD")
   fxRate          Decimal       @db.Decimal(18, 8) @default(1)
+  syncRef         String?
   notes           String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
@@ -299,6 +310,7 @@ model Sale {
   @@index([subsidiaryId])
   @@index([userId])
   @@index([createdAt])
+  @@unique([tenantId, syncRef])
 }
 
 // ──────────────────────────────────────────────
@@ -337,6 +349,7 @@ model Expense {
   date            DateTime
   currency        String    @default("USD")
   fxRate          Decimal   @db.Decimal(18, 8) @default(1)
+  syncRef         String?
   notes           String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -350,6 +363,40 @@ model Expense {
 
   @@index([tenantId])
   @@index([subsidiaryId])
+  @@index([date])
+  @@unique([tenantId, syncRef])
+}
+
+// ──────────────────────────────────────────────
+// DAMAGE RECORDS (Damaged/Expired Goods)
+// ──────────────────────────────────────────────
+
+model DamageRecord {
+  id              String    @id @default(cuid())
+  tenantId        String
+  subsidiaryId    String
+  productId       String
+  userId          String
+  quantity        Decimal   @db.Decimal(12, 3)
+  unit            String    @default("pcs")
+  reason          String    // EXPIRED | DAMAGED | LOST | RAW_MATERIAL_DAMAGE | OTHER
+  damageStage     String    @default("FINISHED_GOODS") // FINISHED_GOODS | RAW_MATERIAL
+  description     String?
+  cost            Decimal   @db.Decimal(12, 2) // Total cost: selling price for finished goods, cost price for raw materials
+  date            DateTime
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  createdBy       String?
+  updatedBy       String?
+
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subsidiary      Subsidiary @relation(fields: [subsidiaryId], references: [id])
+  product         Product   @relation(fields: [productId], references: [id])
+  user            User      @relation("DamageRecords", fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@index([subsidiaryId])
+  @@index([productId])
   @@index([date])
 }
 

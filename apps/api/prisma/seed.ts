@@ -82,10 +82,24 @@ async function main() {
   // ── Common Test Password ──────────────────────────────
   const testPassword = await bcrypt.hash('Test@123', 12)
 
+  // ── StockPilot Pro (Main Company) ───────────────────────
+  const mainTenant = await prisma.tenant.upsert({
+    where: { slug: 'stockpilot-pro' },
+    update: {},
+    create: {
+      name: 'StockPilot Pro',
+      slug: 'stockpilot-pro',
+      email: 'admin@stockpilotpro.com',
+      phone: '+1-555-0000',
+      isActive: true,
+    },
+  })
+
   // ── Super Admin ────────────────────────────────────────
   await prisma.user.upsert({
     where: { email: 'superadmin@stockpilot.pro' },
     update: {
+      tenantId: mainTenant.id,
       password: testPassword,
       firstName: 'Super',
       lastName: 'Admin',
@@ -93,6 +107,7 @@ async function main() {
       isActive: true,
     },
     create: {
+      tenantId: mainTenant.id,
       email: 'superadmin@stockpilot.pro',
       password: testPassword,
       firstName: 'Super',
@@ -101,7 +116,26 @@ async function main() {
       isActive: true,
     },
   })
-  console.log('✅ Super Admin created: superadmin@stockpilot.pro')
+  console.log('✅ Super Admin created: superadmin@stockpilot.pro (tenant: StockPilot Pro)')
+
+  // Subscription for main tenant
+  const now = new Date()
+  const nextYear = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate())
+  await prisma.subscription.upsert({
+    where: { id: 'sub_main' },
+    update: {},
+    create: {
+      id: 'sub_main',
+      tenantId: mainTenant.id,
+      planId: enterprisePlan.id,
+      status: SubscriptionStatus.ACTIVE,
+      startDate: now,
+      expiryDate: nextYear,
+      amount: enterprisePlan.price,
+    },
+  })
+
+  console.log('✅ StockPilot Pro tenant & subscription created')
 
   // ── Demo Tenant ────────────────────────────────────────
   const demoTenant = await prisma.tenant.upsert({
@@ -117,8 +151,6 @@ async function main() {
   })
 
   // Subscription for demo tenant
-  const now = new Date()
-  const nextYear = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate())
   await prisma.subscription.upsert({
     where: { id: 'sub_demo' },
     update: {},
@@ -314,6 +346,53 @@ async function main() {
   }
 
   console.log('✅ Demo products created')
+
+  // ── Demo Damage Records ────────────────────────────────
+  const salesUser = await prisma.user.findUnique({
+    where: { email: 'sales@demo.com' },
+  })
+
+  if (salesUser) {
+    const wirelessKeyboard = await prisma.product.findUnique({ where: { id: 'prod_001' } })
+    const usbHub = await prisma.product.findUnique({ where: { id: 'prod_002' } })
+
+    if (wirelessKeyboard) {
+      await prisma.damageRecord.create({
+        data: {
+          tenantId: demoTenant.id,
+          subsidiaryId: headOffice.id,
+          productId: wirelessKeyboard.id,
+          userId: salesUser.id,
+          quantity: 2,
+          reason: 'DAMAGED',
+          description: 'Defective units with broken keys',
+          cost: 2 * 25.00,
+          date: new Date(),
+          createdBy: salesUser.id,
+        },
+      })
+    }
+
+    if (usbHub) {
+      await prisma.damageRecord.create({
+        data: {
+          tenantId: demoTenant.id,
+          subsidiaryId: headOffice.id,
+          productId: usbHub.id,
+          userId: salesUser.id,
+          quantity: 1,
+          reason: 'EXPIRED',
+          description: 'Batch expired on 2026-03-15',
+          cost: 1 * 18.00,
+          date: new Date(),
+          createdBy: salesUser.id,
+        },
+      })
+    }
+
+    console.log('✅ Example damage records created')
+  }
+
   console.log('\n🎉 Seed complete!')
 }
 

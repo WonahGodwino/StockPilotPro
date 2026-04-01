@@ -4,6 +4,7 @@ import type { Sale } from '@/types'
 import { Printer, Plus } from 'lucide-react'
 import { useReactToPrint } from 'react-to-print'
 import { useAuthStore } from '@/store/auth.store'
+import { getCurrencySymbol } from '@/lib/currency'
 
 interface Props {
   saleId: string
@@ -32,6 +33,8 @@ export default function Receipt({ saleId, onNewSale }: Props) {
   }, [saleId])
 
   if (!sale) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-4 border-primary-600 border-t-transparent rounded-full" /></div>
+
+  const currencySymbol = getCurrencySymbol(sale.currency || user?.tenant?.baseCurrency || 'USD')
 
   return (
     <div className="flex items-center justify-center min-h-[60vh]">
@@ -69,12 +72,12 @@ export default function Receipt({ saleId, onNewSale }: Props) {
                 <div className="flex items-center">
                   <span className="flex-1 truncate">{item.product?.name}</span>
                   <span className="w-12 text-center">{item.quantity}</span>
-                  <span className="w-16 text-right">${Number(item.unitPrice).toFixed(2)}</span>
-                  <span className="w-16 text-right">${Number(item.subtotal).toFixed(2)}</span>
+                  <span className="w-16 text-right">{currencySymbol}{Number(item.unitPrice).toFixed(2)}</span>
+                  <span className="w-16 text-right">{currencySymbol}{Number(item.subtotal).toFixed(2)}</span>
                 </div>
                 {Number(item.discount) > 0 && (
                   <div className="flex justify-end text-gray-400 italic">
-                    <span className="w-16 text-right">-${Number(item.discount).toFixed(2)} disc</span>
+                    <span className="w-16 text-right">-{currencySymbol}{Number(item.discount).toFixed(2)} disc</span>
                   </div>
                 )}
               </div>
@@ -85,21 +88,21 @@ export default function Receipt({ saleId, onNewSale }: Props) {
             {Number(sale.discount) > 0 && (
               <div className="flex justify-between">
                 <span className="text-gray-500">Discount</span>
-                <span>-${Number(sale.discount).toFixed(2)}</span>
+                <span>-{currencySymbol}{Number(sale.discount).toFixed(2)}</span>
               </div>
             )}
             <div className="flex justify-between font-bold text-sm border-t pt-2 mt-1">
               <span>TOTAL</span>
-              <span>${Number(sale.totalAmount).toFixed(2)}</span>
+              <span>{currencySymbol}{Number(sale.totalAmount).toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-gray-500">
               <span>Paid ({sale.paymentMethod})</span>
-              <span>${Number(sale.amountPaid).toFixed(2)}</span>
+              <span>{currencySymbol}{Number(sale.amountPaid).toFixed(2)}</span>
             </div>
             {Number(sale.amountPaid) > Number(sale.totalAmount) && (
               <div className="flex justify-between text-gray-500">
                 <span>Change</span>
-                <span>${(Number(sale.amountPaid) - Number(sale.totalAmount)).toFixed(2)}</span>
+                <span>{currencySymbol}{(Number(sale.amountPaid) - Number(sale.totalAmount)).toFixed(2)}</span>
               </div>
             )}
           </div>

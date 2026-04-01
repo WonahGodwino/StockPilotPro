@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Navigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, ResponsiveContainer, Legend } from 'recharts'
 import api from '@/lib/api'
 import { useAuthStore } from '@/store/auth.store'
@@ -12,6 +13,10 @@ const EXPENSE_COLORS = ['#6366f1','#f59e0b','#10b981','#ef4444','#3b82f6','#8b5c
 
 interface ReportSummary {
   totalSales: number
+  operatingRevenue?: number
+  subscriptionRevenue?: number
+  subscriptionRevenueNative?: number
+  subscriptionBillingCurrency?: string
   totalExpenses: number
   cogs: number
   grossProfit: number
@@ -29,12 +34,18 @@ interface ReportsResponse {
   }
 }
 
+interface ReminderRow {
+  id: string
+  daysLeft: number
+}
+
 export default function Reports() {
   const user = useAuthStore((s) => s.user)
   const [period, setPeriod] = useState<Period>('monthly')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
   const [report, setReport] = useState<ReportsResponse['data'] | null>(null)
+  const [expiringSummary, setExpiringSummary] = useState<{ within30: number; next30: number }>({ within30: 0, next30: 0 })
   const [loading, setLoading] = useState(false)
 
   const fetchReport = useCallback(async () => {
@@ -53,6 +64,18 @@ export default function Reports() {
 
   useEffect(() => { if (period !== 'custom') fetchReport() }, [period, fetchReport])
 
+  useEffect(() => {
+    if (user?.role !== 'SUPER_ADMIN') return
+    api.get('/subscriptions/reminders', { params: { window: 'two_months' } })
+      .then((res) => {
+        const rows: ReminderRow[] = res.data?.data || []
+        const within30 = rows.filter((r) => r.daysLeft >= 0 && r.daysLeft <= 30).length
+        const next30 = rows.filter((r) => r.daysLeft > 30 && r.daysLeft <= 60).length
+        setExpiringSummary({ within30, next30 })
+      })
+      .catch(() => undefined)
+  }, [user?.role])
+
   if (!user || user.role === 'SALESPERSON') return <Navigate to="/dashboard" replace />
 
   const baseCurrency = report?.baseCurrency || user?.tenant?.baseCurrency || 'USD'
@@ -62,6 +85,7 @@ export default function Reports() {
     ? report.expenseByCategory.map((e) => ({ name: e.category, value: e.total }))
     : []
   const summary = report?.summary
+  const isPlatformView = user?.role === 'SUPER_ADMIN' && !!summary?.subscriptionRevenue
 
   return (
     <div className="p-6 space-y-6">
@@ -113,52 +137,115 @@ export default function Reports() {
             ))}
           </div>
 
-          {/* COGS & Inventory */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="card"><p className="text-sm text-gray-500">Cost of Goods Sold</p><p className="text-xl font-bold text-gray-800 mt-1">{fmt(summary.cogs)}</p></div>
-            <div className="card"><p className="text-sm text-gray-500">Total Product Worth</p><p className="text-xl font-bold text-gray-800 mt-1">{fmt(summary.totalProductWorth)}</p></div>
-            <div className="card flex items-center gap-3">
-              <Package className="w-8 h-8 text-indigo-400" />
-              <div><p className="text-sm text-gray-500">Profit Margin</p><p className="text-xl font-bold text-indigo-600 mt-1">{summary.totalSales > 0 ? ((summary.netProfit / summary.totalSales) * 100).toFixed(1) : 0}%</p></div>
+          {/* Tenant-only inventory profitability cards */}
+          {!isPlatformView && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="card"><p className="text-sm text-gray-500">Cost of Goods Sold</p><p className="text-xl font-bold text-gray-800 mt-1">{fmt(summary.cogs)}</p></div>
+              <div className="card"><p className="text-sm text-gray-500">Total Product Worth</p><p className="text-xl font-bold text-gray-800 mt-1">{fmt(summary.totalProductWorth)}</p></div>
+              <div className="card flex items-center gap-3">
+                <Package className="w-8 h-8 text-indigo-400" />
+                <div><p className="text-sm text-gray-500">Profit Margin</p><p className="text-xl font-bold text-indigo-600 mt-1">{summary.totalSales > 0 ? ((summary.netProfit / summary.totalSales) * 100).toFixed(1) : 0}%</p></div>
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Charts */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Top Products */}
-            {report.topProducts && report.topProducts.length > 0 && (
-              <div className="card">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-semibold text-gray-800">Top Products by Revenue</h3>
-                  <Download className="w-4 h-4 text-gray-400" />
+          {isPlatformView && (
+            <div className="card">
+              <h3 className="font-semibold text-gray-800 mb-2">Platform Subscription Revenue</h3>
+              <p className="text-sm text-gray-500 mb-3">
+                Tenant subscriptions are billed in each plan's configured currency and converted to {baseCurrency} for profit reporting.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider">Operating Revenue</p>
+                  <p className="text-lg font-bold text-gray-900">{fmt(summary.operatingRevenue || 0)}</p>
                 </div>
-                <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={report.topProducts.map((p) => ({ name: p.name, revenue: p.totalRevenue }))} layout="vertical">
-                    <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => fmt(v)} />
-                    <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={90} />
-                    <Tooltip formatter={(v: number) => fmt(v)} />
-                    <Bar dataKey="revenue" fill="#6366f1" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider">Subscription Revenue ({baseCurrency})</p>
+                  <p className="text-lg font-bold text-emerald-600">{fmt(summary.subscriptionRevenue || 0)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider">
+                    {summary.subscriptionBillingCurrency === 'MIXED'
+                      ? 'Billing Currency'
+                      : `Subscription Revenue (${summary.subscriptionBillingCurrency || baseCurrency})`}
+                  </p>
+                  <p className="text-lg font-bold text-indigo-600">
+                    {summary.subscriptionBillingCurrency === 'MIXED'
+                      ? 'Mixed currencies'
+                      : (summary.subscriptionRevenueNative || 0).toLocaleString(undefined, { style: 'currency', currency: summary.subscriptionBillingCurrency || baseCurrency })}
+                  </p>
+                </div>
               </div>
-            )}
+            </div>
+          )}
 
-            {/* Expenses by Category */}
-            {expenseByCat.length > 0 && (
-              <div className="card">
-                <h3 className="font-semibold text-gray-800 mb-4">Expenses by Category</h3>
-                <ResponsiveContainer width="100%" height={240}>
-                  <PieChart>
-                    <Pie data={expenseByCat} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
-                      {expenseByCat.map((_, i) => <Cell key={i} fill={EXPENSE_COLORS[i % EXPENSE_COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip formatter={(v: number) => fmt(v)} />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
+          {isPlatformView && (
+            <div className="card">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="font-semibold text-gray-800 mb-2">Expiring Subscription Alerts</h3>
+                  <p className="text-sm text-gray-500">Tenants approaching renewal are tracked here for proactive outreach.</p>
+                  <div className="mt-3 flex flex-wrap gap-4 text-sm">
+                    <p className="text-warning-700 font-medium">This Month: {expiringSummary.within30}</p>
+                    <p className="text-primary-700 font-medium">Upcoming Month: {expiringSummary.next30}</p>
+                  </div>
+                </div>
+                <Link to="/admin/subscription-reminders" className="btn-primary">
+                  Open Reminder Center
+                </Link>
               </div>
-            )}
-          </div>
+            </div>
+          )}
+
+          {/* Tenant operational charts */}
+          {!isPlatformView && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Top Products */}
+              {report.topProducts && report.topProducts.length > 0 && (
+                <div className="card">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-semibold text-gray-800">Top Products by Revenue</h3>
+                    <Download className="w-4 h-4 text-gray-400" />
+                  </div>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={report.topProducts.map((p) => ({ name: p.name, revenue: p.totalRevenue }))} layout="vertical">
+                      <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => fmt(v)} />
+                      <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={90} />
+                      <Tooltip formatter={(v: number) => fmt(v)} />
+                      <Bar dataKey="revenue" fill="#6366f1" radius={[0, 4, 4, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* Expenses by Category */}
+              {expenseByCat.length > 0 && (
+                <div className="card">
+                  <h3 className="font-semibold text-gray-800 mb-4">Expenses by Category</h3>
+                  <ResponsiveContainer width="100%" height={240}>
+                    <PieChart>
+                      <Pie data={expenseByCat} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
+                        {expenseByCat.map((_, i) => <Cell key={i} fill={EXPENSE_COLORS[i % EXPENSE_COLORS.length]} />)}
+                      </Pie>
+                      <Tooltip formatter={(v: number) => fmt(v)} />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isPlatformView && (
+            <div className="card">
+              <h3 className="font-semibold text-gray-800 mb-2">Platform Analytics Scope</h3>
+              <p className="text-sm text-gray-500">
+                Product and expense charts are tenant-level operational metrics and are hidden for platform reports.
+                Use the Platform Dashboard for plan adoption and subscription trend analytics.
+              </p>
+            </div>
+          )}
         </>
       )}
     </div>

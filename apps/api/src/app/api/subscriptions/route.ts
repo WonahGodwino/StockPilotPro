@@ -10,7 +10,7 @@ const createSchema = z.object({
   planId: z.string(),
   startDate: z.string().datetime(),
   expiryDate: z.string().datetime(),
-  amount: z.number().positive(),
+  amount: z.number().positive().optional(),
   notes: z.string().optional(),
 })
 
@@ -56,11 +56,20 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const data = createSchema.parse(body)
 
+    const plan = await prisma.plan.findUnique({ where: { id: data.planId } })
+    if (!plan) return apiError('Plan not found', 404)
+
+    const amount = data.amount ?? Number(plan.price)
+
     const subscription = await prisma.subscription.create({
       data: {
-        ...data,
+        tenantId: data.tenantId,
+        planId: data.planId,
         startDate: new Date(data.startDate),
         expiryDate: new Date(data.expiryDate),
+        amount,
+        billingCurrency: plan.priceCurrency,
+        notes: data.notes,
         status: 'ACTIVE',
         createdBy: user.userId,
       },
@@ -79,6 +88,7 @@ export async function POST(req: NextRequest) {
         startDate: subscription.startDate,
         expiryDate: subscription.expiryDate,
         amount: subscription.amount,
+        billingCurrency: subscription.billingCurrency,
       },
       req,
     })

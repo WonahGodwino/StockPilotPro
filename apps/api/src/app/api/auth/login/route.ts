@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
     // Update last login
     await prisma.user.update({
       where: { id: user.id },
-      data: { lastLoginAt: new Date() },
+      data: { lastLoginAt: new Date(), lastSeenAt: new Date() },
     })
 
     await clearAuthFailures(email, clientIp)

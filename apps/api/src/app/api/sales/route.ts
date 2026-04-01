@@ -22,6 +22,7 @@ const createSaleSchema = z.object({
   amountPaid: z.number().min(0),
   currency: z.string().length(3).transform((v) => v.toUpperCase()).default('USD'),
   fxRate: z.number().positive().default(1),
+  syncRef: z.string().min(6).max(120).optional(),
   notes: z.string().optional(),
 })
 
@@ -40,10 +41,18 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20')
     const from = searchParams.get('from')
     const to = searchParams.get('to')
+    const requestedTenantId = searchParams.get('tenantId') || undefined
+    const tenantId = isSuperAdmin(user)
+      ? requestedTenantId || user.tenantId!
+      : user.tenantId!
+
+    if (!tenantId) {
+      return apiError('No tenant context for this account. Provide tenantId.', 400)
+    }
 
     const where = {
       archived: false,
-      tenantId: isSuperAdmin(user) ? undefined : user.tenantId!,
+      tenantId,
       // Salesperson can only see their own sales
       ...(user.role === 'SALESPERSON' ? { userId: user.userId } : {}),
       ...(subsidiaryId
@@ -91,8 +100,25 @@ export async function POST(req: NextRequest) {
     const user = authenticate(req)
     const body = await req.json()
     const data = createSaleSchema.parse(body)
+    const syncRef = data.syncRef?.trim() || undefined
 
     assertSubsidiaryAccess(user, data.subsidiaryId)
+
+    // Idempotency guard for offline replay: if already synced, return the existing sale.
+    if (syncRef) {
+      const existing = await prisma.sale.findFirst({
+        where: { tenantId: user.tenantId!, syncRef },
+        include: {
+          items: {
+            include: { product: { select: { name: true, unit: true } } },
+          },
+          user: { select: { firstName: true, lastName: true } },
+        },
+      })
+      if (existing) {
+        return NextResponse.json({ data: existing })
+      }
+    }
 
     // Validate products belong to tenant and calculate totals
     const productIds = data.items.map((i) => i.productId)
@@ -151,6 +177,7 @@ export async function POST(req: NextRequest) {
           paymentMethod: data.paymentMethod,
           currency: data.currency,
           fxRate: data.fxRate,
+          syncRef,
           receiptNumber,
           notes: data.notes,
           createdBy: user.userId,
@@ -191,6 +218,7 @@ export async function POST(req: NextRequest) {
         receiptNumber: sale.receiptNumber,
         currency: sale.currency,
         fxRate: sale.fxRate,
+        syncRef: sale.syncRef,
         subsidiaryId: sale.subsidiaryId,
         itemsCount: sale.items.length,
       },

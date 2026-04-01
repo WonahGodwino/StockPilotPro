@@ -59,6 +59,7 @@ const navSections: NavSection[] = [
     items: [
       { label: 'Tenants', href: '/admin/tenants', icon: Shield, roles: ['SUPER_ADMIN'] },
       { label: 'Plans', href: '/admin/plans', icon: TrendingUp, roles: ['SUPER_ADMIN'] },
+      { label: 'Subscription Reminders', href: '/admin/subscription-reminders', icon: Bell, roles: ['SUPER_ADMIN'] },
     ],
   },
 ]

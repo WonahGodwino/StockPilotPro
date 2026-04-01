@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "DamageRecord" ADD COLUMN     "damageStage" TEXT NOT NULL DEFAULT 'FINISHED_GOODS',
+ADD COLUMN     "unit" TEXT NOT NULL DEFAULT 'pcs';

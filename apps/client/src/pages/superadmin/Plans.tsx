@@ -3,11 +3,10 @@ import api from '@/lib/api'
 import type { Plan } from '@/types'
 import toast from 'react-hot-toast'
 import { Plus, CreditCard, Edit, X, Loader2, Check, Zap } from 'lucide-react'
+import { SUPPORTED_CURRENCIES, makeCurrencyFormatter } from '@/lib/currency'
 
-const fmt = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
-
-interface PlanForm { name: string; price: number; maxBranches: number; features: string; billingCycle: string }
-const emptyForm: PlanForm = { name: '', price: 0, maxBranches: 1, features: '', billingCycle: 'MONTHLY' }
+interface PlanForm { name: string; price: number; priceCurrency: string; maxBranches: number; features: string; billingCycle: string }
+const emptyForm: PlanForm = { name: '', price: 0, priceCurrency: 'USD', maxBranches: 1, features: '', billingCycle: 'MONTHLY' }
 
 export default function PlansPage() {
   const [plans, setPlans] = useState<Plan[]>([])
@@ -29,15 +28,19 @@ export default function PlansPage() {
 
   const openCreate = () => { setForm(emptyForm); setModal({ open: true, plan: null }) }
   const openEdit = (p: Plan) => {
-    const featuresText = typeof p.features === 'object' && p.features !== null
-      ? Object.keys(p.features).join('\n')
-      : ''
+    const featureList = Array.isArray(p.features)
+      ? p.features.map(String)
+      : typeof p.features === 'object' && p.features !== null
+      ? Object.keys(p.features)
+      : []
+    const featuresText = featureList.join('\n')
     setForm({
       name: p.name,
       price: Number(p.price),
+      priceCurrency: p.priceCurrency,
       maxBranches: p.maxSubsidiaries,
       features: featuresText,
-      billingCycle: 'MONTHLY',
+      billingCycle: p.billingCycle,
     })
     setModal({ open: true, plan: p })
   }
@@ -49,12 +52,11 @@ export default function PlansPage() {
       const mappedPayload = {
         name: payload.name,
         price: payload.price,
+        priceCurrency: form.priceCurrency,
+        billingCycle: form.billingCycle,
         maxSubsidiaries: payload.maxBranches,
         extraSubsidiaryPrice: 0,
-        features: payload.features.reduce<Record<string, boolean>>((acc, item) => {
-          acc[item] = true
-          return acc
-        }, {}),
+        features: payload.features,
       }
       if (modal.plan) { await api.put(`/plans/${modal.plan.id}`, mappedPayload); toast.success('Plan updated') }
       else { await api.post('/plans', mappedPayload); toast.success('Plan created') }
@@ -75,7 +77,12 @@ export default function PlansPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           {plans.map((p) => {
-            const features = Array.isArray(p.features) ? (p.features as string[]) : []
+            const features = Array.isArray(p.features)
+              ? (p.features as string[])
+              : typeof p.features === 'object' && p.features !== null
+              ? Object.keys(p.features)
+              : []
+            const fmt = makeCurrencyFormatter(p.priceCurrency || 'USD')
             return (
               <div key={p.id} className="card relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-20 h-20 rounded-bl-full bg-indigo-50 flex items-start justify-end p-2">
@@ -85,7 +92,7 @@ export default function PlansPage() {
                   <CreditCard className="w-5 h-5 text-indigo-600" />
                   <h3 className="font-bold text-gray-800 text-lg">{p.name}</h3>
                 </div>
-                <p className="text-3xl font-black text-indigo-600">{fmt(p.price)}<span className="text-sm font-normal text-gray-400">/mo</span></p>
+                <p className="text-3xl font-black text-indigo-600">{fmt(Number(p.price))}<span className="text-sm font-normal text-gray-400">/{p.billingCycle === 'YEARLY' ? 'yr' : 'mo'}</span></p>
                 <p className="text-sm text-gray-500 mt-1">Up to <strong>{p.maxSubsidiaries}</strong> branch{p.maxSubsidiaries !== 1 ? 'es' : ''}</p>
                 {features.length > 0 && (
                   <ul className="mt-3 space-y-1.5">
@@ -109,8 +116,25 @@ export default function PlansPage() {
             <form onSubmit={handleSave} className="p-6 space-y-4">
               <div><label className="block text-sm font-medium text-gray-700 mb-1">Plan Name *</label><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></div>
               <div className="grid grid-cols-2 gap-4">
-                <div><label className="block text-sm font-medium text-gray-700 mb-1">Price (USD/mo) *</label><input className="input" type="number" step="0.01" min="0" value={form.price} onChange={(e) => setForm({ ...form, price: parseFloat(e.target.value) })} required /></div>
+                <div><label className="block text-sm font-medium text-gray-700 mb-1">Price *</label><input className="input" type="number" step="0.01" min="0" value={form.price} onChange={(e) => setForm({ ...form, price: parseFloat(e.target.value) || 0 })} required /></div>
                 <div><label className="block text-sm font-medium text-gray-700 mb-1">Max Branches *</label><input className="input" type="number" min="1" value={form.maxBranches} onChange={(e) => setForm({ ...form, maxBranches: parseInt(e.target.value) })} required /></div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Price Currency *</label>
+                  <select className="input" value={form.priceCurrency} onChange={(e) => setForm({ ...form, priceCurrency: e.target.value })}>
+                    {SUPPORTED_CURRENCIES.map((currency) => (
+                      <option key={currency.code} value={currency.code}>{currency.code} — {currency.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Billing Cycle *</label>
+                  <select className="input" value={form.billingCycle} onChange={(e) => setForm({ ...form, billingCycle: e.target.value })}>
+                    <option value="MONTHLY">Monthly</option>
+                    <option value="YEARLY">Yearly</option>
+                  </select>
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Features (one per line)</label>

@@ -3,6 +3,7 @@ import { Toaster } from 'react-hot-toast'
 import { useEffect, lazy, Suspense } from 'react'
 import { useAuthStore } from '@/store/auth.store'
 import { initSyncListener } from '@/lib/sync'
+import api from '@/lib/api'
 import AppLayout from '@/components/layout/AppLayout'
 
 const Login = lazy(() => import('@/pages/Login'))
@@ -17,6 +18,7 @@ const Users = lazy(() => import('@/pages/Users'))
 const Notifications = lazy(() => import('@/pages/Notifications'))
 const TenantsPage = lazy(() => import('@/pages/superadmin/Tenants'))
 const PlansPage = lazy(() => import('@/pages/superadmin/Plans'))
+const SubscriptionRemindersPage = lazy(() => import('@/pages/superadmin/SubscriptionReminders'))
 const SettingsPage = lazy(() => import('@/pages/Settings'))
 
 function PageLoader() {
@@ -29,20 +31,57 @@ function PageLoader() {
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+  const hasHydrated = useAuthStore((s) => s.hasHydrated)
+  if (!hasHydrated) return <PageLoader />
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />
 }
 
 function RequireSuperAdmin({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((s) => s.user)
+  const hasHydrated = useAuthStore((s) => s.hasHydrated)
+  if (!hasHydrated) return <PageLoader />
   if (!user) return <Navigate to="/login" replace />
   if (user.role !== 'SUPER_ADMIN') return <Navigate to="/dashboard" replace />
   return <>{children}</>
 }
 
 export default function App() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
+
   useEffect(() => {
-    initSyncListener()
+    const cleanup = initSyncListener()
+    return cleanup
   }, [])
+
+  useEffect(() => {
+    if (!isAuthenticated) return
+
+    let intervalId: ReturnType<typeof setInterval> | null = null
+
+    const sendPresence = async () => {
+      if (!navigator.onLine) return
+      try {
+        await api.post('/users/presence')
+      } catch {
+        // Presence heartbeat failures should never block app usage.
+      }
+    }
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void sendPresence()
+      }
+    }
+
+    void sendPresence()
+    intervalId = setInterval(() => { void sendPresence() }, 60_000)
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      if (intervalId) clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [isAuthenticated])
 
   return (
     <BrowserRouter>
@@ -89,6 +128,14 @@ export default function App() {
               element={
                 <RequireSuperAdmin>
                   <PlansPage />
+                </RequireSuperAdmin>
+              }
+            />
+            <Route
+              path="admin/subscription-reminders"
+              element={
+                <RequireSuperAdmin>
+                  <SubscriptionRemindersPage />
                 </RequireSuperAdmin>
               }
             />

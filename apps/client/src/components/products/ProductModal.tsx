@@ -11,6 +11,13 @@ interface Props {
   onSaved: () => void
 }
 
+function toDateInputValue(value?: string | Date): string {
+  if (!value) return ''
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toISOString().slice(0, 10)
+}
+
 export default function ProductModal({ product, onClose, onSaved }: Props) {
   const user = useAuthStore((s) => s.user)
   const [loading, setLoading] = useState(false)
@@ -24,6 +31,7 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
     sellingPrice: product?.sellingPrice ?? 0,
     barcode: product?.barcode || '',
     lowStockThreshold: product?.lowStockThreshold ?? 10,
+    expiryDate: toDateInputValue(product?.expiryDate as string | Date | undefined),
     status: product?.status || 'ACTIVE',
     subsidiaryId: product?.subsidiaryId || user?.subsidiaryId || '',
   })
@@ -95,6 +103,12 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
               <label className="block text-sm font-medium text-gray-700 mb-1">Barcode</label>
               <input className="input" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} placeholder="Optional" />
             </div>
+            {form.type === 'GOODS' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Expiry Date (Optional)</label>
+                <input className="input" type="date" value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })} />
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
               <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as 'ACTIVE' | 'DRAFT' | 'ARCHIVED' })}>

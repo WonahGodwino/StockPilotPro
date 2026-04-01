@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Plus, Search, Edit2, Archive, Package } from 'lucide-react'
+import { Plus, Search, Edit2, Archive, Package, AlertTriangle } from 'lucide-react'
 import api from '@/lib/api'
 import type { Product } from '@/types'
 import { useAuthStore } from '@/store/auth.store'
 import toast from 'react-hot-toast'
 import ProductModal from '@/components/products/ProductModal'
+import DamageModal from '@/components/products/DamageModal'
 import Pagination from '@/components/Pagination'
 import { cacheProducts } from '@/lib/db'
 
@@ -22,6 +23,24 @@ function marginColor(pct: number): string {
   return 'text-danger-600'
 }
 
+function ExpiryStatusBadge({ expiryDate }: { expiryDate?: string }) {
+  if (!expiryDate) return null
+  
+  const today = new Date()
+  const expiry = new Date(expiryDate)
+  const daysUntilExpiry = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+  
+  if (daysUntilExpiry < 0) {
+    return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-danger-100 text-danger-700">Expired</span>
+  }
+  
+  if (daysUntilExpiry <= 7) {
+    return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-warning-100 text-warning-700">Expires in {daysUntilExpiry} day{daysUntilExpiry !== 1 ? 's' : ''}</span>
+  }
+  
+  return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">Expires in {daysUntilExpiry} day{daysUntilExpiry !== 1 ? 's' : ''}</span>
+}
+
 export default function Products() {
   const user = useAuthStore((s) => s.user)
   const [products, setProducts] = useState<Product[]>([])
@@ -33,12 +52,16 @@ export default function Products() {
   const [typeFilter, setTypeFilter] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<Product | null>(null)
+  const [damageModalOpen, setDamageModalOpen] = useState(false)
+  const [damagingProduct, setDamagingProduct] = useState<Product | null>(null)
+  const [reloadError, setReloadError] = useState<string | null>(null)
 
   const canManage = user?.role !== 'SALESPERSON'
   const canDelete = user?.role === 'BUSINESS_ADMIN' || user?.role === 'SUPER_ADMIN'
 
   const load = async (p = page) => {
     setLoading(true)
+    setReloadError(null)
     try {
       const params = new URLSearchParams()
       if (search) params.set('search', search)
@@ -49,8 +72,12 @@ export default function Products() {
       const { data } = await api.get(`/products?${params}`)
       setProducts(data.data)
       setTotal(data.total ?? data.data.length)
-      await cacheProducts(data.data) // cache for offline
-    } catch { toast.error('Failed to load products') }
+      // Keep UI responsive even if offline cache write is slow/fails.
+      void cacheProducts(data.data).catch(() => undefined)
+    } catch {
+      setReloadError('Could not refresh products. Please try again.')
+      toast.error('Failed to load products')
+    }
     finally { setLoading(false) }
   }
 
@@ -83,9 +110,20 @@ export default function Products() {
           </p>
         </div>
         {canManage && (
-          <button className="btn-primary" onClick={() => { setEditing(null); setModalOpen(true) }}>
-            <Plus className="w-4 h-4" /> Add Product
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              className="btn-primary"
+              onClick={() => {
+                setDamagingProduct(null)
+                setDamageModalOpen(true)
+              }}
+            >
+              <AlertTriangle className="w-4 h-4" /> Register Damage
+            </button>
+            <button className="btn-primary" onClick={() => { setEditing(null); setModalOpen(true) }}>
+              <Plus className="w-4 h-4" /> Add Product
+            </button>
+          </div>
         )}
       </div>
 
@@ -115,6 +153,14 @@ export default function Products() {
 
       {/* Table */}
       <div className="card overflow-hidden">
+        {reloadError && (
+          <div className="px-4 py-3 border-b border-warning-200 bg-warning-50 text-warning-800 text-sm flex items-center justify-between">
+            <span>{reloadError}</span>
+            <button className="btn-secondary" onClick={() => { void load(page) }}>
+              Retry
+            </button>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -125,16 +171,17 @@ export default function Products() {
                 <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Cost</th>
                 <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Price</th>
                 <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Profit</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Expiry</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={8} className="text-center py-12 text-gray-400">Loading...</td></tr>
+                <tr><td colSpan={9} className="text-center py-12 text-gray-400">Loading...</td></tr>
               ) : products.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="text-center py-12">
+                  <td colSpan={9} className="text-center py-12">
                     <Package className="w-10 h-10 text-gray-300 mx-auto mb-2" />
                     <p className="text-gray-400 text-sm">No products found</p>
                   </td>
@@ -170,11 +217,25 @@ export default function Products() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
+                        {p.type === 'GOODS' && p.expiryDate ? (
+                          <ExpiryStatusBadge expiryDate={p.expiryDate} />
+                        ) : (
+                          <span className="text-xs text-gray-400">N/A</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
                         <span className={`badge ${statusColors[p.status]}`}>{p.status}</span>
                       </td>
                       <td className="px-4 py-3">
                         {canManage && (
                           <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => { setDamagingProduct(p); setDamageModalOpen(true) }}
+                              className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-warning-600"
+                              title="Register damage/expired"
+                            >
+                              <AlertTriangle className="w-4 h-4" />
+                            </button>
                             <button
                               onClick={() => { setEditing(p); setModalOpen(true) }}
                               className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-primary-600"
@@ -205,8 +266,21 @@ export default function Products() {
       {modalOpen && (
         <ProductModal
           product={editing}
-          onClose={() => setModalOpen(false)}
-          onSaved={() => { setModalOpen(false); load(page) }}
+          onClose={() => { setModalOpen(false); setEditing(null) }}
+          onSaved={() => {
+            setModalOpen(false)
+            setEditing(null)
+            void load(page)
+          }}
+        />
+      )}
+
+      {damageModalOpen && (
+        <DamageModal
+          product={damagingProduct}
+          products={products}
+          onClose={() => { setDamageModalOpen(false); setDamagingProduct(null) }}
+          onSaved={() => load(page)}
         />
       )}
     </div>

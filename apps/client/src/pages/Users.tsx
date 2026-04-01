@@ -23,9 +23,9 @@ function fullName(u: AuthUser) {
   return `${u.firstName} ${u.lastName}`.trim()
 }
 
-function isOnlineNow(lastLoginAt?: string): boolean {
-  if (!lastLoginAt) return false
-  const ts = new Date(lastLoginAt).getTime()
+function isCurrentlyOnline(lastSeenAt?: string): boolean {
+  if (!lastSeenAt) return false
+  const ts = new Date(lastSeenAt).getTime()
   if (Number.isNaN(ts)) return false
   return Date.now() - ts <= 2 * 60 * 1000
 }
@@ -108,7 +108,7 @@ export default function Users() {
 
   const filteredUsers = users.filter((u) => {
     if (salespersonsOnly && u.role !== 'SALESPERSON') return false
-    if (onlineOnly && !isOnlineNow(u.lastLoginAt)) return false
+    if (onlineOnly && !isCurrentlyOnline(u.lastSeenAt)) return false
     return true
   })
 
@@ -182,12 +182,12 @@ export default function Users() {
         <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white shadow-sm">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-gray-100 bg-gray-50">
-              {['Name', 'Email', 'Role', 'Status', 'Branch', 'Actions'].map((h) => <th key={h} className="px-4 py-3 text-left font-semibold text-gray-600">{h}</th>)}
+              {['Name', 'Email', 'Role', 'Presence', 'Last Seen', 'Branch', 'Actions'].map((h) => <th key={h} className="px-4 py-3 text-left font-semibold text-gray-600">{h}</th>)}
             </tr></thead>
             <tbody>
               {filteredUsers.map((u) => {
                 const sub = subsidiaries.find((s) => s.id === (u as unknown as { subsidiaryId?: string }).subsidiaryId)
-                const online = isOnlineNow(u.lastLoginAt)
+                const online = isCurrentlyOnline(u.lastSeenAt)
                 return (
                   <tr key={u.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3">
@@ -204,6 +204,9 @@ export default function Users() {
                         {online ? 'Online' : 'Offline'}
                       </span>
                     </td>
+                    <td className="px-4 py-3 text-gray-500 text-xs">
+                      {u.lastSeenAt ? new Date(u.lastSeenAt).toLocaleString() : 'Never'}
+                    </td>
                     <td className="px-4 py-3 text-gray-500">{sub?.name || '—'}</td>
                     <td className="px-4 py-3">
                       {canManage && u.id !== currentUser?.id && (
@@ -215,7 +218,7 @@ export default function Users() {
               })}
               {filteredUsers.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-gray-400">No users match selected filters.</td>
+                  <td colSpan={7} className="px-4 py-10 text-center text-gray-400">No users match selected filters.</td>
                 </tr>
               )}
             </tbody>

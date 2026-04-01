@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
       where,
       select: {
         id: true, email: true, firstName: true, lastName: true,
-        role: true, phone: true, isActive: true, lastLoginAt: true,
+        role: true, phone: true, isActive: true, lastLoginAt: true, lastSeenAt: true,
         createdAt: true, subsidiaryId: true, tenantId: true,
         subsidiary: { select: { id: true, name: true } },
       },

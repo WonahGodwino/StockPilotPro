@@ -10,6 +10,7 @@ const updatePlanSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
   price: z.number().positive().optional(),
+  priceCurrency: z.string().length(3).transform((v) => v.toUpperCase()).optional(),
   billingCycle: z.nativeEnum(BillingCycle).optional(),
   maxSubsidiaries: z.number().int().min(1).optional(),
   extraSubsidiaryPrice: z.number().min(0).optional(),
@@ -48,6 +49,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       name: data.name,
       description: data.description,
       price: data.price,
+      priceCurrency: data.priceCurrency,
       billingCycle: data.billingCycle,
       maxSubsidiaries: data.maxSubsidiaries,
       extraSubsidiaryPrice: data.extraSubsidiaryPrice,
@@ -72,6 +74,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       oldValues: {
         name: before.name,
         price: before.price,
+        priceCurrency: before.priceCurrency,
         billingCycle: before.billingCycle,
         maxSubsidiaries: before.maxSubsidiaries,
         isActive: before.isActive,
@@ -79,6 +82,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       newValues: {
         name: plan.name,
         price: plan.price,
+        priceCurrency: plan.priceCurrency,
         billingCycle: plan.billingCycle,
         maxSubsidiaries: plan.maxSubsidiaries,
         isActive: plan.isActive,
@@ -117,6 +121,7 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       oldValues: {
         name: plan.name,
         price: plan.price,
+        priceCurrency: plan.priceCurrency,
         billingCycle: plan.billingCycle,
         maxSubsidiaries: plan.maxSubsidiaries,
         isActive: plan.isActive,

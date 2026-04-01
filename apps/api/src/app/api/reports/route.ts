@@ -32,6 +32,47 @@ export async function OPTIONS() {
   return handleOptions()
 }
 
+async function getUsdToBaseRate(tenantId: string, baseCurrency: string): Promise<number> {
+  if (baseCurrency === 'USD') return 1
+
+  const direct = await prisma.currencyRate.findFirst({
+    where: { tenantId, fromCurrency: 'USD', toCurrency: baseCurrency },
+    orderBy: { date: 'desc' },
+    select: { rate: true },
+  })
+  if (direct?.rate) return Number(direct.rate)
+
+  const inverse = await prisma.currencyRate.findFirst({
+    where: { tenantId, fromCurrency: baseCurrency, toCurrency: 'USD' },
+    orderBy: { date: 'desc' },
+    select: { rate: true },
+  })
+  if (inverse?.rate) return 1 / Number(inverse.rate)
+
+  // Fallback to 1 when no FX snapshot is configured.
+  return 1
+}
+
+async function getTransactionToBaseRate(tenantId: string, baseCurrency: string, transactionCurrency: string): Promise<number> {
+  if (transactionCurrency === baseCurrency) return 1
+
+  const direct = await prisma.currencyRate.findFirst({
+    where: { tenantId, fromCurrency: baseCurrency, toCurrency: transactionCurrency },
+    orderBy: { date: 'desc' },
+    select: { rate: true },
+  })
+  if (direct?.rate) return Number(direct.rate)
+
+  const inverse = await prisma.currencyRate.findFirst({
+    where: { tenantId, fromCurrency: transactionCurrency, toCurrency: baseCurrency },
+    orderBy: { date: 'desc' },
+    select: { rate: true },
+  })
+  if (inverse?.rate) return 1 / Number(inverse.rate)
+
+  return 1
+}
+
 export async function GET(req: NextRequest) {
   try {
     const user = authenticate(req)
@@ -42,10 +83,17 @@ export async function GET(req: NextRequest) {
     const from = searchParams.get('from') || undefined
     const to = searchParams.get('to') || undefined
     const subsidiaryId = searchParams.get('subsidiaryId') || undefined
+    const requestedTenantId = searchParams.get('tenantId') || undefined
 
     const tenantId = isSuperAdmin(user)
-      ? searchParams.get('tenantId') || undefined
+      ? requestedTenantId || user.tenantId!
       : user.tenantId!
+
+    if (!tenantId) {
+      return apiError('No tenant context for this account. Provide tenantId.', 400)
+    }
+
+    const isPlatformReport = isSuperAdmin(user) && tenantId === user.tenantId
 
     // Fetch tenant base currency
     const tenant = tenantId
@@ -125,7 +173,43 @@ export async function GET(req: NextRequest) {
       0
     )
 
-    const grossProfit = totalSales - cogs
+    let subscriptionRevenueNative = 0
+    let subscriptionRevenue = 0
+    let subscriptionBillingCurrency: string | undefined
+
+    if (isPlatformReport) {
+      const subscriptionWhere = {
+        status: 'ACTIVE' as const,
+        tenantId: { not: tenantId },
+        ...(dateRange ? { startDate: dateRange } : {}),
+      }
+
+      const subscriptions = await prisma.subscription.findMany({
+        where: subscriptionWhere,
+        select: { amount: true, billingCurrency: true },
+      })
+
+      const distinctBillingCurrencies = Array.from(new Set(subscriptions.map((s) => s.billingCurrency || 'USD')))
+      subscriptionBillingCurrency = distinctBillingCurrencies.length === 1 ? distinctBillingCurrencies[0] : 'MIXED'
+
+      if (distinctBillingCurrencies.length === 1) {
+        subscriptionRevenueNative = subscriptions.reduce((sum, s) => sum + Number(s.amount), 0)
+      }
+
+      const convertedSubscriptions = await Promise.all(
+        subscriptions.map(async (subscription) => {
+          const amount = Number(subscription.amount)
+          const billingCurrency = subscription.billingCurrency || 'USD'
+          const rate = await getTransactionToBaseRate(tenantId!, baseCurrency, billingCurrency)
+          return billingCurrency === baseCurrency ? amount : amount / rate
+        })
+      )
+      subscriptionRevenue = convertedSubscriptions.reduce((sum, amount) => sum + amount, 0)
+    }
+
+    const operatingRevenue = totalSales
+    const totalRevenue = operatingRevenue + subscriptionRevenue
+    const grossProfit = totalRevenue - cogs
     const netProfit = grossProfit - totalExpenses
 
     // Top products by converted revenue
@@ -166,7 +250,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       data: {
         summary: {
-          totalSales,
+          totalSales: totalRevenue,
+          operatingRevenue,
+          subscriptionRevenue,
+          subscriptionRevenueNative,
+          subscriptionBillingCurrency,
           costOfGoods: cogs,
           cogs,
           grossProfit,
@@ -182,7 +270,11 @@ export async function GET(req: NextRequest) {
           total,
         })),
         // Legacy fields for backward compatibility
-        totalSales,
+        totalSales: totalRevenue,
+        operatingRevenue,
+        subscriptionRevenue,
+        subscriptionRevenueNative,
+        subscriptionBillingCurrency,
         costOfGoods: cogs,
         grossProfit,
         totalExpenses,
