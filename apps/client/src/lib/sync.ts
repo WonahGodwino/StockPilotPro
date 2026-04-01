@@ -31,7 +31,13 @@ let syncStatus: SyncStatus = {
 }
 let syncHistory: SyncHistoryEntry[] = []
 
+function shouldPersistSyncHistory(entry: SyncHistoryEntry) {
+  // Ignore empty runs to keep history focused on meaningful sync activity.
+  return entry.pendingBefore > 0 || entry.syncedCount > 0 || entry.failedCount > 0 || entry.status === 'failed'
+}
+
 function pushSyncHistory(entry: SyncHistoryEntry) {
+  if (!shouldPersistSyncHistory(entry)) return
   syncHistory = [entry, ...syncHistory].slice(0, 20)
   void addSyncRun({
     at: new Date(entry.at).toISOString(),
@@ -49,14 +55,16 @@ async function hydrateSyncHistory() {
   historyHydrated = true
   try {
     const rows = await getRecentSyncRuns(20)
-    syncHistory = rows.map((r) => ({
-      at: new Date(r.at).getTime(),
-      syncedCount: r.syncedCount,
-      failedCount: r.failedCount,
-      pendingBefore: r.pendingBefore,
-      status: r.status,
-      error: r.error,
-    }))
+    syncHistory = rows
+      .map((r) => ({
+        at: new Date(r.at).getTime(),
+        syncedCount: r.syncedCount,
+        failedCount: r.failedCount,
+        pendingBefore: r.pendingBefore,
+        status: r.status,
+        error: r.error,
+      }))
+      .filter((entry) => shouldPersistSyncHistory(entry))
     emitSyncStatus()
   } catch {
     // Ignore hydration errors; sync still works without persisted history.
