@@ -10,6 +10,7 @@ const createPlanSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   price: z.number().positive(),
+  priceCurrency: z.string().length(3).transform((v) => v.toUpperCase()).default('USD'),
   billingCycle: z.nativeEnum(BillingCycle).default(BillingCycle.MONTHLY),
   maxSubsidiaries: z.number().int().min(1),
   extraSubsidiaryPrice: z.number().min(0).default(0),
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest) {
       name: data.name,
       description: data.description,
       price: data.price,
+      priceCurrency: data.priceCurrency,
       billingCycle: data.billingCycle,
       maxSubsidiaries: data.maxSubsidiaries,
       extraSubsidiaryPrice: data.extraSubsidiaryPrice,
@@ -65,6 +67,7 @@ export async function POST(req: NextRequest) {
       newValues: {
         name: plan.name,
         price: plan.price,
+        priceCurrency: plan.priceCurrency,
         maxSubsidiaries: plan.maxSubsidiaries,
         isActive: plan.isActive,
       },

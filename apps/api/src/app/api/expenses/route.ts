@@ -13,6 +13,7 @@ const createSchema = z.object({
   date: z.string().datetime(),
   currency: z.string().length(3).transform((v) => v.toUpperCase()).default('USD'),
   fxRate: z.number().positive().default(1),
+  syncRef: z.string().min(6).max(120).optional(),
   notes: z.string().optional(),
   subsidiaryId: z.string(),
 })
@@ -33,10 +34,18 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '20')
     const from = searchParams.get('from')
     const to = searchParams.get('to')
+    const requestedTenantId = searchParams.get('tenantId') || undefined
+    const tenantId = isSuperAdmin(user)
+      ? requestedTenantId || user.tenantId!
+      : user.tenantId!
+
+    if (!tenantId) {
+      return apiError('No tenant context for this account. Provide tenantId.', 400)
+    }
 
     const where = {
       archived: false,
-      tenantId: isSuperAdmin(user) ? undefined : user.tenantId!,
+      tenantId,
       ...(subsidiaryId
         ? { subsidiaryId }
         : user.role === 'SALESPERSON' && user.subsidiaryId
@@ -80,12 +89,24 @@ export async function POST(req: NextRequest) {
     const user = authenticate(req)
     const body = await req.json()
     const data = createSchema.parse(body)
+    const syncRef = data.syncRef?.trim() || undefined
 
     assertSubsidiaryAccess(user, data.subsidiaryId)
+
+    // Idempotency guard for offline replay: if already synced, return existing expense.
+    if (syncRef) {
+      const existing = await prisma.expense.findFirst({
+        where: { tenantId: user.tenantId!, syncRef },
+      })
+      if (existing) {
+        return NextResponse.json({ data: existing })
+      }
+    }
 
     const expense = await prisma.expense.create({
       data: {
         ...data,
+        syncRef,
         date: new Date(data.date),
         tenantId: user.tenantId!,
         userId: user.userId,
@@ -106,6 +127,7 @@ export async function POST(req: NextRequest) {
         date: expense.date,
         currency: expense.currency,
         fxRate: expense.fxRate,
+        syncRef: expense.syncRef,
         subsidiaryId: expense.subsidiaryId,
       },
       req,

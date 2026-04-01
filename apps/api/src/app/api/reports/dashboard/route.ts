@@ -12,9 +12,14 @@ export async function GET(req: NextRequest) {
     const user = authenticate(req)
     if (!hasPermission(user, 'view:analytics')) return apiError('Forbidden', 403)
 
+    const requestedTenantId = new URL(req.url).searchParams.get('tenantId') || undefined
     const tenantId = isSuperAdmin(user)
-      ? new URL(req.url).searchParams.get('tenantId') || undefined
+      ? requestedTenantId || user.tenantId!
       : user.tenantId!
+
+    if (!tenantId) {
+      return apiError('No tenant context for this account. Provide tenantId.', 400)
+    }
 
     const subsidiaryId = new URL(req.url).searchParams.get('subsidiaryId') || undefined
 
@@ -59,6 +64,7 @@ export async function GET(req: NextRequest) {
         prisma.sale.aggregate({
           where: { ...baseWhere, createdAt: { gte: monthStart } },
           _sum: { totalAmount: true },
+          _count: { id: true },
         }),
         // This month's expenses
         prisma.expense.aggregate({
@@ -96,11 +102,14 @@ export async function GET(req: NextRequest) {
     // Map trend aggregates back to { date, revenue } ΓÇö zero-filled for days with no sales
     const salesTrend = trendDays.map(({ date }, i) => ({
       date,
+      total: Number(trendAggregates[i]._sum.totalAmount || 0),
       revenue: Number(trendAggregates[i]._sum.totalAmount || 0),
     }))
 
     return NextResponse.json({
       data: {
+        salesThisMonth: Number(monthSales._sum.totalAmount || 0),
+        salesCount: monthSales._count.id,
         todaySalesCount: todaySales._count.id,
         todaySalesTotal: Number(todaySales._sum.totalAmount || 0),
         revenueThisMonth: Number(monthSales._sum.totalAmount || 0),

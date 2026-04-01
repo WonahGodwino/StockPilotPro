@@ -10,6 +10,12 @@ export interface AuthUser {
   role: UserRole
   tenantId: string | null
   subsidiaryId: string | null
+  isActive?: boolean
+  lastLoginAt?: string
+  lastSeenAt?: string
+  createdAt?: string
+  phone?: string
+  subsidiary?: { id: string; name: string }
   tenant: { id: string; name: string; slug: string; baseCurrency: string } | null
 }
 
@@ -31,10 +37,12 @@ export interface Product {
   sellingPrice: number
   barcode?: string
   lowStockThreshold: number
+  expiryDate?: string
   status: ProductStatus
   createdAt: string
   updatedAt: string
   createdBy?: string
+  subsidiary?: { id: string; name: string }
 }
 
 // ── Sales ─────────────────────────────────────────────────────────────────────
@@ -87,6 +95,7 @@ export interface SaleCheckoutPayload {
   amountPaid: number
   currency: string
   fxRate: number
+  syncRef?: string
   notes?: string
   items: {
     productId: string
@@ -113,6 +122,38 @@ export interface Expense {
   notes?: string
   createdAt: string
   user?: { firstName: string; lastName: string }
+}
+
+export interface CurrencyRate {
+  id: string
+  tenantId: string
+  fromCurrency: string
+  toCurrency: string
+  rate: number
+  date: string
+  createdAt?: string
+  createdBy?: string
+}
+
+// ── Damage Records ───────────────────────────────────────────────────────────
+
+export interface DamageRecord {
+  id: string
+  tenantId: string
+  subsidiaryId: string
+  productId: string
+  userId: string
+  quantity: number
+  unit: string
+  reason: 'EXPIRED' | 'DAMAGED' | 'LOST' | 'RAW_MATERIAL_DAMAGE' | 'OTHER'
+  damageStage: 'FINISHED_GOODS' | 'RAW_MATERIAL'
+  description?: string
+  cost: number
+  date: string
+  createdAt: string
+  updatedAt: string
+  user?: { firstName: string; lastName: string; email: string }
+  product?: { name: string }
 }
 
 // ── Subsidiaries ──────────────────────────────────────────────────────────────
@@ -151,6 +192,8 @@ export interface Plan {
   name: string
   description?: string
   price: number
+  priceCurrency: string
+  billingCycle: 'MONTHLY' | 'YEARLY'
   maxSubsidiaries: number
   extraSubsidiaryPrice: number
   features: Record<string, unknown>
@@ -167,6 +210,7 @@ export interface Subscription {
   startDate: string
   expiryDate: string
   amount: number
+  billingCurrency?: string
   plan?: Plan
 }
 
@@ -188,6 +232,10 @@ export interface Notification {
 
 export interface ReportSummary {
   totalSales: number
+  operatingRevenue?: number
+  subscriptionRevenue?: number
+  subscriptionRevenueNative?: number
+  subscriptionBillingCurrency?: string
   totalExpenses: number
   cogs: number
   grossProfit: number

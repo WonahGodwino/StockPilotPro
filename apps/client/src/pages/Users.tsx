@@ -23,6 +23,13 @@ function fullName(u: AuthUser) {
   return `${u.firstName} ${u.lastName}`.trim()
 }
 
+function isCurrentlyOnline(lastSeenAt?: string): boolean {
+  if (!lastSeenAt) return false
+  const ts = new Date(lastSeenAt).getTime()
+  if (Number.isNaN(ts)) return false
+  return Date.now() - ts <= 2 * 60 * 1000
+}
+
 function SsoPanel({ tenantId }: { tenantId: string }) {
   const [sso, setSso] = useState<SsoSettings | null>(null)
   const [saving, setSaving] = useState(false)
@@ -148,11 +155,12 @@ export default function Users() {
         <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white shadow-sm">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-gray-100 bg-gray-50">
-              {['Name', 'Email', 'Role', 'Branch', 'Actions'].map((h) => <th key={h} className="px-4 py-3 text-left font-semibold text-gray-600">{h}</th>)}
+              {['Name', 'Email', 'Role', 'Presence', 'Last Seen', 'Branch', 'Actions'].map((h) => <th key={h} className="px-4 py-3 text-left font-semibold text-gray-600">{h}</th>)}
             </tr></thead>
             <tbody>
               {users.map((u) => {
                 const sub = subsidiaries.find((s) => s.id === (u as unknown as { subsidiaryId?: string }).subsidiaryId)
+                const online = isCurrentlyOnline(u.lastSeenAt)
                 return (
                   <tr key={u.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3">
@@ -164,6 +172,14 @@ export default function Users() {
                     </td>
                     <td className="px-4 py-3 text-gray-500">{u.email}</td>
                     <td className="px-4 py-3"><span className={`badge ${ROLE_COLORS[u.role] || 'badge-info'}`}><Shield className="w-3 h-3" />{ROLE_LABELS[u.role] || u.role}</span></td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${online ? 'bg-success-50 text-success-700' : 'bg-gray-100 text-gray-600'}`}>
+                        {online ? 'Online' : 'Offline'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-500 text-xs">
+                      {u.lastSeenAt ? new Date(u.lastSeenAt).toLocaleString() : 'Never'}
+                    </td>
                     <td className="px-4 py-3 text-gray-500">{sub?.name || '—'}</td>
                     <td className="px-4 py-3">
                       {canManage && u.id !== currentUser?.id && (

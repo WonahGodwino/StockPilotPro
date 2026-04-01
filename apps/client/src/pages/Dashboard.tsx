@@ -4,11 +4,19 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, BarChart, Bar, Legend,
 } from 'recharts'
-import { TrendingUp, TrendingDown, Package, ShoppingCart, Building2, Bell } from 'lucide-react'
+import { TrendingUp, TrendingDown, Package, ShoppingCart, Building2, Bell, AlertTriangle, AlertCircle } from 'lucide-react'
 import api from '@/lib/api'
-import type { DashboardData, ReportSummary } from '@/types'
+import type { DashboardData, ReportSummary, Product } from '@/types'
 import { useAuthStore } from '@/store/auth.store'
 import { makeCurrencyFormatter } from '@/lib/currency'
+import SuperAdminDashboard from '@/components/layout/SuperAdminDashboard'
+
+interface ExpiringProductsData {
+  expiring: Product[]
+  expired: Product[]
+  expiringCount: number
+  expiredCount: number
+}
 
 function StatCard({
   label, value, icon: Icon, color, subtext, subtextHref, trend,
@@ -39,6 +47,24 @@ function StatCard({
       )}
     </div>
   )
+}
+
+function ExpiryStatusBadge({ expiryDate }: { expiryDate?: string }) {
+  if (!expiryDate) return null
+  
+  const today = new Date()
+  const expiry = new Date(expiryDate)
+  const daysUntilExpiry = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+  
+  if (daysUntilExpiry < 0) {
+    return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-danger-100 text-danger-700">Expired</span>
+  }
+  
+  if (daysUntilExpiry <= 7) {
+    return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-warning-100 text-warning-700">Expires in {daysUntilExpiry} day{daysUntilExpiry !== 1 ? 's' : ''}</span>
+  }
+  
+  return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">Expires in {daysUntilExpiry} day{daysUntilExpiry !== 1 ? 's' : ''}</span>
 }
 
 function DashboardSkeleton() {
@@ -84,20 +110,29 @@ function DashboardSkeleton() {
 
 export default function Dashboard() {
   const user = useAuthStore((s) => s.user)
+
+  // Render SUPER_ADMIN dashboard for platform owner
+  if (user?.role === 'SUPER_ADMIN') {
+    return <SuperAdminDashboard />
+  }
+
   const baseCurrency = user?.tenant?.baseCurrency || 'USD'
   const fmt = makeCurrencyFormatter(baseCurrency, { minimumFractionDigits: 0 })
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [report, setReport] = useState<ReportSummary | null>(null)
+  const [expiringProducts, setExpiringProducts] = useState<ExpiringProductsData | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     Promise.all([
       api.get('/reports/dashboard'),
       api.get('/reports?period=monthly'),
+      api.get('/products/expiring?daysAhead=30'),
     ])
-      .then(([d, r]) => {
+      .then(([d, r, e]) => {
         setDashboard(d.data.data)
         setReport(r.data.data.summary)
+        setExpiringProducts(e.data.data)
       })
       .catch(console.error)
       .finally(() => setLoading(false))
@@ -148,7 +183,64 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* P&L Summary (Admin only) */}
+      {/* Inventory Alerts */}
+      {expiringProducts && (expiringProducts.expiredCount > 0 || expiringProducts.expiringCount > 0) && (
+        <div className="space-y-3">
+          {/* Expired Products Alert */}
+          {expiringProducts.expiredCount > 0 && (
+            <div className="card p-4 border-l-4 border-danger-500 bg-danger-50">
+              <div className="flex items-start justify-between">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-danger-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <h3 className="font-semibold text-danger-900">Expired Products</h3>
+                    <p className="text-sm text-danger-700 mt-1">{expiringProducts.expiredCount} product{expiringProducts.expiredCount !== 1 ? 's' : ''} have expired. Please remove or mark them as damaged.</p>
+                    {expiringProducts.expired.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {expiringProducts.expired.slice(0, 3).map((p) => (
+                          <p key={p.id} className="text-xs text-danger-700">• {p.name} ({p.subsidiary?.name})</p>
+                        ))}
+                        {expiringProducts.expired.length > 3 && (
+                          <p className="text-xs text-danger-700 font-medium">+ {expiringProducts.expired.length - 3} more...</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <Link to="/products?filter=expired" className="text-xs font-medium text-danger-600 hover:underline flex-shrink-0">View</Link>
+              </div>
+            </div>
+          )}
+
+          {/* Expiring Soon Alert */}
+          {expiringProducts.expiringCount > 0 && (
+            <div className="card p-4 border-l-4 border-warning-500 bg-warning-50">
+              <div className="flex items-start justify-between">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-warning-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <h3 className="font-semibold text-warning-900">Expiring Soon</h3>
+                    <p className="text-sm text-warning-700 mt-1">{expiringProducts.expiringCount} product{expiringProducts.expiringCount !== 1 ? 's' : ''} expiring within 30 days.</p>
+                    {expiringProducts.expiring.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {expiringProducts.expiring.slice(0, 3).map((p) => (
+                          <p key={p.id} className="text-xs text-warning-700">• {p.name} ({p.subsidiary?.name}) – {new Date(p.expiryDate!).toLocaleDateString()}</p>
+                        ))}
+                        {expiringProducts.expiring.length > 3 && (
+                          <p className="text-xs text-warning-700 font-medium">+ {expiringProducts.expiring.length - 3} more...</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <Link to="/products?filter=expiring" className="text-xs font-medium text-warning-600 hover:underline flex-shrink-0">View</Link>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+
       {canViewPL && report && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="card p-5">

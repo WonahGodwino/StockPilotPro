@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { Search, Barcode, Trash2, Minus, Plus, ShoppingCart, WifiOff, History, ShoppingBag } from 'lucide-react'
+import { Search, Barcode, Trash2, Minus, Plus, ShoppingCart, WifiOff, History, ShoppingBag, AlertTriangle } from 'lucide-react'
 import { useCartStore } from '@/store/cart.store'
 import type { Product, Sale, SaleCheckoutPayload } from '@/types'
 import api from '@/lib/api'
@@ -8,7 +8,7 @@ import { getProductByBarcode, searchCachedProducts, addPendingSale } from '@/lib
 import { useAuthStore } from '@/store/auth.store'
 import Receipt from '@/components/sales/Receipt'
 import Pagination from '@/components/Pagination'
-import { makeCurrencyFormatter, getCurrencySymbol } from '@/lib/currency'
+import { makeCurrencyFormatter, getCurrencySymbol, SUPPORTED_CURRENCIES } from '@/lib/currency'
 
 let _audioCtx: AudioContext | null = null
 function getAudioContext(): AudioContext | null {
@@ -48,13 +48,16 @@ export default function SalesPage() {
   const user = useAuthStore((s) => s.user)
   const baseCurrency = user?.tenant?.baseCurrency || 'USD'
   const fmt = makeCurrencyFormatter(baseCurrency)
-  const currencySymbol = getCurrencySymbol(baseCurrency)
   const [tab, setTab] = useState<'pos' | 'history'>('pos')
   const [products, setProducts] = useState<Product[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'TRANSFER' | 'POS'>('CASH')
   const [discount, setDiscount] = useState(0)
   const [amountPaid, setAmountPaid] = useState(0)
+  const [saleCurrency, setSaleCurrency] = useState(baseCurrency)
+  const [saleFxRate, setSaleFxRate] = useState(1)
+  const [rateLoading, setRateLoading] = useState(false)
+  const [rateError, setRateError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [completedSale, setCompletedSale] = useState<{ id: string; receiptNumber: string; offline?: boolean } | null>(null)
   const [scanState, setScanState] = useState<'idle' | 'success' | 'error'>('idle')
@@ -112,6 +115,38 @@ export default function SalesPage() {
     return () => clearTimeout(t)
   }, [searchQuery, loadProducts])
 
+  const convertBaseToSaleCurrency = useCallback((amount: number) => {
+    return saleCurrency === baseCurrency ? amount : amount * saleFxRate
+  }, [baseCurrency, saleCurrency, saleFxRate])
+
+  const convertSaleToBaseCurrency = useCallback((amount: number) => {
+    return saleCurrency === baseCurrency ? amount : amount / saleFxRate
+  }, [baseCurrency, saleCurrency, saleFxRate])
+
+  const loadSavedRate = useCallback(async (currency: string) => {
+    if (currency === baseCurrency) {
+      setSaleFxRate(1)
+      setRateError(null)
+      return
+    }
+
+    setRateLoading(true)
+    setRateError(null)
+    try {
+      const { data } = await api.get(`/currency-rates?fromCurrency=${baseCurrency}&toCurrency=${currency}`)
+      setSaleFxRate(Number(data.data.rate))
+    } catch (err: unknown) {
+      setSaleFxRate(1)
+      setRateError((err as { response?: { data?: { error?: string } } })?.response?.data?.error || `No saved exchange rate found for ${currency}`)
+    } finally {
+      setRateLoading(false)
+    }
+  }, [baseCurrency])
+
+  useEffect(() => {
+    void loadSavedRate(saleCurrency)
+  }, [loadSavedRate, saleCurrency])
+
   // Global barcode scanner listener
   useEffect(() => {
     const handleKey = async (e: KeyboardEvent) => {
@@ -161,11 +196,13 @@ export default function SalesPage() {
   }, [cart])
 
   const total = cart.items.reduce((s, i) => s + i.quantity * i.unitPrice - i.discount, 0) - discount
-  const change = amountPaid - total
+  const totalInSaleCurrency = Math.max(0, convertBaseToSaleCurrency(total))
+  const change = amountPaid - totalInSaleCurrency
 
   const handleCheckout = async () => {
     if (cart.items.length === 0) { toast.error('Cart is empty'); return }
-    if (amountPaid < total) { toast.error('Amount tendered is less than total'); return }
+    if (amountPaid < totalInSaleCurrency) { toast.error('Amount tendered is less than total'); return }
+    if (saleCurrency !== baseCurrency && rateError) { toast.error('No saved exchange rate configured for this sale currency'); return }
 
     setLoading(true)
     try {
@@ -175,16 +212,16 @@ export default function SalesPage() {
       const payload: SaleCheckoutPayload = {
         subsidiaryId,
         paymentMethod,
-        discount,
+        discount: Math.max(0, convertBaseToSaleCurrency(discount)),
         amountPaid,
-        currency: baseCurrency,
-        fxRate: 1,
+        currency: saleCurrency,
+        fxRate: saleFxRate,
         items: cart.items.map((i) => ({
           productId: i.product.id,
           quantity: i.quantity,
-          unitPrice: i.unitPrice,
-          costPrice: Number(i.product.costPrice),
-          discount: i.discount,
+          unitPrice: convertBaseToSaleCurrency(i.unitPrice),
+          costPrice: convertBaseToSaleCurrency(Number(i.product.costPrice)),
+          discount: convertBaseToSaleCurrency(i.discount),
         })),
       }
 
@@ -338,7 +375,11 @@ export default function SalesPage() {
                 >
                   <p className="font-medium text-sm text-gray-900 truncate">{p.name}</p>
                   <p className="text-xs text-gray-500 mt-0.5">{p.type} · {p.unit}</p>
-                  <p className="text-primary-600 font-semibold mt-2">{fmt(Number(p.sellingPrice))}</p>
+                  <p className="text-primary-600 font-semibold mt-2">
+                    {saleCurrency === baseCurrency
+                      ? fmt(Number(p.sellingPrice))
+                      : `${getCurrencySymbol(saleCurrency)}${convertBaseToSaleCurrency(Number(p.sellingPrice)).toFixed(2)}`}
+                  </p>
                   {p.type === 'GOODS' && (
                     <p className={`text-xs mt-1 ${p.quantity <= p.lowStockThreshold ? 'text-danger-500' : 'text-gray-400'}`}>
                       Stock: {p.quantity}
@@ -424,7 +465,9 @@ export default function SalesPage() {
                       </button>
                     </div>
                     <span className="text-sm font-semibold text-gray-900">
-                      {fmt(item.quantity * item.unitPrice - item.discount)}
+                      {saleCurrency === baseCurrency
+                        ? fmt(item.quantity * item.unitPrice - item.discount)
+                        : `${getCurrencySymbol(saleCurrency)}${convertBaseToSaleCurrency(item.quantity * item.unitPrice - item.discount).toFixed(2)}`}
                     </span>
                   </div>
                   {/* Per-item discount */}
@@ -434,8 +477,8 @@ export default function SalesPage() {
                       className="input text-xs py-0.5 flex-1"
                       type="number" min="0" step="0.01"
                       placeholder="0.00"
-                      value={item.discount || ''}
-                      onChange={(e) => cart.updateDiscount(item.product.id, parseFloat(e.target.value) || 0)}
+                      value={item.discount ? convertBaseToSaleCurrency(item.discount).toFixed(2) : ''}
+                      onChange={(e) => cart.updateDiscount(item.product.id, convertSaleToBaseCurrency(parseFloat(e.target.value) || 0))}
                     />
                   </div>
                 </div>
@@ -447,20 +490,48 @@ export default function SalesPage() {
           <div className="p-4 border-t border-gray-100 space-y-3">
             <div className="flex items-center justify-between text-sm">
               <span className="text-gray-500">Subtotal</span>
-              <span>{fmt(cart.items.reduce((s, i) => s + i.quantity * i.unitPrice, 0))}</span>
+              <span>
+                {saleCurrency === baseCurrency
+                  ? fmt(cart.items.reduce((s, i) => s + i.quantity * i.unitPrice, 0))
+                  : `${getCurrencySymbol(saleCurrency)}${convertBaseToSaleCurrency(cart.items.reduce((s, i) => s + i.quantity * i.unitPrice, 0)).toFixed(2)}`}
+              </span>
             </div>
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                className="input text-sm"
+                value={saleCurrency}
+                onChange={(e) => setSaleCurrency(e.target.value)}
+              >
+                {SUPPORTED_CURRENCIES.map((currency) => (
+                  <option key={currency.code} value={currency.code}>{currency.code} — {currency.name}</option>
+                ))}
+              </select>
+              <div className="input flex items-center text-sm text-gray-600 bg-gray-50">
+                {saleCurrency === baseCurrency ? 'Base currency sale' : rateLoading ? 'Loading saved rate...' : `Saved rate: ${saleFxRate.toFixed(4)}`}
+              </div>
+            </div>
+            {saleCurrency !== baseCurrency && rateError && (
+              <div className="flex items-start gap-2 rounded-lg bg-warning-50 px-3 py-2 text-xs text-warning-700">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                <span>{rateError}. Go to Settings to save this exchange rate before checkout.</span>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-500 w-20">Discount</span>
               <input
                 className="input text-sm py-1 flex-1"
                 type="number" min="0" step="0.01"
-                value={discount}
-                onChange={(e) => setDiscount(parseFloat(e.target.value) || 0)}
+                value={discount ? convertBaseToSaleCurrency(discount).toFixed(2) : ''}
+                onChange={(e) => setDiscount(convertSaleToBaseCurrency(parseFloat(e.target.value) || 0))}
               />
             </div>
             <div className="flex items-center justify-between text-base font-bold border-t pt-2">
               <span>Total</span>
-              <span className="text-primary-600">{fmt(Math.max(0, total))}</span>
+              <span className="text-primary-600">
+                {saleCurrency === baseCurrency
+                  ? fmt(totalInSaleCurrency)
+                  : `${getCurrencySymbol(saleCurrency)}${totalInSaleCurrency.toFixed(2)}`}
+              </span>
             </div>
             <select
               className="input text-sm"
@@ -474,25 +545,25 @@ export default function SalesPage() {
             <input
               className="input text-sm"
               type="number" min="0" step="0.01"
-              placeholder={`Amount Tendered (${currencySymbol})`}
+              placeholder={`Amount Tendered (${getCurrencySymbol(saleCurrency)})`}
               value={amountPaid || ''}
               onChange={(e) => setAmountPaid(parseFloat(e.target.value) || 0)}
             />
-            {amountPaid > 0 && amountPaid >= total && (
+            {amountPaid > 0 && amountPaid >= totalInSaleCurrency && (
               <div className="flex items-center justify-between text-sm font-medium text-success-600 bg-success-50 rounded-lg px-3 py-2">
                 <span>Change</span>
-                <span>{fmt(change)}</span>
+                <span>{saleCurrency === baseCurrency ? fmt(change) : `${getCurrencySymbol(saleCurrency)}${change.toFixed(2)}`}</span>
               </div>
             )}
-            {amountPaid > 0 && amountPaid < total && (
+            {amountPaid > 0 && amountPaid < totalInSaleCurrency && (
               <div className="flex items-center justify-between text-sm font-medium text-danger-600 bg-danger-50 rounded-lg px-3 py-2">
                 <span>Short by</span>
-                <span>{fmt(total - amountPaid)}</span>
+                <span>{saleCurrency === baseCurrency ? fmt(totalInSaleCurrency - amountPaid) : `${getCurrencySymbol(saleCurrency)}${(totalInSaleCurrency - amountPaid).toFixed(2)}`}</span>
               </div>
             )}
             <button
               onClick={handleCheckout}
-              disabled={loading || cart.items.length === 0}
+              disabled={loading || cart.items.length === 0 || (saleCurrency !== baseCurrency && !!rateError)}
               className="btn-primary w-full py-2.5"
             >
               {loading ? 'Processing...' : 'Checkout'}

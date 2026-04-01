@@ -6,12 +6,12 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev --workspace=apps/api\" \"npm run dev --workspace=apps/client\"",
-    "build": "npm run build --workspace=apps/api && npm run build --workspace=apps/client",
-    "lint": "npm run lint --workspace=apps/api && npm run lint --workspace=apps/client",
-    "db:migrate": "npm run db:migrate --workspace=apps/api",
-    "db:seed": "npm run db:seed --workspace=apps/api",
-    "db:studio": "npm run db:studio --workspace=apps/api"
+    "dev": "concurrently \"npm run dev -w stockpilot-api\" \"npm run dev -w stockpilot-client\"",
+    "build": "npm run build -w stockpilot-api && npm run build -w stockpilot-client",
+    "lint": "npm run lint -w stockpilot-api && npm run lint -w stockpilot-client",
+    "db:migrate": "npm run db:migrate -w stockpilot-api",
+    "db:seed": "npm run db:seed -w stockpilot-api",
+    "db:studio": "npm run db:studio -w stockpilot-api"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

@@ -8,6 +8,7 @@ import { Globe, Loader2 } from 'lucide-react'
 /**
  * CurrencySettings — lets a BUSINESS_ADMIN configure the tenant's base currency.
  * All reports, dashboards, and sales will display in this currency.
+ * SUPER_ADMIN can also update their assigned tenant's currency.
  */
 export default function CurrencySettings() {
   const user = useAuthStore((s) => s.user)
@@ -21,12 +22,32 @@ export default function CurrencySettings() {
 
   if (!user || user.role === 'SALESPERSON') return null
 
+  // Avoid a blank settings panel when tenant context is missing.
+  if (!user.tenant || !user.tenantId) {
+    return (
+      <div className="card p-6">
+        <div className="flex items-start gap-3">
+          <div className="p-2 bg-amber-50 rounded-lg">
+            <Globe className="w-5 h-5 text-amber-600" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-gray-900">Base Currency</h3>
+            <p className="text-sm text-gray-600 mt-1">
+              Currency settings are unavailable because this account is not linked to a company profile.
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const handleSave = async () => {
     if (selected === currentCurrency) return
     setSaving(true)
     try {
       const tenantId = user.tenantId
-      if (!tenantId) throw new Error('No tenant')
+      if (!tenantId) throw new Error('Unable to determine tenant ID')
+      
       await api.patch(`/tenants/${tenantId}`, { baseCurrency: selected })
       // Update local auth state so the new currency is reflected immediately
       if (user.tenant) {
@@ -38,10 +59,9 @@ export default function CurrencySettings() {
       }
       toast.success(`Base currency updated to ${selected}`)
     } catch (err: unknown) {
-      toast.error(
-        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
-          'Failed to update currency'
-      )
+      const errorMsg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
+      toast.error(errorMsg || 'Failed to update currency')
+      console.error('Currency update failed:', err)
     } finally {
       setSaving(false)
     }
@@ -56,7 +76,7 @@ export default function CurrencySettings() {
         <div>
           <h3 className="font-semibold text-gray-900">Base Currency</h3>
           <p className="text-xs text-gray-500">
-            All reports and dashboards will display amounts in this currency.
+            Reports and dashboards display in this currency. Subscription billing remains in USD.
           </p>
         </div>
       </div>
