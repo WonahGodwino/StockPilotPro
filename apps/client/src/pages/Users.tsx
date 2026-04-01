@@ -100,9 +100,17 @@ export default function Users() {
   const [modal, setModal] = useState<{ open: boolean; user: AuthUser | null }>({ open: false, user: null })
   const [form, setForm] = useState<UserForm>(emptyForm)
   const [saving, setSaving] = useState(false)
+  const [salespersonsOnly, setSalespersonsOnly] = useState(false)
+  const [onlineOnly, setOnlineOnly] = useState(false)
 
   const canManage = currentUser?.role === 'BUSINESS_ADMIN' || currentUser?.role === 'SUPER_ADMIN'
   const isBusinessAdmin = currentUser?.role === 'BUSINESS_ADMIN'
+
+  const filteredUsers = users.filter((u) => {
+    if (salespersonsOnly && u.role !== 'SALESPERSON') return false
+    if (onlineOnly && !isCurrentlyOnline(u.lastSeenAt)) return false
+    return true
+  })
 
   const load = async () => {
     setLoading(true)
@@ -140,8 +148,27 @@ export default function Users() {
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold text-gray-900">Users</h1><p className="text-sm text-gray-500 mt-0.5">{users.length} team member{users.length !== 1 ? 's' : ''}</p></div>
+        <div><h1 className="text-2xl font-bold text-gray-900">Users</h1><p className="text-sm text-gray-500 mt-0.5">{filteredUsers.length} of {users.length} team member{users.length !== 1 ? 's' : ''}</p></div>
         {canManage && <button onClick={openCreate} className="btn-primary"><Plus className="w-4 h-4" /> Add User</button>}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => setSalespersonsOnly((v) => !v)}
+          className={`badge px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors ${
+            salespersonsOnly ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          Salespersons only
+        </button>
+        <button
+          onClick={() => setOnlineOnly((v) => !v)}
+          className={`badge px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors ${
+            onlineOnly ? 'bg-success-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          Online now only
+        </button>
       </div>
 
       {/* SSO panel for BUSINESS_ADMIN */}
@@ -158,7 +185,7 @@ export default function Users() {
               {['Name', 'Email', 'Role', 'Presence', 'Last Seen', 'Branch', 'Actions'].map((h) => <th key={h} className="px-4 py-3 text-left font-semibold text-gray-600">{h}</th>)}
             </tr></thead>
             <tbody>
-              {users.map((u) => {
+              {filteredUsers.map((u) => {
                 const sub = subsidiaries.find((s) => s.id === (u as unknown as { subsidiaryId?: string }).subsidiaryId)
                 const online = isCurrentlyOnline(u.lastSeenAt)
                 return (
@@ -189,6 +216,11 @@ export default function Users() {
                   </tr>
                 )
               })}
+              {filteredUsers.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-10 text-center text-gray-400">No users match selected filters.</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
