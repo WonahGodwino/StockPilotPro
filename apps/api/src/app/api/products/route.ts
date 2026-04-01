@@ -16,7 +16,7 @@ const createSchema = z.object({
   barcode: z.string().optional(),
   lowStockThreshold: z.number().min(0).default(10),
   status: z.enum(['ACTIVE', 'DRAFT', 'ARCHIVED']).default('ACTIVE'),
-  subsidiaryId: z.string(),
+  subsidiaryId: z.string().trim().min(1, 'subsidiaryId is required'),
 })
 
 export async function OPTIONS() {
@@ -77,6 +77,18 @@ export async function POST(req: NextRequest) {
 
     assertSubsidiaryAccess(user, data.subsidiaryId)
 
+    const subsidiary = await prisma.subsidiary.findFirst({
+      where: {
+        id: data.subsidiaryId,
+        tenantId: user.tenantId!,
+        archived: false,
+      },
+      select: { id: true },
+    })
+    if (!subsidiary) {
+      return apiError('Invalid subsidiary selected', 422)
+    }
+
     const product = await prisma.product.create({
       data: {
         ...data,
@@ -106,6 +118,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     if (err instanceof z.ZodError) return NextResponse.json({ error: err.errors }, { status: 422 })
     if ((err as Error).message?.includes('Forbidden')) return apiError((err as Error).message, 403)
+    if ((err as { code?: string }).code === 'P2003') return apiError('Invalid subsidiary selected', 422)
     console.error('[PRODUCTS POST]', err)
     return apiError('Internal server error', 500)
   }
