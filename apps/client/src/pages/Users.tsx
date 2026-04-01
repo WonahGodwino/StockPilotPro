@@ -23,6 +23,13 @@ function fullName(u: AuthUser) {
   return `${u.firstName} ${u.lastName}`.trim()
 }
 
+function isOnlineNow(lastLoginAt?: string): boolean {
+  if (!lastLoginAt) return false
+  const ts = new Date(lastLoginAt).getTime()
+  if (Number.isNaN(ts)) return false
+  return Date.now() - ts <= 2 * 60 * 1000
+}
+
 function SsoPanel({ tenantId }: { tenantId: string }) {
   const [sso, setSso] = useState<SsoSettings | null>(null)
   const [saving, setSaving] = useState(false)
@@ -93,9 +100,17 @@ export default function Users() {
   const [modal, setModal] = useState<{ open: boolean; user: AuthUser | null }>({ open: false, user: null })
   const [form, setForm] = useState<UserForm>(emptyForm)
   const [saving, setSaving] = useState(false)
+  const [salespersonsOnly, setSalespersonsOnly] = useState(false)
+  const [onlineOnly, setOnlineOnly] = useState(false)
 
   const canManage = currentUser?.role === 'BUSINESS_ADMIN' || currentUser?.role === 'SUPER_ADMIN'
   const isBusinessAdmin = currentUser?.role === 'BUSINESS_ADMIN'
+
+  const filteredUsers = users.filter((u) => {
+    if (salespersonsOnly && u.role !== 'SALESPERSON') return false
+    if (onlineOnly && !isOnlineNow(u.lastLoginAt)) return false
+    return true
+  })
 
   const load = async () => {
     setLoading(true)
@@ -133,8 +148,27 @@ export default function Users() {
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold text-gray-900">Users</h1><p className="text-sm text-gray-500 mt-0.5">{users.length} team member{users.length !== 1 ? 's' : ''}</p></div>
+        <div><h1 className="text-2xl font-bold text-gray-900">Users</h1><p className="text-sm text-gray-500 mt-0.5">{filteredUsers.length} of {users.length} team member{users.length !== 1 ? 's' : ''}</p></div>
         {canManage && <button onClick={openCreate} className="btn-primary"><Plus className="w-4 h-4" /> Add User</button>}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => setSalespersonsOnly((v) => !v)}
+          className={`badge px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors ${
+            salespersonsOnly ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          Salespersons only
+        </button>
+        <button
+          onClick={() => setOnlineOnly((v) => !v)}
+          className={`badge px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors ${
+            onlineOnly ? 'bg-success-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          Online now only
+        </button>
       </div>
 
       {/* SSO panel for BUSINESS_ADMIN */}
@@ -148,11 +182,12 @@ export default function Users() {
         <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white shadow-sm">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-gray-100 bg-gray-50">
-              {['Name', 'Email', 'Role', 'Branch', 'Actions'].map((h) => <th key={h} className="px-4 py-3 text-left font-semibold text-gray-600">{h}</th>)}
+              {['Name', 'Email', 'Role', 'Status', 'Branch', 'Actions'].map((h) => <th key={h} className="px-4 py-3 text-left font-semibold text-gray-600">{h}</th>)}
             </tr></thead>
             <tbody>
-              {users.map((u) => {
+              {filteredUsers.map((u) => {
                 const sub = subsidiaries.find((s) => s.id === (u as unknown as { subsidiaryId?: string }).subsidiaryId)
+                const online = isOnlineNow(u.lastLoginAt)
                 return (
                   <tr key={u.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3">
@@ -164,6 +199,11 @@ export default function Users() {
                     </td>
                     <td className="px-4 py-3 text-gray-500">{u.email}</td>
                     <td className="px-4 py-3"><span className={`badge ${ROLE_COLORS[u.role] || 'badge-info'}`}><Shield className="w-3 h-3" />{ROLE_LABELS[u.role] || u.role}</span></td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${online ? 'bg-success-50 text-success-700' : 'bg-gray-100 text-gray-600'}`}>
+                        {online ? 'Online' : 'Offline'}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-gray-500">{sub?.name || '—'}</td>
                     <td className="px-4 py-3">
                       {canManage && u.id !== currentUser?.id && (
@@ -173,6 +213,11 @@ export default function Users() {
                   </tr>
                 )
               })}
+              {filteredUsers.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="px-4 py-10 text-center text-gray-400">No users match selected filters.</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

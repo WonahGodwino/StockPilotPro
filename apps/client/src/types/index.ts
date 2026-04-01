@@ -10,6 +10,11 @@ export interface AuthUser {
   role: UserRole
   tenantId: string | null
   subsidiaryId: string | null
+  isActive?: boolean
+  lastLoginAt?: string
+  createdAt?: string
+  phone?: string
+  subsidiary?: { id: string; name: string }
   tenant: { id: string; name: string; slug: string; baseCurrency: string } | null
 }
 
