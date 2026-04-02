@@ -216,6 +216,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(payload)
   } catch (err) {
+    if ((err as Error).message === 'No token provided' || (err as Error).message === 'Unauthorized') {
+      return apiError('Unauthorized', 401)
+    }
     console.error('[SYNC DIAGNOSTICS GET]', err)
     return apiError('Internal server error', 500)
   }

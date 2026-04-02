@@ -95,6 +95,9 @@ export async function GET(req: NextRequest) {
       },
     })
   } catch (err) {
+    if ((err as Error).message === 'No token provided' || (err as Error).message === 'Unauthorized') {
+      return apiError('Unauthorized', 401)
+    }
     if ((err as Error).message?.includes('Forbidden')) return apiError((err as Error).message, 403)
     if ((err as Error).message === 'Unauthorized') return apiError('Unauthorized', 401)
     console.error('[STALE USERS GET]', err)
@@ -178,6 +181,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ data: { sent, skipped } })
   } catch (err) {
+    if ((err as Error).message === 'No token provided' || (err as Error).message === 'Unauthorized') {
+      return apiError('Unauthorized', 401)
+    }
     if ((err as Error).message?.includes('Forbidden')) return apiError((err as Error).message, 403)
     if ((err as Error).message === 'Unauthorized') return apiError('Unauthorized', 401)
     console.error('[STALE USERS POST]', err)

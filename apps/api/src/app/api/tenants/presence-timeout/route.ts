@@ -36,6 +36,9 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ data: tenant })
   } catch (err) {
+    if ((err as Error).message === 'No token provided' || (err as Error).message === 'Unauthorized') {
+      return apiError('Unauthorized', 401)
+    }
     if ((err as Error).message === 'Unauthorized') return apiError('Unauthorized', 401)
     console.error('[TENANT PRESENCE TIMEOUT GET]', err)
     return apiError('Internal server error', 500)
@@ -62,6 +65,9 @@ export async function PATCH(req: NextRequest) {
 
     return NextResponse.json({ data: tenant })
   } catch (err) {
+    if ((err as Error).message === 'No token provided' || (err as Error).message === 'Unauthorized') {
+      return apiError('Unauthorized', 401)
+    }
     if (err instanceof z.ZodError) return NextResponse.json({ error: err.errors }, { status: 422 })
     if ((err as Error).message === 'Unauthorized') return apiError('Unauthorized', 401)
     console.error('[TENANT PRESENCE TIMEOUT PATCH]', err)
