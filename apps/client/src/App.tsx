@@ -19,6 +19,7 @@ const Notifications = lazy(() => import('@/pages/Notifications'))
 const TenantsPage = lazy(() => import('@/pages/superadmin/Tenants'))
 const PlansPage = lazy(() => import('@/pages/superadmin/Plans'))
 const SubscriptionRemindersPage = lazy(() => import('@/pages/superadmin/SubscriptionReminders'))
+const SubscriptionTransactionsPage = lazy(() => import('@/pages/superadmin/SubscriptionTransactions'))
 const SettingsPage = lazy(() => import('@/pages/Settings'))
 
 function PageLoader() {
@@ -136,6 +137,14 @@ export default function App() {
               element={
                 <RequireSuperAdmin>
                   <SubscriptionRemindersPage />
+                </RequireSuperAdmin>
+              }
+            />
+            <Route
+              path="admin/subscription-transactions"
+              element={
+                <RequireSuperAdmin>
+                  <SubscriptionTransactionsPage />
                 </RequireSuperAdmin>
               }
             />

@@ -26,6 +26,27 @@ enum SubscriptionStatus {
   SUSPENDED
 }
 
+enum SubscriptionChangeType {
+  NEW
+  RENEW
+  UPGRADE
+}
+
+enum SubscriptionPaymentMethod {
+  PAYSTACK
+  TRANSFER
+  MANUAL
+}
+
+enum SubscriptionTransactionStatus {
+  PENDING_PAYMENT
+  PENDING_VERIFICATION
+  VERIFIED
+  ACTIVE
+  REJECTED
+  CANCELLED
+}
+
 enum ProductType {
   GOODS
   SERVICE
@@ -70,6 +91,8 @@ model Plan {
   updatedBy            String?
 
   subscriptions   Subscription[]
+  currentPlanTransactions   SubscriptionTransaction[] @relation("CurrentPlanTransaction")
+  requestedPlanTransactions SubscriptionTransaction[] @relation("RequestedPlanTransaction")
 }
 
 // ──────────────────────────────────────────────
@@ -107,6 +130,7 @@ model Tenant {
   ssoAccounts     SsoAccount[]
   currencyRates   CurrencyRate[]
   syncTelemetry   SyncTelemetry[]
+  subscriptionTransactions SubscriptionTransaction[]
 }
 
 // ──────────────────────────────────────────────
@@ -130,9 +154,60 @@ model Subscription {
 
   tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   plan            Plan               @relation(fields: [planId], references: [id])
+  transactions    SubscriptionTransaction[]
 
   @@index([tenantId])
   @@index([status])
+}
+
+model SubscriptionTransaction {
+  id                      String                        @id @default(cuid())
+  tenantId                String
+  subscriptionId          String?
+  currentPlanId           String?
+  requestedPlanId         String
+  changeType              SubscriptionChangeType
+  paymentMethod           SubscriptionPaymentMethod
+  billingCycle            BillingCycle
+  amount                  Decimal                       @db.Decimal(12, 2)
+  currency                String                        @default("USD")
+  status                  SubscriptionTransactionStatus @default(PENDING_PAYMENT)
+  paystackReference       String?                       @unique
+  paystackAccessCode      String?
+  paymentProviderResponse Json?
+  transferProofUrl        String?
+  transferProofOriginalName String?
+  transferProofSize       Int?
+  transferProofContentType String?
+  transferProofUploadedByUserId String?
+  transferProofUploadedAt DateTime?
+  transferProofNote       String?
+  initiatedByUserId       String?
+  verifiedByUserId        String?
+  activatedByUserId       String?
+  modifiedByUserId        String?
+  initiatedAt             DateTime                      @default(now())
+  verifiedAt              DateTime?
+  activatedAt             DateTime?
+  modifiedAt              DateTime?
+  lifecycleEvents         Json                          @default("[]")
+  notes                   String?
+  createdAt               DateTime                      @default(now())
+  updatedAt               DateTime                      @updatedAt
+
+  tenant                  Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subscription            Subscription?                 @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  currentPlan             Plan?                         @relation("CurrentPlanTransaction", fields: [currentPlanId], references: [id], onDelete: SetNull)
+  requestedPlan           Plan                          @relation("RequestedPlanTransaction", fields: [requestedPlanId], references: [id])
+  initiatedBy             User?                         @relation("SubscriptionInitiatedBy", fields: [initiatedByUserId], references: [id], onDelete: SetNull)
+  verifiedBy              User?                         @relation("SubscriptionVerifiedBy", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
+  activatedBy             User?                         @relation("SubscriptionActivatedBy", fields: [activatedByUserId], references: [id], onDelete: SetNull)
+  modifiedBy              User?                         @relation("SubscriptionModifiedBy", fields: [modifiedByUserId], references: [id], onDelete: SetNull)
+  transferProofUploader   User?                         @relation("SubscriptionTransferProofUploader", fields: [transferProofUploadedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, status])
+  @@index([status, createdAt])
 }
 
 // ──────────────────────────────────────────────
@@ -166,6 +241,11 @@ model User {
   refreshTokens   RefreshToken[]
   ssoAccounts     SsoAccount[]
   syncTelemetry   SyncTelemetry[]
+  initiatedSubscriptionTransactions SubscriptionTransaction[] @relation("SubscriptionInitiatedBy")
+  verifiedSubscriptionTransactions  SubscriptionTransaction[] @relation("SubscriptionVerifiedBy")
+  activatedSubscriptionTransactions SubscriptionTransaction[] @relation("SubscriptionActivatedBy")
+  modifiedSubscriptionTransactions  SubscriptionTransaction[] @relation("SubscriptionModifiedBy")
+  uploadedSubscriptionTransferProofs SubscriptionTransaction[] @relation("SubscriptionTransferProofUploader")
 
   @@index([tenantId])
   @@index([email])

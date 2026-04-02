@@ -42,5 +42,9 @@ Thumbs.db
 # Prisma
 prisma/migrations/
 
+# Uploaded files
+apps/api/public/uploads/subscription-proofs/*
+!apps/api/public/uploads/subscription-proofs/.gitkeep
+
 # TypeScript
 *.tsbuildinfo

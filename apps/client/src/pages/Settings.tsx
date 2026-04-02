@@ -2,6 +2,7 @@ import { Navigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth.store'
 import CurrencySettings from '@/components/settings/CurrencySettings'
 import ExchangeRateSettings from '@/components/settings/ExchangeRateSettings'
+import SubscriptionSettings from '@/components/settings/SubscriptionSettings'
 import { Settings as SettingsIcon } from 'lucide-react'
 
 export default function Settings() {
@@ -23,6 +24,7 @@ export default function Settings() {
 
       <CurrencySettings />
       <ExchangeRateSettings />
+      <SubscriptionSettings />
     </div>
   )
 }

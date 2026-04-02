@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import api from '@/lib/api'
-import type { Tenant } from '@/types'
+import type { Tenant, Plan, SubscriptionTransaction } from '@/types'
 import toast from 'react-hot-toast'
 import { Plus, Building, Edit, X, Loader2, ChevronDown, ChevronUp, ToggleLeft, ToggleRight, Shield } from 'lucide-react'
 
@@ -14,6 +14,9 @@ function makeSlug(input: string) {
 }
 
 export default function TenantsPage() {
+  const apiBase = import.meta.env.VITE_API_URL || '/api'
+  const apiOrigin = apiBase.startsWith('http') ? new URL(apiBase).origin : window.location.origin
+
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -25,12 +28,20 @@ export default function TenantsPage() {
   // SSO management state per tenant
   const [ssoSettings, setSsoSettings] = useState<Record<string, SsoSettings>>({})
   const [ssoSaving, setSsoSaving] = useState<string | null>(null)
+  const [plans, setPlans] = useState<Plan[]>([])
+  const [pendingTransactions, setPendingTransactions] = useState<Record<string, SubscriptionTransaction[]>>({})
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [initiateDraft, setInitiateDraft] = useState<Record<string, { requestedPlanId: string; paymentMethod: 'PAYSTACK' | 'TRANSFER' | 'MANUAL'; billingCycle: 'MONTHLY' | 'YEARLY'; note: string }>>({})
 
   const load = async () => {
     setLoading(true)
     try {
-      const res = await api.get<{ data: Tenant[] }>('/tenants')
-      setTenants(res.data.data)
+      const [tenantRes, planRes] = await Promise.all([
+        api.get<{ data: Tenant[] }>('/tenants'),
+        api.get<{ data: Plan[] }>('/plans'),
+      ])
+      setTenants(tenantRes.data.data)
+      setPlans(planRes.data.data || [])
     } catch { toast.error('Failed to load tenants') } finally { setLoading(false) }
   }
 
@@ -49,7 +60,86 @@ export default function TenantsPage() {
   const handleExpand = (id: string) => {
     const next = expanded === id ? null : id
     setExpanded(next)
-    if (next) loadSsoSettings(next)
+    if (next) {
+      loadSsoSettings(next)
+      void loadPendingTransactions(next)
+      setInitiateDraft((prev) => {
+        if (prev[next]) return prev
+        return {
+          ...prev,
+          [next]: {
+            requestedPlanId: plans[0]?.id || '',
+            paymentMethod: 'TRANSFER',
+            billingCycle: 'MONTHLY',
+            note: '',
+          },
+        }
+      })
+    }
+  }
+
+  const loadPendingTransactions = async (tenantId: string) => {
+    try {
+      const res = await api.get<{ data: SubscriptionTransaction[] }>('/subscriptions/transactions', {
+        params: { tenantId, status: 'PENDING_VERIFICATION' },
+      })
+      setPendingTransactions((prev) => ({ ...prev, [tenantId]: res.data.data || [] }))
+    } catch {
+      setPendingTransactions((prev) => ({ ...prev, [tenantId]: [] }))
+    }
+  }
+
+  const initiateSubscription = async (tenantId: string) => {
+    const draft = initiateDraft[tenantId]
+    if (!draft?.requestedPlanId) {
+      toast.error('Select a plan first')
+      return
+    }
+
+    setActionLoading(`init-${tenantId}`)
+    try {
+      const createRes = await api.post<{ data: SubscriptionTransaction }>('/subscriptions/transactions', {
+        tenantId,
+        requestedPlanId: draft.requestedPlanId,
+        billingCycle: draft.billingCycle,
+        paymentMethod: draft.paymentMethod,
+        notes: draft.note || undefined,
+      })
+
+      if (draft.paymentMethod === 'PAYSTACK') {
+        const initRes = await api.post(`/subscriptions/transactions/${createRes.data.data.id}/paystack-init`)
+        const url = initRes.data?.payment?.authorizationUrl
+        if (url) window.open(url, '_blank', 'noopener,noreferrer')
+      }
+
+      if (draft.paymentMethod === 'MANUAL') {
+        await api.post(`/subscriptions/transactions/${createRes.data.data.id}/verify`, {
+          note: draft.note || 'Manual payment confirmed by super admin',
+        })
+        toast.success('Subscription activated successfully')
+      } else {
+        toast.success('Subscription transaction initiated')
+      }
+
+      await Promise.all([load(), loadPendingTransactions(tenantId)])
+    } catch (err: unknown) {
+      toast.error((err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to initiate')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const approveTransfer = async (tenantId: string, transactionId: string, approve: boolean) => {
+    setActionLoading(`${approve ? 'approve' : 'reject'}-${transactionId}`)
+    try {
+      await api.post(`/subscriptions/transactions/${transactionId}/verify`, approve ? { approveTransfer: true } : { rejectTransfer: true })
+      toast.success(approve ? 'Transfer approved and subscription activated' : 'Transfer rejected')
+      await Promise.all([load(), loadPendingTransactions(tenantId)])
+    } catch (err: unknown) {
+      toast.error((err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Action failed')
+    } finally {
+      setActionLoading(null)
+    }
   }
 
   const handleSsoToggle = async (tenantId: string, provider: string, checked: boolean) => {
@@ -195,6 +285,117 @@ export default function TenantsPage() {
                           </div>
                         </div>
                       )}
+                    </div>
+
+                    <div className="bg-indigo-50 rounded-xl p-4 space-y-3">
+                      <p className="text-sm font-semibold text-indigo-800">Subscription Actions (Super Admin)</p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs text-indigo-700 mb-1">Plan</label>
+                          <select
+                            className="input"
+                            value={initiateDraft[t.id]?.requestedPlanId || ''}
+                            onChange={(e) => setInitiateDraft((prev) => ({
+                              ...prev,
+                              [t.id]: {
+                                ...(prev[t.id] || { paymentMethod: 'TRANSFER', billingCycle: 'MONTHLY', note: '' }),
+                                requestedPlanId: e.target.value,
+                              },
+                            }))}
+                          >
+                            <option value="">Select plan</option>
+                            {plans.map((plan) => (
+                              <option key={plan.id} value={plan.id}>{plan.name} ({Number(plan.price).toFixed(2)} {plan.priceCurrency})</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-indigo-700 mb-1">Payment Method</label>
+                          <select
+                            className="input"
+                            value={initiateDraft[t.id]?.paymentMethod || 'TRANSFER'}
+                            onChange={(e) => setInitiateDraft((prev) => ({
+                              ...prev,
+                              [t.id]: {
+                                ...(prev[t.id] || { requestedPlanId: '', billingCycle: 'MONTHLY', note: '' }),
+                                paymentMethod: e.target.value as 'PAYSTACK' | 'TRANSFER' | 'MANUAL',
+                              },
+                            }))}
+                          >
+                            <option value="PAYSTACK">Paystack</option>
+                            <option value="TRANSFER">Transfer</option>
+                            <option value="MANUAL">Manual/Physical</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs text-indigo-700 mb-1">Billing Cycle</label>
+                          <select
+                            className="input"
+                            value={initiateDraft[t.id]?.billingCycle || 'MONTHLY'}
+                            onChange={(e) => setInitiateDraft((prev) => ({
+                              ...prev,
+                              [t.id]: {
+                                ...(prev[t.id] || { requestedPlanId: '', paymentMethod: 'TRANSFER', note: '' }),
+                                billingCycle: e.target.value as 'MONTHLY' | 'YEARLY',
+                              },
+                            }))}
+                          >
+                            <option value="MONTHLY">Monthly</option>
+                            <option value="YEARLY">Yearly</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-indigo-700 mb-1">Note</label>
+                          <input
+                            className="input"
+                            value={initiateDraft[t.id]?.note || ''}
+                            onChange={(e) => setInitiateDraft((prev) => ({
+                              ...prev,
+                              [t.id]: {
+                                ...(prev[t.id] || { requestedPlanId: '', paymentMethod: 'TRANSFER', billingCycle: 'MONTHLY' }),
+                                note: e.target.value,
+                              },
+                            }))}
+                          />
+                        </div>
+                      </div>
+                      <button onClick={() => initiateSubscription(t.id)} className="btn-primary" disabled={actionLoading === `init-${t.id}`}>
+                        {actionLoading === `init-${t.id}` && <Loader2 className="w-4 h-4 animate-spin" />} Initiate Renewal/Upgrade
+                      </button>
+
+                      <div className="pt-2 border-t border-indigo-100 space-y-2">
+                        <p className="text-xs font-semibold text-indigo-700">Pending Transfer Verification</p>
+                        {(pendingTransactions[t.id] || []).length === 0 ? (
+                          <p className="text-xs text-indigo-500">No pending transfer requests.</p>
+                        ) : (
+                          (pendingTransactions[t.id] || []).map((tx) => (
+                            <div key={tx.id} className="rounded-lg bg-white border border-indigo-100 p-3 flex items-center justify-between gap-3">
+                              <div>
+                                <p className="text-sm font-medium text-gray-800">{tx.requestedPlan?.name || tx.requestedPlanId} ({tx.changeType})</p>
+                                <p className="text-xs text-gray-500">{new Date(tx.createdAt).toLocaleString()}</p>
+                                {tx.transferProofUrl ? (
+                                  <a
+                                    className="text-xs text-primary-600 hover:underline"
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    href={tx.transferProofUrl.startsWith('http') ? tx.transferProofUrl : `${apiOrigin}${tx.transferProofUrl}`}
+                                  >
+                                    Open transfer proof
+                                  </a>
+                                ) : (
+                                  <p className="text-xs text-gray-500">Proof not provided</p>
+                                )}
+                              </div>
+                              <div className="flex gap-2">
+                                <button className="btn-secondary" onClick={() => approveTransfer(t.id, tx.id, false)} disabled={actionLoading === `reject-${tx.id}`}>Reject</button>
+                                <button className="btn-primary" onClick={() => approveTransfer(t.id, tx.id, true)} disabled={actionLoading === `approve-${tx.id}`}>Approve</button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}

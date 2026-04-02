@@ -204,6 +204,16 @@ export interface Plan {
 
 export type SubscriptionStatus = 'ACTIVE' | 'EXPIRED' | 'SUSPENDED'
 
+export type SubscriptionPaymentMethod = 'PAYSTACK' | 'TRANSFER' | 'MANUAL'
+export type SubscriptionChangeType = 'NEW' | 'RENEW' | 'UPGRADE'
+export type SubscriptionTransactionStatus =
+  | 'PENDING_PAYMENT'
+  | 'PENDING_VERIFICATION'
+  | 'VERIFIED'
+  | 'ACTIVE'
+  | 'REJECTED'
+  | 'CANCELLED'
+
 export interface Subscription {
   id: string
   tenantId: string
@@ -214,6 +224,44 @@ export interface Subscription {
   amount: number
   billingCurrency?: string
   plan?: Plan
+}
+
+export interface SubscriptionTransaction {
+  id: string
+  tenantId: string
+  subscriptionId?: string
+  currentPlanId?: string
+  requestedPlanId: string
+  changeType: SubscriptionChangeType
+  paymentMethod: SubscriptionPaymentMethod
+  billingCycle: 'MONTHLY' | 'YEARLY'
+  amount: number
+  currency: string
+  status: SubscriptionTransactionStatus
+  paystackReference?: string
+  transferProofUrl?: string
+  transferProofOriginalName?: string
+  transferProofSize?: number
+  transferProofContentType?: string
+  transferProofUploadedByUserId?: string
+  transferProofUploadedAt?: string
+  transferProofNote?: string
+  initiatedByUserId?: string
+  verifiedByUserId?: string
+  activatedByUserId?: string
+  modifiedByUserId?: string
+  initiatedAt: string
+  verifiedAt?: string
+  activatedAt?: string
+  modifiedAt?: string
+  lifecycleEvents?: Array<Record<string, unknown>>
+  notes?: string
+  createdAt: string
+  updatedAt: string
+  requestedPlan?: Plan
+  currentPlan?: Plan
+  subscription?: Subscription
+  tenant?: Pick<Tenant, 'id' | 'name' | 'email'>
 }
 
 // ── Notifications ─────────────────────────────────────────────────────────────

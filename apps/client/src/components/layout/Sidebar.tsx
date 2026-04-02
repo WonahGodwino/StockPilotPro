@@ -6,7 +6,7 @@ import type { UserRole } from '@/types'
 import {
   LayoutDashboard, Package, ShoppingCart, Receipt, BarChart2,
   Building2, Users, Bell, ChevronLeft, ChevronRight,
-  TrendingUp, Shield, ChevronDown, Settings,
+  TrendingUp, Shield, ChevronDown, Settings, ClipboardList,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -60,6 +60,7 @@ const navSections: NavSection[] = [
       { label: 'Tenants', href: '/admin/tenants', icon: Shield, roles: ['SUPER_ADMIN'] },
       { label: 'Plans', href: '/admin/plans', icon: TrendingUp, roles: ['SUPER_ADMIN'] },
       { label: 'Subscription Reminders', href: '/admin/subscription-reminders', icon: Bell, roles: ['SUPER_ADMIN'] },
+      { label: 'Subscription Ledger', href: '/admin/subscription-transactions', icon: ClipboardList, roles: ['SUPER_ADMIN'] },
     ],
   },
 ]
