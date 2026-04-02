@@ -96,6 +96,7 @@ export interface SaleCheckoutPayload {
   currency: string
   fxRate: number
   syncRef?: string
+  transactionRef?: string
   notes?: string
   items: {
     productId: string

@@ -297,6 +297,7 @@ model Sale {
   currency        String        @default("USD")
   fxRate          Decimal       @db.Decimal(18, 8) @default(1)
   syncRef         String?
+  transactionRef  String?
   notes           String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
@@ -314,6 +315,7 @@ model Sale {
   @@index([userId])
   @@index([createdAt])
   @@unique([tenantId, syncRef])
+  @@unique([tenantId, transactionRef])
 }
 
 // ──────────────────────────────────────────────
@@ -353,6 +355,7 @@ model Expense {
   currency        String    @default("USD")
   fxRate          Decimal   @db.Decimal(18, 8) @default(1)
   syncRef         String?
+  transactionRef  String?
   notes           String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -368,6 +371,7 @@ model Expense {
   @@index([subsidiaryId])
   @@index([date])
   @@unique([tenantId, syncRef])
+  @@unique([tenantId, transactionRef])
 }
 
 model SyncTelemetry {

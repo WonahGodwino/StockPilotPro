@@ -23,6 +23,7 @@ const createSaleSchema = z.object({
   currency: z.string().length(3).transform((v) => v.toUpperCase()).default('USD'),
   fxRate: z.number().positive().default(1),
   syncRef: z.string().min(6).max(120).optional(),
+  transactionRef: z.string().min(6).max(180).optional(),
   notes: z.string().optional(),
 })
 
@@ -96,18 +97,29 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  let tenantId: string | undefined
+  let idempotencyRef: string | undefined
   try {
     const user = authenticate(req)
+    tenantId = user.tenantId || undefined
     const body = await req.json()
     const data = createSaleSchema.parse(body)
     const syncRef = data.syncRef?.trim() || undefined
+    const transactionRef = data.transactionRef?.trim() || undefined
+    idempotencyRef = transactionRef || syncRef
 
     assertSubsidiaryAccess(user, data.subsidiaryId)
 
-    // Idempotency guard for offline replay: if already synced, return the existing sale.
-    if (syncRef) {
+    // Strong idempotency guard: prefer transactionRef, fallback to syncRef.
+    if (idempotencyRef) {
       const existing = await prisma.sale.findFirst({
-        where: { tenantId: user.tenantId!, syncRef },
+        where: {
+          tenantId: user.tenantId!,
+          OR: [
+            { transactionRef: idempotencyRef },
+            { syncRef: idempotencyRef },
+          ],
+        },
         include: {
           items: {
             include: { product: { select: { name: true, unit: true } } },
@@ -178,6 +190,7 @@ export async function POST(req: NextRequest) {
           currency: data.currency,
           fxRate: data.fxRate,
           syncRef,
+          transactionRef,
           receiptNumber,
           notes: data.notes,
           createdBy: user.userId,
@@ -219,6 +232,7 @@ export async function POST(req: NextRequest) {
         currency: sale.currency,
         fxRate: sale.fxRate,
         syncRef: sale.syncRef,
+        transactionRef: sale.transactionRef,
         subsidiaryId: sale.subsidiaryId,
         itemsCount: sale.items.length,
       },
@@ -229,6 +243,26 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     if (err instanceof z.ZodError) return NextResponse.json({ error: err.errors }, { status: 422 })
     if ((err as Error).message?.includes('Forbidden')) return apiError((err as Error).message, 403)
+    if ((err as { code?: string }).code === 'P2002') {
+      if (idempotencyRef && tenantId) {
+        const existing = await prisma.sale.findFirst({
+          where: {
+            tenantId,
+            OR: [
+              { transactionRef: idempotencyRef },
+              { syncRef: idempotencyRef },
+            ],
+          },
+          include: {
+            items: {
+              include: { product: { select: { name: true, unit: true } } },
+            },
+            user: { select: { firstName: true, lastName: true } },
+          },
+        })
+        if (existing) return NextResponse.json({ data: existing })
+      }
+    }
     console.error('[SALES POST]', err)
     return apiError('Internal server error', 500)
   }

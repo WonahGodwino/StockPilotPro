@@ -9,6 +9,7 @@ export interface ExpensePayload {
   notes?: string
   subsidiaryId: string
   syncRef?: string
+  transactionRef?: string
 }
 
 // Offline-pending record wrapper
@@ -87,7 +88,12 @@ export async function getProductByBarcode(barcode: string): Promise<Product | un
 
 export async function addPendingSale(data: SaleCheckoutPayload) {
   const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2)}`
-  const payload: SaleCheckoutPayload = { ...data, syncRef: data.syncRef || localId }
+  const dedupeRef = data.transactionRef || data.syncRef || localId
+  const payload: SaleCheckoutPayload = {
+    ...data,
+    syncRef: data.syncRef || localId,
+    transactionRef: dedupeRef,
+  }
   await db.pendingRecords.add({
     localId,
     type: 'sale',
@@ -100,7 +106,12 @@ export async function addPendingSale(data: SaleCheckoutPayload) {
 
 export async function addPendingExpense(data: ExpensePayload) {
   const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2)}`
-  const payload: ExpensePayload = { ...data, syncRef: data.syncRef || localId }
+  const dedupeRef = data.transactionRef || data.syncRef || localId
+  const payload: ExpensePayload = {
+    ...data,
+    syncRef: data.syncRef || localId,
+    transactionRef: dedupeRef,
+  }
   await db.pendingRecords.add({
     localId,
     type: 'expense',
