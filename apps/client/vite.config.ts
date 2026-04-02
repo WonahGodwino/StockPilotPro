@@ -29,6 +29,20 @@ export default defineConfig({
             handler: 'StaleWhileRevalidate',
             options: { cacheName: 'api-products' },
           },
+          {
+            urlPattern: /^https?.*\/api\/(sales|expenses)$/,
+            method: 'POST',
+            handler: 'NetworkOnly',
+            options: {
+              cacheName: 'api-write-queue',
+              backgroundSync: {
+                name: 'stockpilot-write-queue',
+                options: {
+                  maxRetentionTime: 24 * 60,
+                },
+              },
+            },
+          },
         ],
       },
     }),
