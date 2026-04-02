@@ -23,11 +23,11 @@ function fullName(u: AuthUser) {
   return `${u.firstName} ${u.lastName}`.trim()
 }
 
-function isCurrentlyOnline(lastSeenAt?: string): boolean {
+function isCurrentlyOnline(lastSeenAt: string | undefined, timeoutMinutes: number): boolean {
   if (!lastSeenAt) return false
   const ts = new Date(lastSeenAt).getTime()
   if (Number.isNaN(ts)) return false
-  return Date.now() - ts <= 2 * 60 * 1000
+  return Date.now() - ts <= timeoutMinutes * 60 * 1000
 }
 
 function SsoPanel({ tenantId }: { tenantId: string }) {
@@ -106,13 +106,15 @@ export default function Users() {
   const [staleLoading, setStaleLoading] = useState(false)
   const [sendingStaleAlerts, setSendingStaleAlerts] = useState(false)
   const [staleUsers, setStaleUsers] = useState<Array<{ id: string; firstName: string; lastName: string; hoursSinceLastSeen: number; thresholdHours: number }>>([])
+  const [presenceTimeoutMinutes, setPresenceTimeoutMinutes] = useState(2)
+  const [savingPresenceTimeout, setSavingPresenceTimeout] = useState(false)
 
   const canManage = currentUser?.role === 'BUSINESS_ADMIN' || currentUser?.role === 'SUPER_ADMIN'
   const isBusinessAdmin = currentUser?.role === 'BUSINESS_ADMIN'
 
   const filteredUsers = users.filter((u) => {
     if (salespersonsOnly && u.role !== 'SALESPERSON') return false
-    if (onlineOnly && !isCurrentlyOnline(u.lastSeenAt)) return false
+    if (onlineOnly && !isCurrentlyOnline(u.lastSeenAt, presenceTimeoutMinutes)) return false
     return true
   })
 
@@ -143,6 +145,29 @@ export default function Users() {
     }
   }
 
+  const loadPresenceTimeout = async () => {
+    if (!canManage) return
+    try {
+      const res = await api.get<{ data: { presenceTimeoutMinutes: number } }>('/tenants/presence-timeout')
+      setPresenceTimeoutMinutes(Math.max(1, Number(res.data.data.presenceTimeoutMinutes || 2)))
+    } catch {
+      setPresenceTimeoutMinutes(2)
+    }
+  }
+
+  const savePresenceTimeout = async (minutes: number) => {
+    setSavingPresenceTimeout(true)
+    try {
+      const res = await api.patch<{ data: { presenceTimeoutMinutes: number } }>('/tenants/presence-timeout', { minutes })
+      setPresenceTimeoutMinutes(Number(res.data.data.presenceTimeoutMinutes || minutes))
+      toast.success('Presence timeout updated')
+    } catch {
+      toast.error('Failed to update presence timeout')
+    } finally {
+      setSavingPresenceTimeout(false)
+    }
+  }
+
   const sendStaleAlerts = async () => {
     setSendingStaleAlerts(true)
     try {
@@ -159,6 +184,10 @@ export default function Users() {
   useEffect(() => {
     void loadStaleUsers()
   }, [staleHours, canManage])
+
+  useEffect(() => {
+    void loadPresenceTimeout()
+  }, [canManage])
 
   const openCreate = () => { setForm(emptyForm); setModal({ open: true, user: null }) }
   const openEdit = (u: AuthUser) => {
@@ -204,6 +233,22 @@ export default function Users() {
           Online now only
         </button>
       </div>
+
+      {canManage && (
+        <div className="rounded-xl border border-gray-100 bg-white p-3 flex flex-wrap items-center gap-2">
+          <p className="text-xs text-gray-600">Presence timeout:</p>
+          {[1, 2, 5].map((m) => (
+            <button
+              key={m}
+              disabled={savingPresenceTimeout}
+              onClick={() => void savePresenceTimeout(m)}
+              className={`badge px-2.5 py-1 text-xs ${presenceTimeoutMinutes === m ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              {m} min
+            </button>
+          ))}
+        </div>
+      )}
 
       {canManage && (
         <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-4 space-y-3">
@@ -255,7 +300,7 @@ export default function Users() {
             <tbody>
               {filteredUsers.map((u) => {
                 const sub = subsidiaries.find((s) => s.id === (u as unknown as { subsidiaryId?: string }).subsidiaryId)
-                const online = isCurrentlyOnline(u.lastSeenAt)
+                const online = isCurrentlyOnline(u.lastSeenAt, presenceTimeoutMinutes)
                 return (
                   <tr key={u.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3">
