@@ -31,6 +31,32 @@ let syncStatus: SyncStatus = {
 }
 let syncHistory: SyncHistoryEntry[] = []
 
+function getSyncDeviceId() {
+  if (typeof window === 'undefined') return 'server'
+  const key = 'stockpilot:sync-device-id'
+  const existing = window.localStorage.getItem(key)
+  if (existing) return existing
+  const next = `device_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+  window.localStorage.setItem(key, next)
+  return next
+}
+
+async function sendSyncTelemetry(entry: SyncHistoryEntry) {
+  try {
+    await api.post('/sync/telemetry', {
+      deviceId: getSyncDeviceId(),
+      source: 'web',
+      status: entry.status,
+      pendingBefore: entry.pendingBefore,
+      syncedCount: entry.syncedCount,
+      failedCount: entry.failedCount,
+      error: entry.error,
+    })
+  } catch {
+    // Telemetry must never block local sync behavior.
+  }
+}
+
 function shouldPersistSyncHistory(entry: SyncHistoryEntry) {
   // Ignore empty runs to keep history focused on meaningful sync activity.
   return entry.pendingBefore > 0 || entry.syncedCount > 0 || entry.failedCount > 0 || entry.status === 'failed'
@@ -109,13 +135,15 @@ export async function syncPendingRecords() {
         lastSyncedCount: 0,
         lastFailedCount: 0,
       }
-      pushSyncHistory({
+      const entry: SyncHistoryEntry = {
         at: Date.now(),
         syncedCount: 0,
         failedCount: 0,
         pendingBefore: 0,
         status: 'noop',
-      })
+      }
+      pushSyncHistory(entry)
+      void sendSyncTelemetry(entry)
       emitSyncStatus()
       return
     }
@@ -154,14 +182,16 @@ export async function syncPendingRecords() {
       lastFailedCount: failed,
       lastError: failed > 0 ? `${failed} record(s) failed to sync` : null,
     }
-    pushSyncHistory({
+    const entry: SyncHistoryEntry = {
       at: Date.now(),
       syncedCount: synced,
       failedCount: failed,
       pendingBefore: pending.length,
       status: failed === 0 ? 'success' : synced > 0 ? 'partial' : 'failed',
       error: failed > 0 ? `${failed} record(s) failed to sync` : undefined,
-    })
+    }
+    pushSyncHistory(entry)
+    void sendSyncTelemetry(entry)
     emitSyncStatus()
   } catch (err) {
     syncStatus = {
@@ -170,14 +200,16 @@ export async function syncPendingRecords() {
       lastSyncAt: Date.now(),
       lastError: (err as Error)?.message || 'Sync failed',
     }
-    pushSyncHistory({
+    const entry: SyncHistoryEntry = {
       at: Date.now(),
       syncedCount: 0,
       failedCount: 0,
       pendingBefore: 0,
       status: 'failed',
       error: (err as Error)?.message || 'Sync failed',
-    })
+    }
+    pushSyncHistory(entry)
+    void sendSyncTelemetry(entry)
     emitSyncStatus()
     throw err
   } finally {
