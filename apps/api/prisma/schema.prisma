@@ -105,6 +105,7 @@ model Tenant {
   auditLogs       AuditLog[]
   ssoAccounts     SsoAccount[]
   currencyRates   CurrencyRate[]
+  syncTelemetry   SyncTelemetry[]
 }
 
 // ──────────────────────────────────────────────
@@ -163,6 +164,7 @@ model User {
   damageRecords   DamageRecord[] @relation("DamageRecords")
   refreshTokens   RefreshToken[]
   ssoAccounts     SsoAccount[]
+  syncTelemetry   SyncTelemetry[]
 
   @@index([tenantId])
   @@index([email])
@@ -235,6 +237,7 @@ model Subsidiary {
   sales           Sale[]
   expenses        Expense[]
   damageRecords   DamageRecord[]
+  syncTelemetry   SyncTelemetry[]
 
   @@index([tenantId])
 }
@@ -365,6 +368,29 @@ model Expense {
   @@index([subsidiaryId])
   @@index([date])
   @@unique([tenantId, syncRef])
+}
+
+model SyncTelemetry {
+  id            String    @id @default(cuid())
+  tenantId      String
+  subsidiaryId  String?
+  userId        String?
+  deviceId      String
+  source        String    @default("web")
+  status        String
+  pendingBefore Int       @default(0)
+  syncedCount   Int       @default(0)
+  failedCount   Int       @default(0)
+  error         String?
+  createdAt     DateTime  @default(now())
+
+  tenant        Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subsidiary    Subsidiary? @relation(fields: [subsidiaryId], references: [id], onDelete: SetNull)
+  user          User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, deviceId, createdAt])
+  @@index([tenantId, status, createdAt])
 }
 
 // ──────────────────────────────────────────────
