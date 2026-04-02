@@ -142,6 +142,22 @@ export default function TenantsPage() {
     }
   }
 
+  const cancelTransferRequest = async (tenantId: string, transactionId: string) => {
+    setActionLoading(`cancel-${transactionId}`)
+    try {
+      await api.patch(`/subscriptions/transactions/${transactionId}`, {
+        status: 'CANCELLED',
+        notes: 'Cancelled by super admin',
+      })
+      toast.success('Transfer request cancelled')
+      await Promise.all([load(), loadPendingTransactions(tenantId)])
+    } catch (err: unknown) {
+      toast.error((err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Cancel failed')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   const handleSsoToggle = async (tenantId: string, provider: string, checked: boolean) => {
     const current = ssoSettings[tenantId] || { ssoEnabled: false, ssoProviders: [] }
     const newProviders = checked
@@ -390,6 +406,7 @@ export default function TenantsPage() {
                               </div>
                               <div className="flex gap-2">
                                 <button className="btn-secondary" onClick={() => approveTransfer(t.id, tx.id, false)} disabled={actionLoading === `reject-${tx.id}`}>Reject</button>
+                                <button className="btn-secondary" onClick={() => cancelTransferRequest(t.id, tx.id)} disabled={actionLoading === `cancel-${tx.id}`}>Cancel</button>
                                 <button className="btn-primary" onClick={() => approveTransfer(t.id, tx.id, true)} disabled={actionLoading === `approve-${tx.id}`}>Approve</button>
                               </div>
                             </div>

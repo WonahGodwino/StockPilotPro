@@ -23,6 +23,7 @@ export default function SubscriptionTransactionsPage() {
   const [rows, setRows] = useState<SubscriptionTransaction[]>([])
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [loading, setLoading] = useState(true)
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
 
   const [status, setStatus] = useState<SubscriptionTransactionStatus | 'ALL'>('ALL')
   const [paymentMethod, setPaymentMethod] = useState<SubscriptionPaymentMethod | 'ALL'>('ALL')
@@ -76,6 +77,88 @@ export default function SubscriptionTransactionsPage() {
     } catch {
       toast.error('CSV export failed')
     }
+  }
+
+  const activateRequest = async (row: SubscriptionTransaction) => {
+    setActionLoading(`activate-${row.id}`)
+    try {
+      if (row.paymentMethod === 'TRANSFER') {
+        await api.post(`/subscriptions/transactions/${row.id}/verify`, {
+          approveTransfer: true,
+          note: 'Approved and activated by super admin',
+        })
+      } else if (row.paymentMethod === 'MANUAL') {
+        await api.post(`/subscriptions/transactions/${row.id}/verify`, {
+          note: 'Manual payment confirmed and activated by super admin',
+        })
+      } else {
+        await api.post(`/subscriptions/transactions/${row.id}/verify`, {
+          reference: row.paystackReference,
+        })
+      }
+      toast.success('Subscription request activated')
+      await load()
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
+      toast.error(message || 'Activation failed')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const rejectRequest = async (row: SubscriptionTransaction) => {
+    setActionLoading(`reject-${row.id}`)
+    try {
+      if (row.paymentMethod === 'TRANSFER') {
+        await api.post(`/subscriptions/transactions/${row.id}/verify`, {
+          rejectTransfer: true,
+          note: 'Rejected by super admin',
+        })
+      } else {
+        await api.patch(`/subscriptions/transactions/${row.id}`, {
+          status: 'REJECTED',
+          notes: 'Rejected by super admin',
+        })
+      }
+      toast.success('Subscription request rejected')
+      await load()
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
+      toast.error(message || 'Rejection failed')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const cancelRequest = async (row: SubscriptionTransaction) => {
+    setActionLoading(`cancel-${row.id}`)
+    try {
+      await api.patch(`/subscriptions/transactions/${row.id}`, {
+        status: 'CANCELLED',
+        notes: 'Cancelled by super admin',
+      })
+      toast.success('Subscription request cancelled')
+      await load()
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
+      toast.error(message || 'Cancel failed')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const canActivate = (row: SubscriptionTransaction) => {
+    if (row.status === 'PENDING_VERIFICATION' && (row.paymentMethod === 'TRANSFER' || row.paymentMethod === 'MANUAL')) return true
+    if (row.status === 'PENDING_PAYMENT' && row.paymentMethod === 'PAYSTACK') return true
+    return false
+  }
+
+  const canReject = (row: SubscriptionTransaction) => {
+    return row.status === 'PENDING_VERIFICATION' || row.status === 'PENDING_PAYMENT'
+  }
+
+  const canCancel = (row: SubscriptionTransaction) => {
+    return row.status === 'PENDING_VERIFICATION' || row.status === 'PENDING_PAYMENT'
   }
 
   const summary = useMemo(() => {
@@ -142,13 +225,14 @@ export default function SubscriptionTransactionsPage() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Actors</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Proof</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">Loading transactions...</td></tr>
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-400">Loading transactions...</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">No transactions found.</td></tr>
+                <tr><td colSpan={9} className="px-4 py-10 text-center text-gray-400">No transactions found.</td></tr>
               ) : rows.map((row) => (
                 <tr key={row.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-gray-700">{new Date(row.createdAt).toLocaleString()}</td>
@@ -181,6 +265,37 @@ export default function SubscriptionTransactionsPage() {
                         <p>Uploader: {row.transferProofUploadedByUserId || '-'}</p>
                       </div>
                     ) : '-'}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-2">
+                      {canActivate(row) && (
+                        <button
+                          className="btn-primary"
+                          onClick={() => void activateRequest(row)}
+                          disabled={actionLoading === `activate-${row.id}`}
+                        >
+                          {actionLoading === `activate-${row.id}` ? 'Activating...' : 'Activate'}
+                        </button>
+                      )}
+                      {canReject(row) && (
+                        <button
+                          className="btn-secondary"
+                          onClick={() => void rejectRequest(row)}
+                          disabled={actionLoading === `reject-${row.id}`}
+                        >
+                          {actionLoading === `reject-${row.id}` ? 'Rejecting...' : 'Reject'}
+                        </button>
+                      )}
+                      {canCancel(row) && (
+                        <button
+                          className="btn-secondary"
+                          onClick={() => void cancelRequest(row)}
+                          disabled={actionLoading === `cancel-${row.id}`}
+                        >
+                          {actionLoading === `cancel-${row.id}` ? 'Cancelling...' : 'Cancel'}
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
