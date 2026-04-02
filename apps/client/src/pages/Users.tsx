@@ -102,6 +102,10 @@ export default function Users() {
   const [saving, setSaving] = useState(false)
   const [salespersonsOnly, setSalespersonsOnly] = useState(false)
   const [onlineOnly, setOnlineOnly] = useState(false)
+  const [staleHours, setStaleHours] = useState(24)
+  const [staleLoading, setStaleLoading] = useState(false)
+  const [sendingStaleAlerts, setSendingStaleAlerts] = useState(false)
+  const [staleUsers, setStaleUsers] = useState<Array<{ id: string; firstName: string; lastName: string; hoursSinceLastSeen: number; thresholdHours: number }>>([])
 
   const canManage = currentUser?.role === 'BUSINESS_ADMIN' || currentUser?.role === 'SUPER_ADMIN'
   const isBusinessAdmin = currentUser?.role === 'BUSINESS_ADMIN'
@@ -125,6 +129,36 @@ export default function Users() {
   }
 
   useEffect(() => { load() }, [])
+
+  const loadStaleUsers = async () => {
+    if (!canManage) return
+    setStaleLoading(true)
+    try {
+      const res = await api.get<{ data: { staleUsers: Array<{ id: string; firstName: string; lastName: string; hoursSinceLastSeen: number; thresholdHours: number }> } }>(`/users/stale-alerts?hours=${staleHours}`)
+      setStaleUsers(res.data.data.staleUsers || [])
+    } catch {
+      setStaleUsers([])
+    } finally {
+      setStaleLoading(false)
+    }
+  }
+
+  const sendStaleAlerts = async () => {
+    setSendingStaleAlerts(true)
+    try {
+      const res = await api.post<{ data: { sent: number; skipped: number } }>(`/users/stale-alerts?hours=${staleHours}`)
+      toast.success(`Sent ${res.data.data.sent} stale-user alert(s), skipped ${res.data.data.skipped}.`)
+      await loadStaleUsers()
+    } catch {
+      toast.error('Failed to send stale-user alerts')
+    } finally {
+      setSendingStaleAlerts(false)
+    }
+  }
+
+  useEffect(() => {
+    void loadStaleUsers()
+  }, [staleHours, canManage])
 
   const openCreate = () => { setForm(emptyForm); setModal({ open: true, user: null }) }
   const openEdit = (u: AuthUser) => {
@@ -170,6 +204,40 @@ export default function Users() {
           Online now only
         </button>
       </div>
+
+      {canManage && (
+        <div className="rounded-xl border border-amber-100 bg-amber-50/60 p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold text-amber-900">Stale Salesperson Activity</p>
+              <p className="text-xs text-amber-800">
+                {staleLoading ? 'Checking activity...' : `${staleUsers.length} salesperson(s) inactive for ${staleHours}+ hours`}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                className="input text-xs py-1.5 px-2"
+                value={staleHours}
+                onChange={(e) => setStaleHours(Number(e.target.value))}
+              >
+                <option value={24}>24h threshold</option>
+                <option value={72}>72h threshold</option>
+              </select>
+              <button onClick={sendStaleAlerts} disabled={sendingStaleAlerts} className="btn-secondary text-xs">
+                {sendingStaleAlerts && <Loader2 className="w-3 h-3 animate-spin" />}
+                Send Alerts
+              </button>
+            </div>
+          </div>
+          {staleUsers.length > 0 && (
+            <div className="text-xs text-amber-900">
+              {staleUsers.slice(0, 4).map((u) => (
+                <div key={u.id}>{u.firstName} {u.lastName}: {u.hoursSinceLastSeen}h inactive</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* SSO panel for BUSINESS_ADMIN */}
       {isBusinessAdmin && currentUser?.tenantId && (
