@@ -85,6 +85,7 @@ model Tenant {
   address         String?
   logo            String?
   baseCurrency    String   @default("USD")
+  presenceTimeoutMinutes Int @default(2)
   isActive        Boolean  @default(true)
   ssoEnabled      Boolean  @default(false)
   ssoProviders    Json     @default("[]")

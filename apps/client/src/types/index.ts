@@ -181,6 +181,7 @@ export interface Tenant {
   phone?: string
   isActive: boolean
   baseCurrency: string
+  presenceTimeoutMinutes?: number
   createdAt: string
   subscriptions?: Subscription[]
   _count?: { users: number; subsidiaries: number }
