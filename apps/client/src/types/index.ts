@@ -262,6 +262,9 @@ export interface SubscriptionTransaction {
   currentPlan?: Plan
   subscription?: Subscription
   tenant?: Pick<Tenant, 'id' | 'name' | 'email'>
+  initiatedBy?: { id: string; firstName: string; lastName: string; email: string }
+  verifiedBy?: { id: string; firstName: string; lastName: string; email: string }
+  activatedBy?: { id: string; firstName: string; lastName: string; email: string }
 }
 
 // ── Notifications ─────────────────────────────────────────────────────────────

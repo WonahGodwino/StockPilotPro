@@ -167,6 +167,15 @@ export default function SubscriptionTransactionsPage() {
     return { total: rows.length, active, pending }
   }, [rows])
 
+  const displayActor = (row: SubscriptionTransaction, kind: 'initiated' | 'verified' | 'activated') => {
+    const actor = kind === 'initiated' ? row.initiatedBy : kind === 'verified' ? row.verifiedBy : row.activatedBy
+    const id = kind === 'initiated' ? row.initiatedByUserId : kind === 'verified' ? row.verifiedByUserId : row.activatedByUserId
+    if (actor) {
+      return `${actor.firstName} ${actor.lastName}`.trim()
+    }
+    return id || '-'
+  }
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -223,6 +232,7 @@ export default function SubscriptionTransactionsPage() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Change</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Payment</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Effective Date</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Actors</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Proof</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Actions</th>
@@ -245,9 +255,16 @@ export default function SubscriptionTransactionsPage() {
                   <td className="px-4 py-3 text-gray-700">{row.paymentMethod} ({Number(row.amount).toFixed(2)} {row.currency})</td>
                   <td className="px-4 py-3"><span className="badge badge-info">{row.status}</span></td>
                   <td className="px-4 py-3 text-xs text-gray-600">
-                    <p>Initiated: {row.initiatedByUserId || '-'}</p>
-                    <p>Verified: {row.verifiedByUserId || '-'}</p>
-                    <p>Activated: {row.activatedByUserId || '-'}</p>
+                    {row.activatedAt
+                      ? new Date(row.activatedAt).toLocaleString()
+                      : row.subscription?.startDate
+                        ? new Date(row.subscription.startDate).toLocaleString()
+                        : '-'}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-gray-600">
+                    <p>Initiated: {displayActor(row, 'initiated')}</p>
+                    <p>Verified: {displayActor(row, 'verified')}</p>
+                    <p>Activated: {displayActor(row, 'activated')}</p>
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-600">
                     {row.transferProofUrl ? (
