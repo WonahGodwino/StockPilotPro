@@ -31,6 +31,13 @@ let syncStatus: SyncStatus = {
 }
 let syncHistory: SyncHistoryEntry[] = []
 
+function supportsBackgroundSync() {
+  if (typeof window === 'undefined') return false
+  const nav = navigator as Navigator & { serviceWorker?: ServiceWorkerContainer }
+  const hasSyncManager = typeof (window as Window & { SyncManager?: unknown }).SyncManager !== 'undefined'
+  return !!nav.serviceWorker && hasSyncManager
+}
+
 function getSyncDeviceId() {
   if (typeof window === 'undefined') return 'server'
   const key = 'stockpilot:sync-device-id'
@@ -116,7 +123,11 @@ function onOnline() {
 }
 
 function onOffline() {
-  toast.error('You are offline. Changes will sync when reconnected.')
+  if (supportsBackgroundSync()) {
+    toast.error('You are offline. Background sync will replay queued writes when network returns.')
+  } else {
+    toast.error('You are offline. Changes will sync when reconnected (background sync not supported).')
+  }
 }
 
 export async function syncPendingRecords() {
@@ -223,6 +234,9 @@ export function initSyncListener() {
   }
 
   listenerInitialized = true
+  if (!supportsBackgroundSync()) {
+    console.info('[SYNC] Background Sync not supported in this browser; using online and interval fallback.')
+  }
   void hydrateSyncHistory()
   window.addEventListener('online', onOnline)
   window.addEventListener('offline', onOffline)
