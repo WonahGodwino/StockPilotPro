@@ -76,6 +76,32 @@ enum BillingCycle {
   YEARLY
 }
 
+enum EnterpriseAiSignalClass {
+  PUBLIC
+  PLATFORM
+  TENANT
+}
+
+enum EnterpriseAiRecommendationType {
+  DEMAND_FORECAST
+  REORDER_ADVISOR
+  PRICING_MARGIN_ADVISOR
+  CASHFLOW_FORECAST
+  EXPENSE_RISK_ALERT
+  ANOMALY_DETECTION
+  BRANCH_PERFORMANCE
+  NL_ASSISTANT
+}
+
+enum EnterpriseAiRecommendationStatus {
+  OPEN
+  ACCEPTED
+  REJECTED
+  SNOOZED
+  NOT_RELEVANT
+  RESOLVED
+}
+
 // ──────────────────────────────────────────────
 // PLANS (created by SUPER_ADMIN)
 // ──────────────────────────────────────────────
@@ -649,4 +675,88 @@ model CurrencyRate {
   @@index([tenantId])
   @@index([date])
   @@index([fromCurrency, toCurrency])
+}
+
+model EnterpriseAiFeatureSnapshot {
+  id                String   @id @default(cuid())
+  tenantId          String
+  snapshotVersion   String
+  freshnessScore    Decimal? @db.Decimal(5, 2)
+  generatedAt       DateTime
+  featureSnapshot   Json
+  sourceCoverage    Json?
+  createdAt         DateTime @default(now())
+
+  @@index([tenantId, generatedAt])
+}
+
+model EnterpriseAiSignal {
+  id                String                  @id @default(cuid())
+  tenantId          String?
+  signalClass       EnterpriseAiSignalClass
+  source            String
+  signalKey         String
+  signalValue       Json
+  tags              Json?                   @default("[]")
+  effectiveDate     DateTime
+  createdByUserId   String?
+  createdAt         DateTime                @default(now())
+
+  @@index([tenantId, effectiveDate])
+  @@index([signalClass, effectiveDate])
+  @@index([signalKey, effectiveDate])
+}
+
+model EnterpriseAiRecommendation {
+  id                String                          @id @default(cuid())
+  tenantId          String
+  subsidiaryId      String?
+  recommendationType EnterpriseAiRecommendationType
+  status            EnterpriseAiRecommendationStatus @default(OPEN)
+  title             String
+  summary           String
+  confidenceScore   Decimal?                        @db.Decimal(5, 4)
+  riskScore         Decimal?                        @db.Decimal(5, 4)
+  reasonCodes       Json?                           @default("[]")
+  sourceProvenance  Json?                           @default("[]")
+  modelVersion      String
+  inputSnapshot     Json
+  outputPayload     Json
+  actedByUserId     String?
+  actedAt           DateTime?
+  snoozedUntil      DateTime?
+  feedbackNote      String?
+  createdAt         DateTime                        @default(now())
+  updatedAt         DateTime                        @updatedAt
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, recommendationType, createdAt])
+  @@index([subsidiaryId])
+}
+
+model EnterpriseAiRecommendationDecision {
+  id                String   @id @default(cuid())
+  recommendationId  String
+  tenantId          String
+  userId            String
+  action            String
+  note              String?
+  createdAt         DateTime @default(now())
+
+  @@index([recommendationId, createdAt])
+  @@index([tenantId, createdAt])
+}
+
+model EnterpriseAiMetric {
+  id                String   @id @default(cuid())
+  tenantId          String?
+  metricKey         String
+  metricValue       Decimal  @db.Decimal(18, 6)
+  dimensions        Json?    @default("{}")
+  measuredAt        DateTime @default(now())
+  createdAt         DateTime @default(now())
+
+  @@index([tenantId, metricKey, measuredAt])
+  @@index([metricKey, measuredAt])
 }

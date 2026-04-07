@@ -6,7 +6,7 @@ import type { UserRole } from '@/types'
 import {
   LayoutDashboard, Package, ShoppingCart, Receipt, BarChart2,
   Building2, Users, Bell, ChevronLeft, ChevronRight,
-  TrendingUp, Shield, ChevronDown, Settings, ClipboardList, BadgeCheck,
+  TrendingUp, Shield, ChevronDown, Settings, ClipboardList, BadgeCheck, Bot,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -47,6 +47,7 @@ const navSections: NavSection[] = [
     label: 'Management',
     items: [
       { label: 'Reports', href: '/reports', icon: BarChart2, roles: ['SUPER_ADMIN', 'BUSINESS_ADMIN'] },
+      { label: 'Enterprise AI', href: '/enterprise-ai', icon: Bot, roles: ['SUPER_ADMIN', 'BUSINESS_ADMIN'] },
       { label: 'Subsidiaries', href: '/subsidiaries', icon: Building2, roles: ['SUPER_ADMIN', 'BUSINESS_ADMIN'] },
       { label: 'Users', href: '/users', icon: Users, roles: ['SUPER_ADMIN', 'AGENT', 'BUSINESS_ADMIN'] },
       { label: 'Settings', href: '/settings', icon: Settings, roles: ['SUPER_ADMIN', 'AGENT', 'BUSINESS_ADMIN', 'SALESPERSON'] },

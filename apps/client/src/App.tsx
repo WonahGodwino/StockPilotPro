@@ -26,6 +26,7 @@ const TrustedCustomersPage = lazy(() => import('@/pages/superadmin/TrustedCustom
 const SubscriptionRemindersPage = lazy(() => import('@/pages/superadmin/SubscriptionReminders'))
 const SubscriptionTransactionsPage = lazy(() => import('@/pages/superadmin/SubscriptionTransactions'))
 const SettingsPage = lazy(() => import('@/pages/Settings'))
+const EnterpriseAIPage = lazy(() => import('@/pages/EnterpriseAI'))
 
 function PageLoader() {
   return (
@@ -169,6 +170,7 @@ export default function App() {
             <Route path="users" element={<Users />} />
             <Route path="notifications" element={<Notifications />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="enterprise-ai" element={<EnterpriseAIPage />} />
             {/* Super Admin routes */}
             <Route
               path="admin/tenants"
@@ -229,6 +231,7 @@ export default function App() {
             <Route path="users" element={<Users />} />
             <Route path="notifications" element={<Notifications />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="enterprise-ai" element={<EnterpriseAIPage />} />
             {/* Super Admin routes */}
             <Route
               path="admin/tenants"

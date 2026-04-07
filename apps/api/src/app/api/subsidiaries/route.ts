@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { isSuperAdmin, isBusinessAdmin } from '@/lib/rbac'
 import { blocksSubsidiaryCreation, getActiveSubscriptionForTenant, isEnterprisePlan } from '@/lib/subscription-enforcement'
+import { logAudit } from '@/lib/audit'
 
 const createSchema = z.object({
   name: z.string().min(1),
@@ -53,11 +54,20 @@ export async function POST(req: NextRequest) {
     const tenantId = isSuperAdmin(user) ? (data.tenantId || user.tenantId!) : user.tenantId!
     if (!tenantId) return apiError('tenantId is required', 400)
 
+    let planDecision: Record<string, unknown> | null = null
+
     // Enforce branch limits from active subscription package.
     if (!isSuperAdmin(user)) {
       const subscription = await getActiveSubscriptionForTenant(tenantId)
 
       if (!subscription) return apiError('No active subscription', 403)
+
+      planDecision = {
+        planId: subscription.planId,
+        planName: subscription.plan.name,
+        maxSubsidiaries: subscription.plan.maxSubsidiaries,
+        enterpriseBypass: isEnterprisePlan(subscription.plan),
+      }
 
       if (blocksSubsidiaryCreation(subscription.plan)) {
         return apiError('Your current package does not allow branch creation. Upgrade required.', 403)
@@ -66,6 +76,18 @@ export async function POST(req: NextRequest) {
       if (!isEnterprisePlan(subscription.plan)) {
         const count = await prisma.subsidiary.count({ where: { tenantId, archived: false } })
         if (count >= subscription.plan.maxSubsidiaries) {
+          await logAudit({
+            tenantId,
+            userId: user.userId,
+            action: 'SUBSIDIARY_LIMIT_BLOCK',
+            entity: 'subsidiary',
+            newValues: {
+              ...planDecision,
+              existingCount: count,
+              attemptedName: data.name,
+            },
+            req,
+          })
           return apiError(`Subsidiary limit reached (${subscription.plan.maxSubsidiaries}). Upgrade your plan.`, 403)
         }
       }
@@ -80,6 +102,19 @@ export async function POST(req: NextRequest) {
         tenantId,
         createdBy: user.userId,
       },
+    })
+
+    await logAudit({
+      tenantId,
+      userId: user.userId,
+      action: 'CREATE',
+      entity: 'subsidiary',
+      entityId: subsidiary.id,
+      newValues: {
+        name: subsidiary.name,
+        ...planDecision,
+      },
+      req,
     })
 
     return NextResponse.json({ data: subsidiary }, { status: 201 })
