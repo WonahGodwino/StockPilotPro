@@ -6,6 +6,7 @@ import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { isSuperAdmin } from '@/lib/rbac'
 import { logAudit } from '@/lib/audit'
 import { appendLifecycleEvent, deriveTransactionStatus, detectChangeType } from '@/lib/subscription-transactions'
+import { getAgentTenantIds, isAgent, isTenantAssignedToAgent } from '@/lib/agent-access'
 
 const createSchema = z.object({
   tenantId: z.string().optional(),
@@ -33,11 +34,22 @@ export async function GET(req: NextRequest) {
     const user = authenticate(req)
     const url = new URL(req.url)
 
-    const tenantId = isSuperAdmin(user)
-      ? (url.searchParams.get('tenantId') || undefined)
-      : user.tenantId || undefined
+    const requestedTenantId = url.searchParams.get('tenantId') || undefined
 
-    if (!tenantId && !isSuperAdmin(user)) return apiError('Forbidden', 403)
+    let tenantId: string | undefined
+    if (isSuperAdmin(user)) {
+      tenantId = requestedTenantId
+    } else if (isAgent(user)) {
+      if (requestedTenantId) {
+        const allowed = await isTenantAssignedToAgent(user.userId, requestedTenantId)
+        if (!allowed) return apiError('Forbidden', 403)
+        tenantId = requestedTenantId
+      }
+    } else {
+      tenantId = user.tenantId || undefined
+    }
+
+    if (!tenantId && !isSuperAdmin(user) && !isAgent(user)) return apiError('Forbidden', 403)
 
     const status = url.searchParams.get('status') || undefined
     const paymentMethod = url.searchParams.get('paymentMethod') || undefined
@@ -53,13 +65,16 @@ export async function GET(req: NextRequest) {
         }
       : undefined
 
+    const agentTenantIds = isAgent(user) && !tenantId ? await getAgentTenantIds(user.userId) : []
+
     const where = {
       ...(tenantId ? { tenantId } : {}),
+      ...(isAgent(user) && !tenantId ? { tenantId: { in: agentTenantIds } } : {}),
       ...(status ? { status: status as never } : {}),
       ...(paymentMethod ? { paymentMethod: paymentMethod as never } : {}),
       ...(changeType ? { changeType: changeType as never } : {}),
       ...(createdAt ? { createdAt } : {}),
-    }
+    } as never
 
     const data = await prisma.subscriptionTransaction.findMany({
       where,
@@ -154,14 +169,29 @@ export async function POST(req: NextRequest) {
   try {
     const user = authenticate(req)
     if (user.role === UserRole.SALESPERSON) return apiError('Forbidden', 403)
+    const agentUser = isAgent(user)
 
     const body = await req.json()
     const parsed = createSchema.parse(body)
 
-    const tenantId = isSuperAdmin(user) ? parsed.tenantId : user.tenantId
+    const superAdmin = isSuperAdmin(user)
+    if (!superAdmin && !agentUser && parsed.tenantId) {
+      return apiError('You can only initiate transactions for your own business or organization', 403)
+    }
+
+    const tenantId = superAdmin
+      ? parsed.tenantId
+      : agentUser
+        ? parsed.tenantId
+        : user.tenantId
 
     if (!tenantId) return apiError('Tenant is required', 422)
-    if (!isSuperAdmin(user) && tenantId !== user.tenantId) return apiError('Forbidden', 403)
+    if (agentUser) {
+      const allowed = await isTenantAssignedToAgent(user.userId, tenantId)
+      if (!allowed) return apiError('You can only initiate transactions for businesses assigned to you', 403)
+    } else if (!superAdmin && tenantId !== user.tenantId) {
+      return apiError('You can only initiate transactions for your own business or organization', 403)
+    }
 
     const [tenant, requestedPlan] = await Promise.all([
       prisma.tenant.findUnique({ where: { id: tenantId } }),
@@ -187,7 +217,7 @@ export async function POST(req: NextRequest) {
 
     const now = new Date()
     const proofUploader = parsed.transferProofUploadedByUserId || user.userId
-    if (parsed.transferProofUploadedByUserId && parsed.transferProofUploadedByUserId !== user.userId && !isSuperAdmin(user)) {
+    if (parsed.transferProofUploadedByUserId && parsed.transferProofUploadedByUserId !== user.userId && !superAdmin) {
       return apiError('Invalid transfer proof uploader metadata', 403)
     }
     const initialEvents = appendLifecycleEvent([], {

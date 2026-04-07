@@ -1,10 +1,17 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { Search, Barcode, Trash2, Minus, Plus, ShoppingCart, WifiOff, History, ShoppingBag, AlertTriangle } from 'lucide-react'
 import { useCartStore } from '@/store/cart.store'
-import type { Product, Sale, SaleCheckoutPayload } from '@/types'
+import type { Product, Sale, SaleCheckoutPayload, Subsidiary } from '@/types'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { getProductByBarcode, searchCachedProducts, addPendingSale } from '@/lib/db'
+import {
+  addPendingSale,
+  getCachedSalesForTenant,
+  getCachedProductsForTenant,
+  getPendingSaleRecords,
+  getProductByBarcode,
+  replaceCachedSalesForTenant,
+} from '@/lib/db'
 import { useAuthStore } from '@/store/auth.store'
 import Receipt from '@/components/sales/Receipt'
 import Pagination from '@/components/Pagination'
@@ -71,23 +78,185 @@ export default function SalesPage() {
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyPage, setHistoryPage] = useState(1)
   const [historyTotal, setHistoryTotal] = useState(0)
+  const [historySubsidiaries, setHistorySubsidiaries] = useState<Subsidiary[]>([])
+  const [historySubsidiaryId, setHistorySubsidiaryId] = useState<string>('all')
+
+  const canFilterHistoryBySubsidiary = user?.role !== 'SALESPERSON'
+
+  const applySalesRoleFilter = useCallback((records: Sale[]) => {
+    if (!user) return []
+
+    if (user.role === 'SALESPERSON') {
+      return records.filter((item) => {
+        if (item.userId !== user.id) return false
+        if (user.subsidiaryId && item.subsidiaryId !== user.subsidiaryId) return false
+        return true
+      })
+    }
+
+    return records
+  }, [user])
+
+  const applyHistorySubsidiaryFilter = useCallback((records: Sale[]) => {
+    if (!canFilterHistoryBySubsidiary) return records
+    if (!historySubsidiaryId || historySubsidiaryId === 'all') return records
+    return records.filter((item) => item.subsidiaryId === historySubsidiaryId)
+  }, [canFilterHistoryBySubsidiary, historySubsidiaryId])
+
+  const loadHistorySubsidiaries = useCallback(async () => {
+    if (!canFilterHistoryBySubsidiary) return
+    try {
+      const { data } = await api.get<{ data: Subsidiary[] }>('/subsidiaries')
+      setHistorySubsidiaries(data.data || [])
+    } catch {
+      setHistorySubsidiaries([])
+    }
+  }, [canFilterHistoryBySubsidiary])
+
+  const toLocalOfflineSale = useCallback((
+    record: Awaited<ReturnType<typeof getPendingSaleRecords>>[number],
+  ): Sale => {
+    const subtotal = record.data.items.reduce((sum, item) => sum + (item.quantity * item.unitPrice) - item.discount, 0)
+    const totalAmount = Math.max(0, subtotal - (record.data.discount || 0))
+    return {
+      id: `offline-${record.localId}`,
+      tenantId: user?.tenantId || '',
+      subsidiaryId: record.data.subsidiaryId,
+      userId: user?.id || 'offline-user',
+      totalAmount,
+      discount: record.data.discount || 0,
+      amountPaid: record.data.amountPaid || 0,
+      paymentMethod: record.data.paymentMethod,
+      receiptNumber: `OFFLINE-${record.localId.slice(-6).toUpperCase()}`,
+      currency: record.data.currency,
+      fxRate: Number(record.data.fxRate) || 1,
+      notes: record.data.notes,
+      createdAt: record.createdAt,
+      items: record.data.items.map((item, index) => ({
+        id: `${record.localId}-${index}`,
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        costPrice: item.costPrice,
+        discount: item.discount,
+        subtotal: (item.quantity * item.unitPrice) - item.discount,
+      })),
+      user: user ? { firstName: user.firstName, lastName: user.lastName } : { firstName: 'Offline', lastName: 'User' },
+    }
+  }, [user])
+
+  const refreshOfflineSalesCache = useCallback(async () => {
+    if (!navigator.onLine || !user?.tenantId) return
+
+    const allAccessible: Sale[] = []
+    let cursor = 1
+    const pageSize = 200
+    while (cursor <= 50) {
+      const params = new URLSearchParams()
+      params.set('page', String(cursor))
+      params.set('limit', String(pageSize))
+      const { data } = await api.get(`/sales?${params}`)
+      const rows = data.data as Sale[]
+      allAccessible.push(...rows)
+      if (rows.length < pageSize || allAccessible.length >= Number(data.total || 0)) break
+      cursor += 1
+    }
+
+    await replaceCachedSalesForTenant(user.tenantId, allAccessible)
+  }, [user?.tenantId])
+
+  useEffect(() => {
+    setSaleCurrency(baseCurrency)
+    setSaleFxRate(1)
+    setRateError(null)
+  }, [baseCurrency])
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true)
     try {
+      const pendingOffline = await getPendingSaleRecords()
+
+      if (!navigator.onLine && user?.tenantId) {
+        const cached = await getCachedSalesForTenant(user.tenantId)
+        const cachedScoped = applyHistorySubsidiaryFilter(applySalesRoleFilter(cached))
+        const existingRefs = new Set<string>()
+        for (const sale of cachedScoped) {
+          const ref = (sale as Sale & { syncRef?: string; transactionRef?: string }).syncRef
+            || (sale as Sale & { syncRef?: string; transactionRef?: string }).transactionRef
+          if (ref) existingRefs.add(ref)
+        }
+
+        const unresolvedPending = pendingOffline
+          .filter((record) => {
+            const dedupeRef = record.data.transactionRef || record.data.syncRef || record.localId
+            return !existingRefs.has(dedupeRef)
+          })
+          .map((record) => toLocalOfflineSale(record))
+
+        const merged = [...unresolvedPending, ...cachedScoped]
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        const start = (historyPage - 1) * HISTORY_LIMIT
+        const end = start + HISTORY_LIMIT
+        setSales(merged.slice(start, end))
+        setHistoryTotal(merged.length)
+        return
+      }
+
       const params = new URLSearchParams()
       params.set('page', String(historyPage))
       params.set('limit', String(HISTORY_LIMIT))
+      if (canFilterHistoryBySubsidiary && historySubsidiaryId !== 'all') {
+        params.set('subsidiaryId', historySubsidiaryId)
+      }
       const { data } = await api.get(`/sales?${params}`)
-      setSales(data.data)
-      setHistoryTotal(data.total)
+      const remoteSales = data.data as Sale[]
+      const existingRefs = new Set<string>()
+      for (const sale of remoteSales) {
+        const ref = (sale as Sale & { syncRef?: string; transactionRef?: string }).syncRef
+          || (sale as Sale & { syncRef?: string; transactionRef?: string }).transactionRef
+        if (ref) existingRefs.add(ref)
+      }
+
+      const unresolvedPending = pendingOffline
+        .filter((record) => {
+          const dedupeRef = record.data.transactionRef || record.data.syncRef || record.localId
+          if (canFilterHistoryBySubsidiary && historySubsidiaryId !== 'all' && record.data.subsidiaryId !== historySubsidiaryId) return false
+          return !existingRefs.has(dedupeRef)
+        })
+        .map((record) => toLocalOfflineSale(record))
+
+      const merged = historyPage === 1 ? [...unresolvedPending, ...remoteSales] : remoteSales
+      setSales(applyHistorySubsidiaryFilter(applySalesRoleFilter(merged)))
+      setHistoryTotal(Number(data.total || 0) + unresolvedPending.length)
+
+      void refreshOfflineSalesCache().catch(() => undefined)
     } catch { toast.error('Failed to load sales history') }
     finally { setHistoryLoading(false) }
-  }, [historyPage])
+  }, [HISTORY_LIMIT, applyHistorySubsidiaryFilter, applySalesRoleFilter, canFilterHistoryBySubsidiary, historyPage, historySubsidiaryId, refreshOfflineSalesCache, toLocalOfflineSale, user?.tenantId])
 
   useEffect(() => {
     if (tab === 'history') loadHistory()
   }, [tab, historyPage, loadHistory])
+
+  useEffect(() => {
+    if (tab !== 'history') return
+    void loadHistorySubsidiaries()
+  }, [loadHistorySubsidiaries, tab])
+
+  useEffect(() => {
+    setHistoryPage(1)
+  }, [historySubsidiaryId])
+
+  useEffect(() => {
+    if (tab !== 'history') return
+    const refresh = () => { void loadHistory() }
+    window.addEventListener('stockpilot:sync-status', refresh as EventListener)
+    window.addEventListener('online', refresh)
+    return () => {
+      window.removeEventListener('stockpilot:sync-status', refresh as EventListener)
+      window.removeEventListener('online', refresh)
+    }
+  }, [loadHistory, tab])
 
   // Auto-set subsidiaryId from the authenticated user if not already set
   useEffect(() => {
@@ -104,11 +273,17 @@ export default function SalesPage() {
         const { data } = await api.get(`/products?search=${encodeURIComponent(q)}&status=ACTIVE&limit=10`)
         setProducts(data.data)
       } else {
-        const cached = await searchCachedProducts(q)
-        setProducts(cached)
+        const cached = user?.tenantId
+          ? await getCachedProductsForTenant(user.tenantId, user.subsidiaryId || undefined)
+          : []
+        const normalized = q.toLowerCase()
+        const matches = cached
+          .filter((p) => p.status === 'ACTIVE')
+          .filter((p) => p.name.toLowerCase().includes(normalized) || p.barcode === q)
+        setProducts(matches.slice(0, 10))
       }
     } catch { setProducts([]) }
-  }, [])
+  }, [user?.subsidiaryId, user?.tenantId])
 
   useEffect(() => {
     const t = setTimeout(() => loadProducts(searchQuery), 300)
@@ -277,12 +452,28 @@ export default function SalesPage() {
       {tab === 'history' ? (
         /* ── Sales History ── */
         <div className="card overflow-hidden">
+          {canFilterHistoryBySubsidiary && (
+            <div className="px-4 pt-4 pb-2 flex items-center gap-3">
+              <label className="text-xs font-semibold uppercase tracking-wider text-gray-500">Subsidiary</label>
+              <select
+                className="input max-w-xs"
+                value={historySubsidiaryId}
+                onChange={(e) => setHistorySubsidiaryId(e.target.value)}
+              >
+                <option value="all">All Subsidiaries</option>
+                {historySubsidiaries.map((subsidiary) => (
+                  <option key={subsidiary.id} value={subsidiary.id}>{subsidiary.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Receipt #</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Subsidiary</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">By</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Payment</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Currency</th>
@@ -291,10 +482,10 @@ export default function SalesPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {historyLoading ? (
-                  <tr><td colSpan={6} className="text-center py-10 text-gray-400">Loading...</td></tr>
+                  <tr><td colSpan={7} className="text-center py-10 text-gray-400">Loading...</td></tr>
                 ) : sales.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="text-center py-12">
+                    <td colSpan={7} className="text-center py-12">
                       <ShoppingCart className="w-10 h-10 text-gray-300 mx-auto mb-2" />
                       <p className="text-gray-400 text-sm">No sales recorded yet</p>
                     </td>
@@ -302,8 +493,18 @@ export default function SalesPage() {
                 ) : (
                   sales.map((s) => (
                     <tr key={s.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-900">{s.receiptNumber}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900">
+                        <div className="flex items-center gap-2">
+                          <span>{s.receiptNumber}</span>
+                          {s.id.startsWith('offline-') && (
+                            <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+                              Pending Offline
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-gray-500 text-xs">{new Date(s.createdAt).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-gray-500 text-xs">{s.subsidiary?.name || '—'}</td>
                       <td className="px-4 py-3 text-gray-500 text-xs">
                         {s.user ? `${s.user.firstName} ${s.user.lastName}` : '—'}
                       </td>

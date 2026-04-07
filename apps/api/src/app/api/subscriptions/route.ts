@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { isSuperAdmin } from '@/lib/rbac'
 import { logAudit } from '@/lib/audit'
+import { isAgent, isTenantAssignedToAgent, getAgentTenantIds } from '@/lib/agent-access'
 
 const createSchema = z.object({
   tenantId: z.string(),
@@ -27,13 +28,29 @@ export async function OPTIONS() {
 export async function GET(req: NextRequest) {
   try {
     const user = authenticate(req)
+    const requestedTenantId = new URL(req.url).searchParams.get('tenantId') || undefined
 
-    const tenantId = isSuperAdmin(user)
-      ? new URL(req.url).searchParams.get('tenantId') || undefined
-      : user.tenantId!
+    let tenantId: string | undefined
+
+    if (isSuperAdmin(user)) {
+      tenantId = requestedTenantId
+    } else if (isAgent(user)) {
+      if (requestedTenantId) {
+        const allowed = await isTenantAssignedToAgent(user.userId, requestedTenantId)
+        if (!allowed) return apiError('Forbidden', 403)
+        tenantId = requestedTenantId
+      }
+    } else {
+      tenantId = user.tenantId || undefined
+    }
+
+    const agentTenantIds = isAgent(user) && !tenantId ? await getAgentTenantIds(user.userId) : []
 
     const subscriptions = await prisma.subscription.findMany({
-      where: { ...(tenantId ? { tenantId } : {}) },
+      where: {
+        ...(tenantId ? { tenantId } : {}),
+        ...(isAgent(user) && !tenantId ? { tenantId: { in: agentTenantIds } } : {}),
+      },
       include: {
         plan: true,
         tenant: { select: { name: true, email: true } },

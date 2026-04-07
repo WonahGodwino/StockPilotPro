@@ -30,6 +30,45 @@ function getDateRange(period: string): { startDate: Date; endDate: Date } {
   return { startDate, endDate }
 }
 
+function buildIntervalRanges(period: string, startDate: Date, endDate: Date) {
+  let intervals = 30
+  const daysDiff = Math.max(
+    1,
+    Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
+  )
+
+  if (period === 'yearly') intervals = 12
+  else if (period === 'quarterly') intervals = Math.min(13, Math.ceil(daysDiff / 7))
+  else if (period === 'weekly') intervals = 7
+  else intervals = Math.min(30, daysDiff)
+
+  return Array.from({ length: intervals }, (_, i) => {
+    const date = new Date(startDate)
+    if (period === 'yearly') {
+      date.setMonth(date.getMonth() + i)
+    } else if (period === 'quarterly') {
+      date.setDate(date.getDate() + Math.floor(daysDiff / intervals) * i)
+    } else {
+      date.setDate(date.getDate() + i)
+    }
+
+    const nextIntervalDate = new Date(date)
+    if (period === 'yearly') {
+      nextIntervalDate.setMonth(nextIntervalDate.getMonth() + 1)
+    } else if (period === 'quarterly') {
+      nextIntervalDate.setDate(nextIntervalDate.getDate() + Math.floor(daysDiff / intervals))
+    } else {
+      nextIntervalDate.setDate(nextIntervalDate.getDate() + 1)
+    }
+
+    return {
+      date: date.toISOString().split('T')[0],
+      start: date,
+      end: nextIntervalDate,
+    }
+  })
+}
+
 export async function GET(req: NextRequest) {
   try {
     const user = authenticate(req)
@@ -65,30 +104,17 @@ export async function GET(req: NextRequest) {
       },
     })
 
-    // Get subscription stats
-    const [activeSubscriptions, allSubscriptions] = await Promise.all([
-      prisma.subscription.count({
-          where: { 
-            status: 'ACTIVE',
-            tenantId: { not: user.tenantId! },
-            createdAt: { gte: startDate, lte: endDate },
-          },
-      }),
-      prisma.subscription.findMany({
-          where: { 
-            tenantId: { not: user.tenantId! },
-            createdAt: { gte: startDate, lte: endDate },
-          },
-        include: { plan: true },
-      }),
-    ])
+    // Get current subscription status summary across all tenants (not date-windowed).
+    const allSubscriptions = await prisma.subscription.findMany({
+      where: {
+        tenantId: { not: user.tenantId! },
+      },
+      include: { plan: true },
+    })
 
-    const expiredSubscriptions = allSubscriptions.filter(
-      (s) => s.status === 'EXPIRED'
-    ).length
-    const suspendedSubscriptions = allSubscriptions.filter(
-      (s) => s.status === 'SUSPENDED'
-    ).length
+    const activeSubscriptions = allSubscriptions.filter((s) => s.status === 'ACTIVE').length
+    const expiredSubscriptions = allSubscriptions.filter((s) => s.status === 'EXPIRED').length
+    const suspendedSubscriptions = allSubscriptions.filter((s) => s.status === 'SUSPENDED').length
 
     // Calculate total revenue and build per-plan breakdown
     const activeSubscriptions_list = allSubscriptions.filter((s) => s.status === 'ACTIVE')
@@ -164,50 +190,51 @@ export async function GET(req: NextRequest) {
     }
     const planBreakdown = Array.from(planMap.values()).sort((a, b) => b.revenue - a.revenue)
 
-    // Subscription trend for date range
-    const subscriptionsByDate = allSubscriptions
+    const intervalRanges = buildIntervalRanges(period, startDate, endDate)
 
-    // Determine number of intervals based on period
-    let intervals = 30
-    const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24))
-    
-    if (period === 'yearly') intervals = 12
-    else if (period === 'quarterly') intervals = Math.min(13, Math.ceil(daysDiff / 7))
-    else if (period === 'weekly') intervals = 7
-    else intervals = Math.min(30, daysDiff)
+    // Build subscription trend from effective lifecycle timestamps for activations,
+    // and subscription update timestamps for status transitions.
+    const [activatedTransactions, expiredTransitions, suspendedTransitions] = await Promise.all([
+      prisma.subscriptionTransaction.findMany({
+        where: {
+          tenantId: { not: user.tenantId! },
+          status: 'ACTIVE',
+          OR: [
+            { activatedAt: { gte: startDate, lte: endDate } },
+            { verifiedAt: { gte: startDate, lte: endDate } },
+            { initiatedAt: { gte: startDate, lte: endDate } },
+          ],
+        },
+        select: { initiatedAt: true, verifiedAt: true, activatedAt: true },
+      }),
+      prisma.subscription.findMany({
+        where: {
+          tenantId: { not: user.tenantId! },
+          status: 'EXPIRED',
+          updatedAt: { gte: startDate, lte: endDate },
+        },
+        select: { updatedAt: true },
+      }),
+      prisma.subscription.findMany({
+        where: {
+          tenantId: { not: user.tenantId! },
+          status: 'SUSPENDED',
+          updatedAt: { gte: startDate, lte: endDate },
+        },
+        select: { updatedAt: true },
+      }),
+    ])
 
-    // Group by interval and count by status
-    const subscriptionTrend = Array.from({ length: intervals }, (_, i) => {
-      const date = new Date(startDate)
-      if (period === 'yearly') {
-        date.setMonth(date.getMonth() + i)
-      } else if (period === 'quarterly') {
-        date.setDate(date.getDate() + Math.floor(daysDiff / intervals) * i)
-      } else {
-        date.setDate(date.getDate() + i)
-      }
-      
-      const dateStr = date.toISOString().split('T')[0]
-      const nextIntervalDate = new Date(date)
-      if (period === 'yearly') {
-        nextIntervalDate.setMonth(nextIntervalDate.getMonth() + 1)
-      } else if (period === 'quarterly') {
-        nextIntervalDate.setDate(nextIntervalDate.getDate() + Math.floor(daysDiff / intervals))
-      } else {
-        nextIntervalDate.setDate(nextIntervalDate.getDate() + 1)
-      }
+    const activeEventDates = activatedTransactions
+      .map((tx) => tx.activatedAt ?? tx.verifiedAt ?? tx.initiatedAt)
+      .filter((d): d is Date => Boolean(d))
 
-      const rangeSubscriptions = subscriptionsByDate.filter(
-        (s) => s.createdAt >= date && s.createdAt < nextIntervalDate
-      )
-
-      return {
-        date: dateStr,
-        active: rangeSubscriptions.filter((s) => s.status === 'ACTIVE').length,
-        expired: rangeSubscriptions.filter((s) => s.status === 'EXPIRED').length,
-        suspended: rangeSubscriptions.filter((s) => s.status === 'SUSPENDED').length,
-      }
-    })
+    const subscriptionTrend = intervalRanges.map((range) => ({
+      date: range.date,
+      active: activeEventDates.filter((d) => d >= range.start && d < range.end).length,
+      expired: expiredTransitions.filter((s) => s.updatedAt >= range.start && s.updatedAt < range.end).length,
+      suspended: suspendedTransitions.filter((s) => s.updatedAt >= range.start && s.updatedAt < range.end).length,
+    }))
 
     // Company growth trend for date range
     const companiesByDate = await prisma.tenant.findMany({
@@ -219,33 +246,14 @@ export async function GET(req: NextRequest) {
     })
 
     let runningCount = totalCompanies - companiesByDate.length
-    const companyGrowth = Array.from({ length: intervals }, (_, i) => {
-      const date = new Date(startDate)
-      if (period === 'yearly') {
-        date.setMonth(date.getMonth() + i)
-      } else if (period === 'quarterly') {
-        date.setDate(date.getDate() + Math.floor(daysDiff / intervals) * i)
-      } else {
-        date.setDate(date.getDate() + i)
-      }
-      
-      const dateStr = date.toISOString().split('T')[0]
-      const nextIntervalDate = new Date(date)
-      if (period === 'yearly') {
-        nextIntervalDate.setMonth(nextIntervalDate.getMonth() + 1)
-      } else if (period === 'quarterly') {
-        nextIntervalDate.setDate(nextIntervalDate.getDate() + Math.floor(daysDiff / intervals))
-      } else {
-        nextIntervalDate.setDate(nextIntervalDate.getDate() + 1)
-      }
-
+    const companyGrowth = intervalRanges.map((range) => {
       const newCompanies = companiesByDate.filter(
-        (c) => c.createdAt >= date && c.createdAt < nextIntervalDate
+        (c) => c.createdAt >= range.start && c.createdAt < range.end
       ).length
 
       runningCount += newCompanies
 
-      return { date: dateStr, count: runningCount }
+      return { date: range.date, count: runningCount }
     })
 
     return NextResponse.json({

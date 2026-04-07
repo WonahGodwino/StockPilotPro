@@ -55,6 +55,7 @@ export async function GET(req: NextRequest) {
   try {
     const user = authenticate(req)
     requirePermission(user, 'manage:users')
+    if (isSuperAdmin(user)) return apiError('SUPER_ADMIN does not manage tenant salesperson activity', 403)
 
     const { searchParams } = new URL(req.url)
     const requestedTenantId = searchParams.get('tenantId') || undefined
@@ -109,6 +110,7 @@ export async function POST(req: NextRequest) {
   try {
     const user = authenticate(req)
     requirePermission(user, 'manage:users')
+    if (isSuperAdmin(user)) return apiError('SUPER_ADMIN does not manage tenant salesperson activity', 403)
 
     const { searchParams } = new URL(req.url)
     const requestedTenantId = searchParams.get('tenantId') || undefined

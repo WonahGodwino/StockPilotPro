@@ -11,6 +11,10 @@ export async function GET(req: NextRequest) {
   try {
     const user = authenticate(req)
 
+    if (isSuperAdmin(user)) {
+      return apiError('SUPER_ADMIN does not use tenant notifications', 403)
+    }
+
     const { searchParams } = new URL(req.url)
 
     const tenantId = isSuperAdmin(user)

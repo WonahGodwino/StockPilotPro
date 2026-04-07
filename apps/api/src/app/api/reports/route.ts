@@ -10,6 +10,12 @@ function getDateRange(period: string, from?: string, to?: string) {
   switch (period) {
     case 'daily':
       return { gte: new Date(now.setHours(0, 0, 0, 0)), lte: new Date() }
+    case 'weekly': {
+      const start = new Date(now)
+      start.setDate(now.getDate() - 6)
+      start.setHours(0, 0, 0, 0)
+      return { gte: start, lte: new Date() }
+    }
     case 'monthly': {
       const start = new Date(now.getFullYear(), now.getMonth(), 1)
       return { gte: start, lte: new Date() }
@@ -71,6 +77,16 @@ async function getTransactionToBaseRate(tenantId: string, baseCurrency: string, 
   if (inverse?.rate) return 1 / Number(inverse.rate)
 
   return 1
+}
+
+function toBaseExpenseAmount(amountRaw: unknown, fxRateRaw: unknown, currency: string, baseCurrency: string): number {
+  const amount = Number(amountRaw)
+  if (!Number.isFinite(amount)) return 0
+  if (currency === baseCurrency) return amount
+
+  const rate = Number(fxRateRaw)
+  if (!Number.isFinite(rate) || rate <= 0) return amount
+  return amount / rate
 }
 
 export async function GET(req: NextRequest) {
@@ -149,17 +165,13 @@ export async function GET(req: NextRequest) {
     })
 
     const totalExpenses = (expensesRaw as Array<{ amount: unknown; category: string; currency: string; fxRate: unknown }>).reduce((s: number, e) => {
-      const amount = Number(e.amount)
-      const rate = Number(e.fxRate)
-      return s + (e.currency === baseCurrency ? amount : amount / rate)
+      return s + toBaseExpenseAmount(e.amount, e.fxRate, e.currency, baseCurrency)
     }, 0)
 
     // Expense breakdown by category (in base currency)
     const expenseByCatMap: Record<string, number> = {}
     for (const e of expensesRaw) {
-      const amount = Number(e.amount)
-      const rate = Number(e.fxRate)
-      const converted = e.currency === baseCurrency ? amount : amount / rate
+      const converted = toBaseExpenseAmount(e.amount, e.fxRate, e.currency, baseCurrency)
       expenseByCatMap[e.category] = (expenseByCatMap[e.category] || 0) + converted
     }
 

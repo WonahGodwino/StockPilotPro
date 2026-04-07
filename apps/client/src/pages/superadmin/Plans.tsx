@@ -1,12 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import api from '@/lib/api'
 import type { Plan } from '@/types'
 import toast from 'react-hot-toast'
 import { Plus, CreditCard, Edit, X, Loader2, Check, Zap } from 'lucide-react'
 import { SUPPORTED_CURRENCIES, makeCurrencyFormatter } from '@/lib/currency'
+import { getSuperadminCacheKey, isOnlineNow, readSuperadminCache, writeSuperadminCache } from '@/lib/superadminCache'
 
-interface PlanForm { name: string; price: number; priceCurrency: string; maxBranches: number; features: string; billingCycle: string }
-const emptyForm: PlanForm = { name: '', price: 0, priceCurrency: 'USD', maxBranches: 1, features: '', billingCycle: 'MONTHLY' }
+interface PlanForm { name: string; price: number; priceCurrency: string; maxBranches: number; benefits: string; billingCycle: string }
+const emptyForm: PlanForm = { name: '', price: 0, priceCurrency: 'USD', maxBranches: 1, benefits: '', billingCycle: 'MONTHLY' }
 
 export default function PlansPage() {
   const [plans, setPlans] = useState<Plan[]>([])
@@ -14,17 +15,41 @@ export default function PlansPage() {
   const [modal, setModal] = useState<{ open: boolean; plan: Plan | null }>({ open: false, plan: null })
   const [form, setForm] = useState<PlanForm>(emptyForm)
   const [saving, setSaving] = useState(false)
+  const [isOnline, setIsOnline] = useState(isOnlineNow())
+
+  const cacheKey = useMemo(() => getSuperadminCacheKey('plans'), [])
 
   const load = async () => {
     setLoading(true)
     try {
+      if (!isOnlineNow()) {
+        const cached = readSuperadminCache<{ plans: Plan[] }>(cacheKey)
+        if (cached) setPlans(cached.plans || [])
+        return
+      }
+
       const res = await api.get<{ data: Plan[] }>('/plans')
       setPlans(res.data.data)
+      writeSuperadminCache(cacheKey, { plans: res.data.data, cachedAt: new Date().toISOString() })
     }
     catch { toast.error('Failed to load plans') } finally { setLoading(false) }
   }
 
   useEffect(() => { load() }, [])
+
+  useEffect(() => {
+    const onOnline = () => {
+      setIsOnline(true)
+      void load()
+    }
+    const onOffline = () => setIsOnline(false)
+    window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
+    return () => {
+      window.removeEventListener('online', onOnline)
+      window.removeEventListener('offline', onOffline)
+    }
+  }, [])
 
   const openCreate = () => { setForm(emptyForm); setModal({ open: true, plan: null }) }
   const openEdit = (p: Plan) => {
@@ -39,7 +64,7 @@ export default function PlansPage() {
       price: Number(p.price),
       priceCurrency: p.priceCurrency,
       maxBranches: p.maxSubsidiaries,
-      features: featuresText,
+      benefits: featuresText,
       billingCycle: p.billingCycle,
     })
     setModal({ open: true, plan: p })
@@ -48,7 +73,12 @@ export default function PlansPage() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault(); setSaving(true)
     try {
-      const payload = { ...form, features: form.features.split('\n').map((f) => f.trim()).filter(Boolean), price: Number(form.price), maxBranches: Number(form.maxBranches) }
+      if (!isOnlineNow()) {
+        toast.error('Reconnect to create or edit plans')
+        return
+      }
+
+      const payload = { ...form, benefits: form.benefits.split('\n').map((f) => f.trim()).filter(Boolean), price: Number(form.price), maxBranches: Number(form.maxBranches) }
       const mappedPayload = {
         name: payload.name,
         price: payload.price,
@@ -56,7 +86,7 @@ export default function PlansPage() {
         billingCycle: form.billingCycle,
         maxSubsidiaries: payload.maxBranches,
         extraSubsidiaryPrice: 0,
-        features: payload.features,
+        benefits: payload.benefits,
       }
       if (modal.plan) { await api.put(`/plans/${modal.plan.id}`, mappedPayload); toast.success('Plan updated') }
       else { await api.post('/plans', mappedPayload); toast.success('Plan created') }
@@ -71,6 +101,8 @@ export default function PlansPage() {
         <div><h1 className="text-2xl font-bold text-gray-900">Subscription Plans</h1><p className="text-sm text-gray-500 mt-0.5">{plans.length} plan{plans.length !== 1 ? 's' : ''}</p></div>
         <button onClick={openCreate} className="btn-primary"><Plus className="w-4 h-4" /> New Plan</button>
       </div>
+
+      {!isOnline && <p className="text-xs text-amber-600">Offline mode: showing cached plans. Reconnect to edit.</p>}
 
       {loading ? (
         <div className="flex items-center justify-center h-48"><Loader2 className="w-8 h-8 animate-spin text-indigo-600" /></div>
@@ -137,8 +169,8 @@ export default function PlansPage() {
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Features (one per line)</label>
-                <textarea className="input resize-none" rows={4} value={form.features} onChange={(e) => setForm({ ...form, features: e.target.value })} placeholder="Unlimited products&#10;POS system&#10;Inventory tracking" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">Benefits (one per line)</label>
+                <textarea className="input resize-none" rows={4} value={form.benefits} onChange={(e) => setForm({ ...form, benefits: e.target.value })} placeholder="Unlimited products&#10;POS system&#10;Inventory tracking" />
               </div>
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setModal({ open: false, plan: null })} className="btn-secondary flex-1">Cancel</button>

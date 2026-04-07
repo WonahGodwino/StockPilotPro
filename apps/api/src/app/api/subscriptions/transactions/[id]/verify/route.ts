@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { isSuperAdmin } from '@/lib/rbac'
+import { isAgent, isTenantAssignedToAgent } from '@/lib/agent-access'
 import {
   activateSubscriptionFromTransaction,
   appendLifecycleEvent,
@@ -38,7 +39,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     })
 
     if (!tx) return apiError('Transaction not found', 404)
-    if (!isSuperAdmin(user) && tx.tenantId !== user.tenantId) return apiError('Forbidden', 403)
+    if (isAgent(user)) {
+      const allowed = await isTenantAssignedToAgent(user.userId, tx.tenantId)
+      if (!allowed) return apiError('Forbidden', 403)
+      if (tx.paymentMethod !== 'PAYSTACK') {
+        return apiError('Agents can only verify and activate online (Paystack) payments', 403)
+      }
+    } else if (!isSuperAdmin(user) && tx.tenantId !== user.tenantId) {
+      return apiError('Forbidden', 403)
+    }
 
     const now = new Date()
 

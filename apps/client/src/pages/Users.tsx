@@ -1,13 +1,19 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import api from '@/lib/api'
 import type { AuthUser, Subsidiary } from '@/types'
 import { useAuthStore } from '@/store/auth.store'
 import toast from 'react-hot-toast'
 import { Plus, Edit, Shield, X, Loader2, KeyRound } from 'lucide-react'
+import { Navigate } from 'react-router-dom'
+import {
+  getCachedSubsidiariesForTenant,
+  getCachedUsersForTenant,
+  replaceCachedSubsidiariesForTenant,
+  replaceCachedUsersForTenant,
+} from '@/lib/db'
 
-const ROLES = ['BUSINESS_ADMIN', 'SALESPERSON'] as const
-const ROLE_LABELS: Record<string, string> = { BUSINESS_ADMIN: 'Admin', SALESPERSON: 'Salesperson', SUPER_ADMIN: 'Super Admin' }
-const ROLE_COLORS: Record<string, string> = { BUSINESS_ADMIN: 'badge-warning', SALESPERSON: 'badge-info', SUPER_ADMIN: 'badge-danger' }
+const ROLE_LABELS: Record<string, string> = { BUSINESS_ADMIN: 'Admin', SALESPERSON: 'Salesperson', SUPER_ADMIN: 'Super Admin', AGENT: 'Agent' }
+const ROLE_COLORS: Record<string, string> = { BUSINESS_ADMIN: 'badge-warning', SALESPERSON: 'badge-info', SUPER_ADMIN: 'badge-danger', AGENT: 'badge-success' }
 
 interface UserForm { name: string; email: string; password: string; role: string; subsidiaryId: string }
 const emptyForm: UserForm = { name: '', email: '', password: '', role: 'SALESPERSON', subsidiaryId: '' }
@@ -94,6 +100,8 @@ function SsoPanel({ tenantId }: { tenantId: string }) {
 
 export default function Users() {
   const currentUser = useAuthStore((s) => s.user)
+  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN'
+  const isBusinessAdmin = currentUser?.role === 'BUSINESS_ADMIN'
   const [users, setUsers] = useState<AuthUser[]>([])
   const [subsidiaries, setSubsidiaries] = useState<Subsidiary[]>([])
   const [loading, setLoading] = useState(true)
@@ -109,31 +117,81 @@ export default function Users() {
   const [presenceTimeoutMinutes, setPresenceTimeoutMinutes] = useState(2)
   const [savingPresenceTimeout, setSavingPresenceTimeout] = useState(false)
 
-  const canManage = currentUser?.role === 'BUSINESS_ADMIN' || currentUser?.role === 'SUPER_ADMIN'
-  const isBusinessAdmin = currentUser?.role === 'BUSINESS_ADMIN'
+  const canManage = isBusinessAdmin || isSuperAdmin
+  const allowedRoles = isSuperAdmin ? ['AGENT'] : ['BUSINESS_ADMIN', 'SALESPERSON']
+
+  if (!currentUser || currentUser.role === 'SALESPERSON') {
+    return <Navigate to="/dashboard" replace />
+  }
 
   const filteredUsers = users.filter((u) => {
+    if (isSuperAdmin && u.role !== 'AGENT') return false
     if (salespersonsOnly && u.role !== 'SALESPERSON') return false
     if (onlineOnly && !isCurrentlyOnline(u.lastSeenAt, presenceTimeoutMinutes)) return false
     return true
   })
 
-  const load = async () => {
+  const refreshOfflineUsersCache = useCallback(async () => {
+    if (!navigator.onLine) return
+
+    const [usersRes, subsRes] = await Promise.all([
+      api.get<{ data: AuthUser[] }>(isSuperAdmin ? '/users?role=AGENT' : '/users'),
+      isSuperAdmin ? Promise.resolve({ data: { data: [] as Subsidiary[] } }) : api.get<{ data: Subsidiary[] }>('/subsidiaries'),
+    ])
+
+    await replaceCachedUsersForTenant(currentUser?.tenantId ?? null, usersRes.data.data)
+    if (!isSuperAdmin && currentUser?.tenantId) {
+      await replaceCachedSubsidiariesForTenant(currentUser.tenantId, subsRes.data.data)
+    }
+  }, [currentUser?.tenantId, isSuperAdmin])
+
+  const load = useCallback(async () => {
     setLoading(true)
     try {
+      if (!navigator.onLine) {
+        const cachedUsers = await getCachedUsersForTenant(currentUser?.tenantId ?? null, isSuperAdmin ? 'AGENT' : undefined)
+        setUsers(cachedUsers)
+
+        if (!isSuperAdmin && currentUser?.tenantId) {
+          const cachedSubs = await getCachedSubsidiariesForTenant(currentUser.tenantId)
+          setSubsidiaries(cachedSubs)
+        } else {
+          setSubsidiaries([])
+        }
+        return
+      }
+
       const [usersRes, subsRes] = await Promise.all([
-        api.get<{ data: AuthUser[] }>('/users'),
-        api.get<{ data: Subsidiary[] }>('/subsidiaries'),
+        api.get<{ data: AuthUser[] }>(isSuperAdmin ? '/users?role=AGENT' : '/users'),
+        isSuperAdmin ? Promise.resolve({ data: { data: [] as Subsidiary[] } }) : api.get<{ data: Subsidiary[] }>('/subsidiaries'),
       ])
       setUsers(usersRes.data.data)
       setSubsidiaries(subsRes.data.data)
-    } catch { toast.error('Failed to load users') } finally { setLoading(false) }
-  }
 
-  useEffect(() => { load() }, [])
+      await replaceCachedUsersForTenant(currentUser?.tenantId ?? null, usersRes.data.data)
+      if (!isSuperAdmin && currentUser?.tenantId) {
+        await replaceCachedSubsidiariesForTenant(currentUser.tenantId, subsRes.data.data)
+      }
+    } catch { toast.error('Failed to load users') } finally { setLoading(false) }
+  }, [currentUser?.tenantId, isSuperAdmin])
+
+  useEffect(() => { void load() }, [load])
+
+  useEffect(() => {
+    const onOnline = () => {
+      void load()
+      void refreshOfflineUsersCache()
+    }
+
+    window.addEventListener('online', onOnline)
+    return () => {
+      window.removeEventListener('online', onOnline)
+    }
+  }, [load, refreshOfflineUsersCache])
 
   const loadStaleUsers = async () => {
     if (!canManage) return
+    if (!navigator.onLine) return
     setStaleLoading(true)
     try {
       const res = await api.get<{ data: { staleUsers: Array<{ id: string; firstName: string; lastName: string; hoursSinceLastSeen: number; thresholdHours: number }> } }>(`/users/stale-alerts?hours=${staleHours}`)
@@ -147,6 +205,7 @@ export default function Users() {
 
   const loadPresenceTimeout = async () => {
     if (!canManage) return
+    if (!navigator.onLine) return
     try {
       const res = await api.get<{ data: { presenceTimeoutMinutes: number } }>('/tenants/presence-timeout')
       setPresenceTimeoutMinutes(Math.max(1, Number(res.data.data.presenceTimeoutMinutes || 2)))
@@ -156,6 +215,10 @@ export default function Users() {
   }
 
   const savePresenceTimeout = async (minutes: number) => {
+    if (!navigator.onLine) {
+      toast.error('Reconnect to update presence timeout')
+      return
+    }
     setSavingPresenceTimeout(true)
     try {
       const res = await api.patch<{ data: { presenceTimeoutMinutes: number } }>('/tenants/presence-timeout', { minutes })
@@ -169,6 +232,10 @@ export default function Users() {
   }
 
   const sendStaleAlerts = async () => {
+    if (!navigator.onLine) {
+      toast.error('Reconnect to send stale-user alerts')
+      return
+    }
     setSendingStaleAlerts(true)
     try {
       const res = await api.post<{ data: { sent: number; skipped: number } }>(`/users/stale-alerts?hours=${staleHours}`)
@@ -189,7 +256,10 @@ export default function Users() {
     void loadPresenceTimeout()
   }, [canManage])
 
-  const openCreate = () => { setForm(emptyForm); setModal({ open: true, user: null }) }
+  const openCreate = () => {
+    setForm({ ...emptyForm, role: isSuperAdmin ? 'AGENT' : 'SALESPERSON', subsidiaryId: '' })
+    setModal({ open: true, user: null })
+  }
   const openEdit = (u: AuthUser) => {
     setForm({ name: fullName(u), email: u.email, password: '', role: u.role, subsidiaryId: u.subsidiaryId || '' })
     setModal({ open: true, user: u })
@@ -203,7 +273,7 @@ export default function Users() {
       if (form.password) payload.password = form.password
       if (modal.user) { await api.put(`/users/${modal.user.id}`, payload); toast.success('User updated') }
       else { await api.post('/users', { ...payload, password: form.password }); toast.success('User created') }
-      setModal({ open: false, user: null }); load()
+      setModal({ open: false, user: null }); void load(); void refreshOfflineUsersCache()
     } catch (err: unknown) { toast.error((err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed') }
     finally { setSaving(false) }
   }
@@ -211,28 +281,36 @@ export default function Users() {
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold text-gray-900">Users</h1><p className="text-sm text-gray-500 mt-0.5">{filteredUsers.length} of {users.length} team member{users.length !== 1 ? 's' : ''}</p></div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Users</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{filteredUsers.length} of {users.length} team member{users.length !== 1 ? 's' : ''}</p>
+          {isSuperAdmin && (
+            <p className="text-xs text-gray-500 mt-1">Showing platform agents only (AGENT users).</p>
+          )}
+        </div>
         {canManage && <button onClick={openCreate} className="btn-primary"><Plus className="w-4 h-4" /> Add User</button>}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => setSalespersonsOnly((v) => !v)}
-          className={`badge px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors ${
-            salespersonsOnly ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-          }`}
-        >
-          Salespersons only
-        </button>
-        <button
-          onClick={() => setOnlineOnly((v) => !v)}
-          className={`badge px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors ${
-            onlineOnly ? 'bg-success-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-          }`}
-        >
-          Online now only
-        </button>
-      </div>
+      {isBusinessAdmin && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setSalespersonsOnly((v) => !v)}
+            className={`badge px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors ${
+              salespersonsOnly ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            Salespersons only
+          </button>
+          <button
+            onClick={() => setOnlineOnly((v) => !v)}
+            className={`badge px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors ${
+              onlineOnly ? 'bg-success-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            Online now only
+          </button>
+        </div>
+      )}
 
       {canManage && (
         <div className="rounded-xl border border-gray-100 bg-white p-3 flex flex-wrap items-center gap-2">
@@ -357,12 +435,12 @@ export default function Users() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
                   <select className="input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-                    {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+                    {allowedRoles.map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Branch</label>
-                  <select className="input" value={form.subsidiaryId} onChange={(e) => setForm({ ...form, subsidiaryId: e.target.value })}>
+                  <select className="input" value={form.subsidiaryId} onChange={(e) => setForm({ ...form, subsidiaryId: e.target.value })} disabled={isSuperAdmin}>
                     <option value="">All branches</option>
                     {subsidiaries.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>

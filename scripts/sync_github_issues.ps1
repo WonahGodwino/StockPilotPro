@@ -41,7 +41,7 @@ if (!(Test-Path $IssuesDoc)) {
 }
 
 foreach ($priorityLabel in @('p0','p1','p2','p3')) {
-  gh label create $priorityLabel --repo $Repo --color 5319e7 --description 'Priority label' 2>$null | Out-Null
+  gh label create $priorityLabel --repo $Repo --color 5319e7 --description 'Priority label' --force 2>$null | Out-Null
 }
 
 $content = Get-Content -Raw -Path $IssuesDoc

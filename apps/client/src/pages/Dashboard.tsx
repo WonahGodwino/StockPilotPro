@@ -10,6 +10,7 @@ import type { DashboardData, ReportSummary, Product } from '@/types'
 import { useAuthStore } from '@/store/auth.store'
 import { makeCurrencyFormatter } from '@/lib/currency'
 import SuperAdminDashboard from '@/components/layout/SuperAdminDashboard'
+import AgentDashboard from '@/components/layout/AgentDashboard'
 
 interface ExpiringProductsData {
   expiring: Product[]
@@ -116,6 +117,10 @@ export default function Dashboard() {
     return <SuperAdminDashboard />
   }
 
+  if (user?.role === 'AGENT') {
+    return <AgentDashboard />
+  }
+
   const baseCurrency = user?.tenant?.baseCurrency || 'USD'
   const fmt = makeCurrencyFormatter(baseCurrency, { minimumFractionDigits: 0 })
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
@@ -123,32 +128,81 @@ export default function Dashboard() {
   const [expiringProducts, setExpiringProducts] = useState<ExpiringProductsData | null>(null)
   const [loading, setLoading] = useState(true)
 
+  const dashboardCacheKey = `stockpilot:dashboard-snapshot:${user?.tenantId || 'none'}:${user?.role || 'none'}`
+
   useEffect(() => {
-    Promise.all([
-      api.get('/reports/dashboard'),
-      api.get('/reports?period=monthly'),
-      api.get('/products/expiring?daysAhead=30'),
-    ])
-      .then(([d, r, e]) => {
-        setDashboard(d.data.data)
-        setReport(r.data.data.summary)
-        setExpiringProducts(e.data.data)
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false))
-  }, [])
+    const load = async () => {
+      setLoading(true)
+      try {
+        const [d, r, e] = await Promise.all([
+          api.get('/reports/dashboard'),
+          api.get('/reports?period=monthly'),
+          api.get('/products/expiring?daysAhead=30'),
+        ])
+
+        const snapshot = {
+          dashboard: d.data.data as DashboardData,
+          report: r.data.data.summary as ReportSummary,
+          expiringProducts: e.data.data as ExpiringProductsData,
+          cachedAt: new Date().toISOString(),
+        }
+        setDashboard(snapshot.dashboard)
+        setReport(snapshot.report)
+        setExpiringProducts(snapshot.expiringProducts)
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(dashboardCacheKey, JSON.stringify(snapshot))
+        }
+      } catch {
+        if (typeof window !== 'undefined') {
+          const raw = window.localStorage.getItem(dashboardCacheKey)
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw) as {
+                dashboard: DashboardData
+                report: ReportSummary
+                expiringProducts: ExpiringProductsData
+              }
+              setDashboard(parsed.dashboard)
+              setReport(parsed.report)
+              setExpiringProducts(parsed.expiringProducts)
+            } catch {
+              console.error('Failed to parse dashboard offline snapshot')
+            }
+          }
+        }
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    void load()
+  }, [dashboardCacheKey])
 
   if (loading) {
     return <DashboardSkeleton />
   }
 
   const canViewPL = user?.role !== 'SALESPERSON'
+  const salesTrendData = Array.isArray(dashboard?.salesTrend)
+    ? dashboard.salesTrend.map((item) => {
+        const rawTotal = Number((item as { total?: unknown; revenue?: unknown }).total ?? (item as { revenue?: unknown }).revenue ?? 0)
+        return {
+          date: typeof (item as { date?: unknown }).date === 'string' ? (item as { date: string }).date : '',
+          total: Number.isFinite(rawTotal) ? rawTotal : 0,
+        }
+      })
+    : []
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-sm text-gray-500 mt-1">Overview for this month</p>
+        <div className="mt-1 flex items-center gap-2">
+          <p className="text-sm text-gray-500">Overview for this month</p>
+          <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700 border border-primary-100">
+            Base Currency: {baseCurrency}
+          </span>
+        </div>
       </div>
 
       {/* Stats Grid */}
@@ -272,7 +326,7 @@ export default function Dashboard() {
         <div className="card p-6">
           <h3 className="font-semibold text-gray-900 mb-4">Sales Trend (Last 7 Days)</h3>
           <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={dashboard?.salesTrend ?? []}>
+            <AreaChart data={salesTrendData}>
               <defs>
                 <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#2563eb" stopOpacity={0.2} />
@@ -280,7 +334,7 @@ export default function Dashboard() {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v) => v.slice(5)} />
+              <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v) => (typeof v === 'string' ? v.slice(5) : '')} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => fmt(v)} />
               <Tooltip formatter={(v: number) => fmt(v)} />
               <Area isAnimationActive type="monotone" dataKey="total" stroke="#2563eb" fill="url(#salesGrad)" strokeWidth={2} />

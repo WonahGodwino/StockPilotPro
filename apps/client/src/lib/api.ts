@@ -1,5 +1,6 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
 import { useAuthStore } from '@/store/auth.store'
+import { isTokenExpired } from '@/lib/authToken'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
@@ -10,6 +11,10 @@ const api = axios.create({
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const token = useAuthStore.getState().accessToken
   if (token) {
+    if (isTokenExpired(token)) {
+      useAuthStore.getState().logout()
+      return Promise.reject(new axios.Cancel('Access token expired. User logged out.'))
+    }
     config.headers.Authorization = `Bearer ${token}`
   }
   return config

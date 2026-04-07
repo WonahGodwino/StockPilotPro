@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Mail, BellRing, Send, CalendarClock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
+import { getSuperadminCacheKey, isOnlineNow, readSuperadminCache, writeSuperadminCache } from '@/lib/superadminCache'
 
 type ReminderWindow = 'current_month' | 'next_month' | 'two_months'
 
@@ -40,12 +41,24 @@ export default function SubscriptionRemindersPage() {
   const [loading, setLoading] = useState(false)
   const [loadingLogs, setLoadingLogs] = useState(false)
   const [sendingId, setSendingId] = useState<string | null>(null)
+  const [isOnline, setIsOnline] = useState(isOnlineNow())
+
+  const remindersCacheKey = getSuperadminCacheKey(`reminders:${windowType}`)
+  const logsCacheKey = getSuperadminCacheKey('reminder-logs')
 
   const load = async (win: ReminderWindow) => {
     setLoading(true)
     try {
+      const key = getSuperadminCacheKey(`reminders:${win}`)
+      if (!isOnlineNow()) {
+        const cached = readSuperadminCache<{ items: ReminderRow[] }>(key)
+        if (cached) setItems(cached.items || [])
+        return
+      }
+
       const res = await api.get('/subscriptions/reminders', { params: { window: win } })
       setItems(res.data.data || [])
+      writeSuperadminCache(key, { items: res.data.data || [], cachedAt: new Date().toISOString() })
     } catch {
       toast.error('Failed to load subscription reminders')
     } finally {
@@ -56,8 +69,15 @@ export default function SubscriptionRemindersPage() {
   const loadLogs = async () => {
     setLoadingLogs(true)
     try {
+      if (!isOnlineNow()) {
+        const cached = readSuperadminCache<{ logs: ReminderLogRow[] }>(logsCacheKey)
+        if (cached) setLogs(cached.logs || [])
+        return
+      }
+
       const res = await api.get('/subscriptions/reminders/logs', { params: { page: 1, limit: 20 } })
       setLogs(res.data.data || [])
+      writeSuperadminCache(logsCacheKey, { logs: res.data.data || [], cachedAt: new Date().toISOString() })
     } catch {
       toast.error('Failed to load reminder delivery logs')
     } finally {
@@ -73,7 +93,27 @@ export default function SubscriptionRemindersPage() {
     void loadLogs()
   }, [])
 
+  useEffect(() => {
+    const onOnline = () => {
+      setIsOnline(true)
+      void load(windowType)
+      void loadLogs()
+    }
+    const onOffline = () => setIsOnline(false)
+    window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
+    return () => {
+      window.removeEventListener('online', onOnline)
+      window.removeEventListener('offline', onOffline)
+    }
+  }, [windowType])
+
   const sendAutoReminders = async () => {
+    if (!isOnlineNow()) {
+      toast.error('Reconnect to send reminders')
+      return
+    }
+
     try {
       setSendingId('AUTO')
       const res = await api.post('/subscriptions/reminders', { mode: 'auto', channel: 'both' })
@@ -89,6 +129,11 @@ export default function SubscriptionRemindersPage() {
   }
 
   const sendManualReminder = async (subscriptionId: string) => {
+    if (!isOnlineNow()) {
+      toast.error('Reconnect to send reminders')
+      return
+    }
+
     try {
       setSendingId(subscriptionId)
       const res = await api.post('/subscriptions/reminders', {
@@ -107,6 +152,11 @@ export default function SubscriptionRemindersPage() {
   }
 
   const sendSmtpTest = async () => {
+    if (!isOnlineNow()) {
+      toast.error('Reconnect to test SMTP')
+      return
+    }
+
     try {
       setSendingId('SMTP_TEST')
       await api.post('/subscriptions/reminders/test-email', {})
@@ -133,6 +183,7 @@ export default function SubscriptionRemindersPage() {
           <p className="text-sm text-gray-500 mt-1">
             Notify tenant owners/admins before expiry to avoid service disruption.
           </p>
+          {!isOnline && <p className="text-xs text-amber-600 mt-1">Offline mode: showing cached reminders and logs.</p>}
         </div>
         <div className="flex items-center gap-2">
           <button className="btn-secondary" onClick={sendSmtpTest} disabled={sendingId === 'SMTP_TEST'}>

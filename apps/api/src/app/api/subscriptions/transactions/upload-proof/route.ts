@@ -14,7 +14,7 @@ export async function OPTIONS() {
 export async function POST(req: NextRequest) {
   try {
     const user = authenticate(req)
-    if (!user.tenantId) return apiError('Forbidden', 403)
+    if (!user.tenantId && user.role !== 'AGENT' && user.role !== 'SUPER_ADMIN') return apiError('Forbidden', 403)
 
     const formData = await req.formData()
     const file = formData.get('file')

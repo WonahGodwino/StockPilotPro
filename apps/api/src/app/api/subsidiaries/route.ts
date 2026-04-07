@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { isSuperAdmin, isBusinessAdmin } from '@/lib/rbac'
+import { blocksSubsidiaryCreation, getActiveSubscriptionForTenant, isEnterprisePlan } from '@/lib/subscription-enforcement'
 
 const createSchema = z.object({
   name: z.string().min(1),
@@ -52,18 +53,21 @@ export async function POST(req: NextRequest) {
     const tenantId = isSuperAdmin(user) ? (data.tenantId || user.tenantId!) : user.tenantId!
     if (!tenantId) return apiError('tenantId is required', 400)
 
-    // Check subscription subsidiary limit
+    // Enforce branch limits from active subscription package.
     if (!isSuperAdmin(user)) {
-      const subscription = await prisma.subscription.findFirst({
-        where: { tenantId, status: 'ACTIVE' },
-        include: { plan: true },
-      })
+      const subscription = await getActiveSubscriptionForTenant(tenantId)
 
       if (!subscription) return apiError('No active subscription', 403)
 
-      const count = await prisma.subsidiary.count({ where: { tenantId, archived: false } })
-      if (count >= subscription.plan.maxSubsidiaries) {
-        return apiError(`Subsidiary limit reached (${subscription.plan.maxSubsidiaries}). Upgrade your plan.`, 403)
+      if (blocksSubsidiaryCreation(subscription.plan)) {
+        return apiError('Your current package does not allow branch creation. Upgrade required.', 403)
+      }
+
+      if (!isEnterprisePlan(subscription.plan)) {
+        const count = await prisma.subsidiary.count({ where: { tenantId, archived: false } })
+        if (count >= subscription.plan.maxSubsidiaries) {
+          return apiError(`Subsidiary limit reached (${subscription.plan.maxSubsidiaries}). Upgrade your plan.`, 403)
+        }
       }
     }
 

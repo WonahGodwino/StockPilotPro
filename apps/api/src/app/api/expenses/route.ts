@@ -2,9 +2,37 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
-import { isSuperAdmin, assertSubsidiaryAccess } from '@/lib/rbac'
+import { isSuperAdmin, isSalesperson } from '@/lib/rbac'
 import { logAudit } from '@/lib/audit'
 import { EXPENSE_CATEGORIES } from '@/lib/expenses'
+
+async function resolveSavedFxRate(tenantId: string, fromCurrency: string, toCurrency: string): Promise<number | null> {
+  if (fromCurrency === toCurrency) return 1
+
+  const direct = await prisma.currencyRate.findFirst({
+    where: { tenantId, fromCurrency, toCurrency },
+    orderBy: { date: 'desc' },
+    select: { rate: true },
+  })
+
+  if (direct?.rate) {
+    const rate = Number(direct.rate)
+    if (Number.isFinite(rate) && rate > 0) return rate
+  }
+
+  const inverse = await prisma.currencyRate.findFirst({
+    where: { tenantId, fromCurrency: toCurrency, toCurrency: fromCurrency },
+    orderBy: { date: 'desc' },
+    select: { rate: true },
+  })
+
+  if (inverse?.rate) {
+    const rate = Number(inverse.rate)
+    if (Number.isFinite(rate) && rate > 0) return 1 / rate
+  }
+
+  return null
+}
 
 const createSchema = z.object({
   title: z.string().min(1),
@@ -16,7 +44,7 @@ const createSchema = z.object({
   syncRef: z.string().min(6).max(120).optional(),
   transactionRef: z.string().min(6).max(180).optional(),
   notes: z.string().optional(),
-  subsidiaryId: z.string(),
+  subsidiaryId: z.string().nullable().optional(),
 })
 
 export async function OPTIONS() {
@@ -44,14 +72,18 @@ export async function GET(req: NextRequest) {
       return apiError('No tenant context for this account. Provide tenantId.', 400)
     }
 
+    const subsidiaryFilter = subsidiaryId === 'main'
+      ? { subsidiaryId: null }
+      : subsidiaryId
+      ? { subsidiaryId }
+      : user.role === 'SALESPERSON' && user.subsidiaryId
+      ? { subsidiaryId: user.subsidiaryId }
+      : {}
+
     const where = {
       archived: false,
       tenantId,
-      ...(subsidiaryId
-        ? { subsidiaryId }
-        : user.role === 'SALESPERSON' && user.subsidiaryId
-        ? { subsidiaryId: user.subsidiaryId }
-        : {}),
+      ...subsidiaryFilter,
       ...(category ? { category } : {}),
       ...(search ? { title: { contains: search, mode: 'insensitive' as const } } : {}),
       ...(from || to
@@ -97,7 +129,35 @@ export async function POST(req: NextRequest) {
     const transactionRef = data.transactionRef?.trim() || undefined
     idempotencyRef = transactionRef || syncRef
 
-    assertSubsidiaryAccess(user, data.subsidiaryId)
+    const requestedSubsidiaryId = data.subsidiaryId || undefined
+    let resolvedSubsidiaryId: string | undefined
+
+    if (isSalesperson(user)) {
+      if (!user.subsidiaryId) {
+        return apiError('Salesperson account must be linked to a subsidiary', 400)
+      }
+      if (requestedSubsidiaryId && requestedSubsidiaryId !== user.subsidiaryId) {
+        return apiError('Forbidden: salesperson can only record expenses under assigned subsidiary', 403)
+      }
+      resolvedSubsidiaryId = user.subsidiaryId
+    } else {
+      resolvedSubsidiaryId = requestedSubsidiaryId
+    }
+
+    if (resolvedSubsidiaryId) {
+      const subsidiary = await prisma.subsidiary.findFirst({
+        where: {
+          id: resolvedSubsidiaryId,
+          tenantId: user.tenantId!,
+          archived: false,
+          isActive: true,
+        },
+        select: { id: true },
+      })
+      if (!subsidiary) {
+        return apiError('Invalid subsidiary selected', 422)
+      }
+    }
 
     // Strong idempotency guard: prefer transactionRef, fallback to syncRef.
     if (idempotencyRef) {
@@ -115,12 +175,34 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: user.tenantId! },
+      select: { baseCurrency: true },
+    })
+    const baseCurrency = tenant?.baseCurrency || 'USD'
+
+    let normalizedFxRate = Number(data.fxRate)
+    if (data.currency === baseCurrency) {
+      normalizedFxRate = 1
+    } else if (normalizedFxRate === 1) {
+      const savedRate = await resolveSavedFxRate(user.tenantId!, baseCurrency, data.currency)
+      if (!savedRate) {
+        return apiError(
+          `No saved exchange rate found for ${baseCurrency}/${data.currency}. Load or enter a valid FX rate before saving.`,
+          422
+        )
+      }
+      normalizedFxRate = savedRate
+    }
+
     const expense = await prisma.expense.create({
       data: {
         ...data,
+        fxRate: normalizedFxRate,
         syncRef,
         transactionRef,
         date: new Date(data.date),
+        subsidiaryId: resolvedSubsidiaryId,
         tenantId: user.tenantId!,
         userId: user.userId,
         createdBy: user.userId,
@@ -151,6 +233,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     if (err instanceof z.ZodError) return NextResponse.json({ error: err.errors }, { status: 422 })
     if ((err as Error).message?.includes('Forbidden')) return apiError((err as Error).message, 403)
+    if ((err as { code?: string }).code === 'P2003') return apiError('Invalid subsidiary selected', 422)
     if ((err as { code?: string }).code === 'P2002') {
       if (idempotencyRef && tenantId) {
         const existing = await prisma.expense.findFirst({

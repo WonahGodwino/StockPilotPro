@@ -16,6 +16,7 @@ datasource db {
 
 enum UserRole {
   SUPER_ADMIN
+  AGENT
   BUSINESS_ADMIN
   SALESPERSON
 }
@@ -45,6 +46,11 @@ enum SubscriptionTransactionStatus {
   ACTIVE
   REJECTED
   CANCELLED
+}
+
+enum AgentCommissionPaymentStatus {
+  PENDING
+  PAID
 }
 
 enum ProductType {
@@ -95,6 +101,21 @@ model Plan {
   requestedPlanTransactions SubscriptionTransaction[] @relation("RequestedPlanTransaction")
 }
 
+model TrustedCustomer {
+  id          String   @id @default(cuid())
+  name        String
+  logoUrl     String?
+  websiteUrl  String?
+  displayOrder Int     @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdBy   String?
+  updatedBy   String?
+
+  @@index([isActive, displayOrder])
+}
+
 // ──────────────────────────────────────────────
 // TENANTS (each = one business)
 // ──────────────────────────────────────────────
@@ -106,6 +127,9 @@ model Tenant {
   email           String   @unique
   phone           String?
   address         String?
+  country         String?
+  state           String?
+  lga             String?
   logo            String?
   baseCurrency    String   @default("USD")
   presenceTimeoutMinutes Int @default(2)
@@ -116,7 +140,10 @@ model Tenant {
   updatedAt       DateTime @updatedAt
   createdBy       String?
   updatedBy       String?
+  acquisitionAgentId String?
   archived        Boolean  @default(false)
+
+  acquisitionAgent User?   @relation("AgentTenants", fields: [acquisitionAgentId], references: [id], onDelete: SetNull)
 
   users           User[]
   subsidiaries    Subsidiary[]
@@ -131,6 +158,8 @@ model Tenant {
   currencyRates   CurrencyRate[]
   syncTelemetry   SyncTelemetry[]
   subscriptionTransactions SubscriptionTransaction[]
+
+  @@index([acquisitionAgentId])
 }
 
 // ──────────────────────────────────────────────
@@ -204,6 +233,7 @@ model SubscriptionTransaction {
   activatedBy             User?                         @relation("SubscriptionActivatedBy", fields: [activatedByUserId], references: [id], onDelete: SetNull)
   modifiedBy              User?                         @relation("SubscriptionModifiedBy", fields: [modifiedByUserId], references: [id], onDelete: SetNull)
   transferProofUploader   User?                         @relation("SubscriptionTransferProofUploader", fields: [transferProofUploadedByUserId], references: [id], onDelete: SetNull)
+  commissionRemittance    AgentCommissionRemittance?
 
   @@index([tenantId, createdAt])
   @@index([tenantId, status])
@@ -239,6 +269,7 @@ model User {
   expenses        Expense[]
   damageRecords   DamageRecord[] @relation("DamageRecords")
   refreshTokens   RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
   ssoAccounts     SsoAccount[]
   syncTelemetry   SyncTelemetry[]
   initiatedSubscriptionTransactions SubscriptionTransaction[] @relation("SubscriptionInitiatedBy")
@@ -246,11 +277,36 @@ model User {
   activatedSubscriptionTransactions SubscriptionTransaction[] @relation("SubscriptionActivatedBy")
   modifiedSubscriptionTransactions  SubscriptionTransaction[] @relation("SubscriptionModifiedBy")
   uploadedSubscriptionTransferProofs SubscriptionTransaction[] @relation("SubscriptionTransferProofUploader")
+  remittedAgentCommissions AgentCommissionRemittance[] @relation("AgentCommissionRemittedBy")
+  assignedTenants Tenant[] @relation("AgentTenants")
 
   @@index([tenantId])
   @@index([email])
   @@index([role])
   @@index([lastSeenAt])
+}
+
+model AgentCommissionRemittance {
+  id                        String                       @id @default(cuid())
+  subscriptionTransactionId String                       @unique
+  status                    AgentCommissionPaymentStatus @default(PAID)
+  batchId                   String?
+  cycleStartAt              DateTime?
+  cycleEndAt                DateTime?
+  paidAt                    DateTime?
+  paidByUserId              String?
+  reportFileName            String?
+  source                    String?
+  createdAt                 DateTime                     @default(now())
+  updatedAt                 DateTime                     @updatedAt
+
+  subscriptionTransaction   SubscriptionTransaction      @relation(fields: [subscriptionTransactionId], references: [id], onDelete: Cascade)
+  paidBy                    User?                        @relation("AgentCommissionRemittedBy", fields: [paidByUserId], references: [id], onDelete: SetNull)
+
+  @@index([batchId])
+  @@index([cycleStartAt, cycleEndAt])
+  @@index([status, updatedAt])
+  @@index([paidByUserId])
 }
 
 // ──────────────────────────────────────────────
@@ -292,6 +348,22 @@ model RefreshToken {
 
   @@index([userId])
   @@index([token])
+}
+
+model PasswordResetToken {
+  id         String   @id @default(cuid())
+  userId     String
+  email      String
+  tokenHash  String
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([email, createdAt])
+  @@index([expiresAt])
 }
 
 // ──────────────────────────────────────────────
@@ -427,7 +499,7 @@ model SaleItem {
 model Expense {
   id              String    @id @default(cuid())
   tenantId        String
-  subsidiaryId    String
+  subsidiaryId    String?
   userId          String
   title           String
   amount          Decimal   @db.Decimal(12, 2)
@@ -445,7 +517,7 @@ model Expense {
   archived        Boolean   @default(false)
 
   tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  subsidiary      Subsidiary @relation(fields: [subsidiaryId], references: [id])
+  subsidiary      Subsidiary? @relation(fields: [subsidiaryId], references: [id])
   user            User      @relation(fields: [userId], references: [id])
 
   @@index([tenantId])

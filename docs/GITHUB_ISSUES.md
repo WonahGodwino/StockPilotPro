@@ -714,5 +714,176 @@ Add "Export CSV" button to the Reports page. Exports the current P&L data as a C
 
 ---
 
-*Total Issues: 53*
+## EPIC 14 — Enterprise AI Package (Tenant-Gated)
+
+### Issue #54 — Enterprise package entitlement and route guard
+**Labels:** `feature` `backend` `security`
+**Priority:** P0
+
+Implement package entitlement checks for Enterprise AI features. Add middleware guards for `/api/enterprise-ai/*` that allow access only when tenant has active Enterprise package entitlement.
+
+**Acceptance Criteria:**
+- [ ] Unauthorized tenants receive `403` with upgrade metadata
+- [ ] Authorized Enterprise tenants can call all Enterprise AI endpoints
+- [ ] Guard is reusable and applied consistently to all Enterprise AI routes
+
+---
+
+### Issue #55 — Enterprise package unlimited branches enforcement
+**Labels:** `feature` `backend`
+**Priority:** P0
+
+Update branch limit enforcement so Enterprise package tenants have unlimited branch creation while non-Enterprise plans still enforce `maxBranches`.
+
+**Acceptance Criteria:**
+- [ ] Enterprise tenants bypass branch cap checks
+- [ ] Non-Enterprise tenants still receive limit errors as configured
+- [ ] Branch creation audit includes plan context used for decision
+
+---
+
+### Issue #56 — Tenant context feature store for AI inputs
+**Labels:** `feature` `backend`
+**Priority:** P0
+
+Build a tenant-scoped feature aggregation layer for AI input signals (sales, products, stock movement, expenses, branch performance) with cached snapshots for efficient inference.
+
+**Acceptance Criteria:**
+- [ ] Feature snapshots are tenant-isolated
+- [ ] Snapshot includes branch and product granularity
+- [ ] Snapshot freshness metadata is stored and exposed
+
+---
+
+### Issue #57 — Public and platform signal ingestion for contextual intelligence
+**Labels:** `feature` `backend` `infra`
+**Priority:** P1
+
+Implement ingestion and normalization of public signals (seasonality, holidays, macro proxies) and platform-level anonymized benchmarks to complement tenant-local context.
+
+**Acceptance Criteria:**
+- [ ] Public data ingestion supports source tagging and validation
+- [ ] Platform benchmarks are anonymized and non-identifiable
+- [ ] AI services can reference both signal classes in response provenance
+
+---
+
+### Issue #58 — Demand forecast and reorder recommendation service
+**Labels:** `feature` `backend`
+**Priority:** P0
+
+Create Enterprise AI demand forecasting and reorder recommendation endpoints per product per branch with confidence scores and reason codes.
+
+**Acceptance Criteria:**
+- [ ] Returns forecast horizon, suggested reorder quantity, and reorder point
+- [ ] Includes confidence and top driver explanations
+- [ ] Recommendations are persisted with `modelVersion` and `inputSnapshot`
+
+---
+
+### Issue #59 — Pricing and margin advisor service
+**Labels:** `feature` `backend`
+**Priority:** P1
+
+Implement pricing guidance endpoint that suggests safe adjustment ranges and projected margin impact using tenant context and contextual signals.
+
+**Acceptance Criteria:**
+- [ ] Output provides min/recommended/max adjustment range
+- [ ] Output includes projected margin impact before action
+- [ ] No automatic price mutation without explicit user action
+
+---
+
+### Issue #60 — Cash-flow forecast and expense risk alerts
+**Labels:** `feature` `backend`
+**Priority:** P1
+
+Build AI endpoints for short-term cash-flow forecasts and unusual expense growth detection, with actionable risk summaries.
+
+**Acceptance Criteria:**
+- [ ] Forecast outputs include inflow/outflow trend and net position projection
+- [ ] Risk alerts identify unusual category spikes with severity
+- [ ] Alerts are deduplicated and tenant-scoped
+
+---
+
+### Issue #61 — Anomaly detection for sales, expenses, and inventory
+**Labels:** `feature` `backend` `security`
+**Priority:** P1
+
+Implement anomaly detection service for suspicious discounts, duplicate expenses, inventory shrinkage spikes, and transaction outliers.
+
+**Acceptance Criteria:**
+- [ ] Each anomaly includes risk score and reason codes
+- [ ] Supports role-aware visibility for sensitive alerts
+- [ ] Detection output can be acknowledged/resolved with audit trail
+
+---
+
+### Issue #62 — Branch performance copilot dashboard (Enterprise only)
+**Labels:** `feature` `frontend`
+**Priority:** P1
+
+Create Enterprise branch performance views showing branch comparisons, bottlenecks, and prioritized improvement actions.
+
+**Acceptance Criteria:**
+- [ ] Branch ranking uses standardized metrics (revenue, margin, stock health, expense efficiency)
+- [ ] UI supports large branch counts without pagination failures
+- [ ] Non-Enterprise tenants cannot access route
+
+---
+
+### Issue #63 — Natural-language Enterprise AI assistant
+**Labels:** `feature` `frontend` `backend`
+**Priority:** P1
+
+Implement chat-based business assistant for Enterprise users with scoped analytics queries and recommendation summaries.
+
+**Acceptance Criteria:**
+- [ ] Responses include source provenance tags (tenant/platform/public)
+- [ ] Assistant respects role permissions and tenant scope
+- [ ] Unsafe or out-of-scope prompts are rejected with safe guidance
+
+---
+
+### Issue #64 — Recommendation decision workflow and feedback loop
+**Labels:** `feature` `frontend` `backend`
+**Priority:** P1
+
+Add recommendation lifecycle actions (`accept`, `reject`, `snooze`, `not_relevant`) and capture feedback to improve future recommendation quality.
+
+**Acceptance Criteria:**
+- [ ] Recommendation states are persisted with actor and timestamp
+- [ ] Feedback is linked to recommendation context for retraining/evaluation
+- [ ] Audit logs capture all recommendation decisions
+
+---
+
+### Issue #65 — Enterprise AI observability and quality evaluation
+**Labels:** `enhancement` `backend` `infra` `testing`
+**Priority:** P2
+
+Add monitoring and evaluation dashboards for forecast error, anomaly precision, recommendation adoption, and API health for Enterprise AI services.
+
+**Acceptance Criteria:**
+- [ ] Metrics available per tenant and globally (anonymized where needed)
+- [ ] Alerting thresholds configured for service regressions
+- [ ] Evaluation jobs are repeatable and documented
+
+---
+
+### Issue #66 — Enterprise AI access and isolation test suite
+**Labels:** `testing` `backend` `frontend` `security`
+**Priority:** P1
+
+Create automated tests validating Enterprise entitlement gating, tenant isolation, role boundaries, and upgrade-path UX for blocked tenants.
+
+**Acceptance Criteria:**
+- [ ] Non-Enterprise access attempts fail with expected responses
+- [ ] Enterprise access succeeds for authorized roles
+- [ ] Cross-tenant leakage tests pass for all Enterprise AI endpoints
+
+---
+
+*Total Issues: 66*
 *Last updated: Auto-generated by GitHub Copilot*

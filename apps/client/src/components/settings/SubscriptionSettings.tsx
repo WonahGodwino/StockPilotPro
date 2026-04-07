@@ -3,7 +3,7 @@ import toast from 'react-hot-toast'
 import { CreditCard, RefreshCw, UploadCloud, ShieldCheck } from 'lucide-react'
 import api from '@/lib/api'
 import { useAuthStore } from '@/store/auth.store'
-import type { Plan, Subscription, SubscriptionPaymentMethod, SubscriptionTransaction } from '@/types'
+import type { Plan, Subscription, SubscriptionPaymentMethod, SubscriptionTransaction, Tenant } from '@/types'
 
 const methodLabels: Record<SubscriptionPaymentMethod, string> = {
   PAYSTACK: 'Paystack (Online)',
@@ -16,9 +16,12 @@ export default function SubscriptionSettings() {
   const apiOrigin = apiBase.startsWith('http') ? new URL(apiBase).origin : window.location.origin
 
   const user = useAuthStore((s) => s.user)
+  const isAgent = user?.role === 'AGENT'
   const [plans, setPlans] = useState<Plan[]>([])
   const [currentSubscription, setCurrentSubscription] = useState<Subscription | null>(null)
   const [transactions, setTransactions] = useState<SubscriptionTransaction[]>([])
+  const [assignedTenants, setAssignedTenants] = useState<Tenant[]>([])
+  const [selectedTenantId, setSelectedTenantId] = useState('')
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
 
@@ -33,18 +36,66 @@ export default function SubscriptionSettings() {
   const [transferProofUploadedByUserId, setTransferProofUploadedByUserId] = useState('')
   const [transferProofUploadedAt, setTransferProofUploadedAt] = useState('')
   const [proofUploading, setProofUploading] = useState(false)
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
 
-  const tenantId = user?.tenantId || null
+  const cacheKey = `stockpilot:subscription-settings:${user?.id || 'unknown'}:${user?.tenantId || 'none'}:${user?.role || 'none'}`
+
+  const tenantId = isAgent ? selectedTenantId || null : user?.tenantId || null
 
   const load = async () => {
-    if (!tenantId) return
-
     setLoading(true)
     try {
+      if (!navigator.onLine) {
+        const raw = typeof window !== 'undefined' ? window.localStorage.getItem(cacheKey) : null
+        if (raw) {
+          const snapshot = JSON.parse(raw) as {
+            plans: Plan[]
+            currentSubscription: Subscription | null
+            transactions: SubscriptionTransaction[]
+            assignedTenants: Tenant[]
+            selectedTenantId: string
+            requestedPlanId: string
+            billingCycle: 'MONTHLY' | 'YEARLY'
+          }
+
+          setPlans(snapshot.plans || [])
+          setCurrentSubscription(snapshot.currentSubscription || null)
+          setTransactions(snapshot.transactions || [])
+          setAssignedTenants(snapshot.assignedTenants || [])
+          if (snapshot.selectedTenantId) setSelectedTenantId(snapshot.selectedTenantId)
+          if (snapshot.requestedPlanId) setRequestedPlanId(snapshot.requestedPlanId)
+          if (snapshot.billingCycle) setBillingCycle(snapshot.billingCycle)
+        }
+        setLoading(false)
+        return
+      }
+
+      const plansReq = api.get<{ data: Plan[] }>('/plans')
+
+      let effectiveTenantId = tenantId
+      if (isAgent) {
+        const tenantsRes = await api.get<{ data: Tenant[] }>('/tenants')
+        const available = tenantsRes.data.data || []
+        setAssignedTenants(available)
+
+        if (!effectiveTenantId && available.length > 0) {
+          effectiveTenantId = available[0].id
+          setSelectedTenantId(available[0].id)
+        }
+      }
+
+      if (!effectiveTenantId) {
+        setPlans([])
+        setCurrentSubscription(null)
+        setTransactions([])
+        setLoading(false)
+        return
+      }
+
       const [plansRes, tenantRes, txRes] = await Promise.all([
-        api.get<{ data: Plan[] }>('/plans'),
-        api.get<{ data: { subscriptions?: Subscription[] } }>(`/tenants/${tenantId}`),
-        api.get<{ data: SubscriptionTransaction[] }>('/subscriptions/transactions'),
+        plansReq,
+        api.get<{ data: { subscriptions?: Subscription[] } }>(`/tenants/${effectiveTenantId}`),
+        api.get<{ data: SubscriptionTransaction[] }>('/subscriptions/transactions', { params: { tenantId: effectiveTenantId } }),
       ])
 
       const loadedPlans = plansRes.data.data || []
@@ -60,6 +111,22 @@ export default function SubscriptionSettings() {
         setRequestedPlanId(currentPlanId || loadedPlans[0].id)
         setBillingCycle(active?.plan?.billingCycle || loadedPlans[0].billingCycle)
       }
+
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(
+          cacheKey,
+          JSON.stringify({
+            plans: loadedPlans,
+            currentSubscription: active,
+            transactions: txRes.data.data || [],
+            assignedTenants: isAgent ? assignedTenants : [],
+            selectedTenantId: isAgent ? (effectiveTenantId || selectedTenantId) : '',
+            requestedPlanId: requestedPlanId || (loadedPlans[0]?.id || ''),
+            billingCycle,
+            cachedAt: new Date().toISOString(),
+          })
+        )
+      }
     } catch {
       toast.error('Failed to load subscription settings')
     } finally {
@@ -69,7 +136,22 @@ export default function SubscriptionSettings() {
 
   useEffect(() => {
     void load()
-  }, [tenantId])
+  }, [tenantId, isAgent])
+
+  useEffect(() => {
+    const onOnline = () => {
+      setIsOnline(true)
+      void load()
+    }
+    const onOffline = () => setIsOnline(false)
+
+    window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
+    return () => {
+      window.removeEventListener('online', onOnline)
+      window.removeEventListener('offline', onOffline)
+    }
+  }, [tenantId, isAgent])
 
   const selectedPlan = useMemo(
     () => plans.find((p) => p.id === requestedPlanId),
@@ -79,6 +161,16 @@ export default function SubscriptionSettings() {
   const isUpgrade = !!currentSubscription && currentSubscription.planId !== requestedPlanId
 
   const submitRequest = async () => {
+    if (!navigator.onLine) {
+      toast.error('Reconnect to submit subscription requests')
+      return
+    }
+
+    if (isAgent && !tenantId) {
+      toast.error('Select a business first')
+      return
+    }
+
     if (!requestedPlanId) {
       toast.error('Select a plan first')
       return
@@ -87,6 +179,7 @@ export default function SubscriptionSettings() {
     setSubmitting(true)
     try {
       const payload = {
+        tenantId: isAgent ? tenantId || undefined : undefined,
         requestedPlanId,
         billingCycle,
         paymentMethod,
@@ -127,13 +220,18 @@ export default function SubscriptionSettings() {
       await load()
     } catch (err: unknown) {
       const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
-      toast.error(message || 'Failed to submit request')
+      toast.error(message || 'You can only initiate transactions for your own business or organization')
     } finally {
       setSubmitting(false)
     }
   }
 
   const verifyPaystack = async (txId: string) => {
+    if (!navigator.onLine) {
+      toast.error('Reconnect to verify payment')
+      return
+    }
+
     try {
       await api.post(`/subscriptions/transactions/${txId}/verify`, {})
       toast.success('Payment verified and subscription activated.')
@@ -145,6 +243,11 @@ export default function SubscriptionSettings() {
   }
 
   const uploadTransferProof = async (file: File) => {
+    if (!navigator.onLine) {
+      toast.error('Reconnect to upload transfer proof')
+      return
+    }
+
     if (!file) return
     const form = new FormData()
     form.append('file', file)
@@ -169,7 +272,7 @@ export default function SubscriptionSettings() {
     }
   }
 
-  if (!tenantId) return null
+  if (!tenantId && !isAgent) return null
 
   return (
     <div className="card p-6 space-y-5">
@@ -177,11 +280,27 @@ export default function SubscriptionSettings() {
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Subscription & Renewal</h2>
           <p className="text-sm text-gray-500 mt-1">Request renewal or plan upgrade, pay online, or submit transfer proof.</p>
+          {!isOnline && <p className="text-xs text-amber-600 mt-1">Offline mode: showing cached subscription records.</p>}
         </div>
         <button className="btn-secondary" onClick={() => void load()} disabled={loading}>
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
         </button>
       </div>
+
+      {isAgent && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Business</label>
+          <select className="input" value={selectedTenantId} onChange={(e) => setSelectedTenantId(e.target.value)}>
+            <option value="">Select business</option>
+            {assignedTenants.map((tenant) => (
+              <option key={tenant.id} value={tenant.id}>{tenant.name}</option>
+            ))}
+          </select>
+          {assignedTenants.length === 0 && (
+            <p className="mt-2 text-xs text-gray-500">No businesses are assigned to your agent account yet.</p>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="rounded-xl border border-gray-200 p-4">

@@ -1,8 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import api from '@/lib/api'
 import type { Product } from '@/types'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/auth.store'
+import { useAppStore } from '@/store/app.store'
+import { getApiErrorMessage } from '@/lib/apiError'
+import { makeCurrencyFormatter } from '@/lib/currency'
 import { X, Loader2 } from 'lucide-react'
 
 interface Props {
@@ -20,6 +23,11 @@ function toDateInputValue(value?: string | Date): string {
 
 export default function ProductModal({ product, onClose, onSaved }: Props) {
   const user = useAuthStore((s) => s.user)
+  const baseCurrency = user?.tenant?.baseCurrency || 'USD'
+  const fmt = makeCurrencyFormatter(baseCurrency)
+  const selectedSubsidiaryId = useAppStore((s) => s.selectedSubsidiaryId)
+  const subsidiaries = useAppStore((s) => s.subsidiaries)
+  const isSalesperson = user?.role === 'SALESPERSON'
   const [loading, setLoading] = useState(false)
   const [form, setForm] = useState({
     name: product?.name || '',
@@ -33,23 +41,46 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
     lowStockThreshold: product?.lowStockThreshold ?? 10,
     expiryDate: toDateInputValue(product?.expiryDate as string | Date | undefined),
     status: product?.status || 'ACTIVE',
-    subsidiaryId: product?.subsidiaryId || user?.subsidiaryId || '',
+    subsidiaryId: product?.subsidiaryId || selectedSubsidiaryId || user?.subsidiaryId || '',
   })
+
+  useEffect(() => {
+    if (isSalesperson && user?.subsidiaryId && form.subsidiaryId !== user.subsidiaryId) {
+      setForm((current) => ({ ...current, subsidiaryId: user.subsidiaryId || '' }))
+      return
+    }
+
+    if (!isSalesperson && !form.subsidiaryId && subsidiaries.length > 0) {
+      setForm((current) => ({ ...current, subsidiaryId: subsidiaries[0].id }))
+    }
+  }, [isSalesperson, user?.subsidiaryId, subsidiaries, form.subsidiaryId])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    const resolvedSubsidiaryId = isSalesperson ? (user?.subsidiaryId || '') : form.subsidiaryId
+
+    if (!resolvedSubsidiaryId) {
+      toast.error('Please select a subsidiary before creating a product')
+      return
+    }
+
     setLoading(true)
     try {
+      const payload = {
+        ...form,
+        subsidiaryId: resolvedSubsidiaryId,
+      }
+
       if (product) {
-        await api.put(`/products/${product.id}`, form)
+        await api.put(`/products/${product.id}`, payload)
         toast.success('Product updated')
       } else {
-        await api.post('/products', form)
+        await api.post('/products', payload)
         toast.success('Product created')
       }
       onSaved()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to save'
+      const msg = getApiErrorMessage(err, 'Failed to save')
       toast.error(msg)
     } finally {
       setLoading(false)
@@ -118,6 +149,24 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
               </select>
             </div>
             <div className="col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Subsidiary *</label>
+              <select
+                className="input"
+                value={form.subsidiaryId}
+                onChange={(e) => setForm({ ...form, subsidiaryId: e.target.value })}
+                disabled={isSalesperson}
+                required
+              >
+                {!isSalesperson && <option value="">Select a subsidiary</option>}
+                {subsidiaries.map((subsidiary) => (
+                  <option key={subsidiary.id} value={subsidiary.id}>{subsidiary.name}</option>
+                ))}
+              </select>
+              {isSalesperson && (
+                <p className="mt-1 text-xs text-gray-500">Products are created under your assigned subsidiary.</p>
+              )}
+            </div>
+            <div className="col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
               <textarea className="input resize-none" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
             </div>
@@ -131,7 +180,7 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
               <div className="bg-gray-50 rounded-lg p-3 text-sm">
                 <span className="text-gray-500">Margin: </span>
                 <span className={`font-semibold ${color}`}>
-                  ${(form.sellingPrice - form.costPrice).toFixed(2)} ({marginPct.toFixed(1)}%)
+                  {fmt(form.sellingPrice - form.costPrice)} ({marginPct.toFixed(1)}%)
                 </span>
               </div>
             )

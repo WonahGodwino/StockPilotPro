@@ -6,6 +6,8 @@ import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { isSuperAdmin } from '@/lib/rbac'
 import { logAudit } from '@/lib/audit'
 
+const benefitsSchema = z.array(z.string().min(1))
+
 const updatePlanSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
@@ -14,7 +16,8 @@ const updatePlanSchema = z.object({
   billingCycle: z.nativeEnum(BillingCycle).optional(),
   maxSubsidiaries: z.number().int().min(1).optional(),
   extraSubsidiaryPrice: z.number().min(0).optional(),
-  features: z.array(z.string()).optional(),
+  features: benefitsSchema.optional(),
+  benefits: benefitsSchema.optional(),
   isActive: z.boolean().optional(),
 })
 
@@ -41,6 +44,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
     const body = await req.json()
     const data = updatePlanSchema.parse(body)
+    const benefits = data.benefits ?? data.features
 
     const before = await prisma.plan.findUnique({ where: { id: params.id } })
     if (!before) return apiError('Plan not found', 404)
@@ -56,8 +60,8 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       isActive: data.isActive,
       updatedBy: user.userId,
     }
-    if (data.features !== undefined) {
-      updateData.features = data.features as Prisma.InputJsonValue
+    if (benefits !== undefined) {
+      updateData.features = benefits as Prisma.InputJsonValue
     }
 
     const plan = await prisma.plan.update({

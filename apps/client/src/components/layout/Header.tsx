@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
-import { getPendingRecordCount } from '@/lib/db'
+import { getPendingRecordCount, subscribePendingRecordsChanged } from '@/lib/db'
 import { getSyncHistorySnapshot, getSyncStatusSnapshot, syncPendingRecords } from '@/lib/sync'
 
 const SYSTEM_NAME = 'StockPilotPro'
@@ -26,6 +26,10 @@ export default function Header() {
 
     if (user.role === 'SUPER_ADMIN') {
       return SYSTEM_NAME
+    }
+
+    if (user.role === 'AGENT') {
+      return 'Agent Workspace'
     }
 
     if (user.role === 'SALESPERSON') {
@@ -65,10 +69,12 @@ export default function Header() {
 
     void refreshPending()
     const intervalId = setInterval(() => { void refreshPending() }, 10_000)
+    const unsubscribePending = subscribePendingRecordsChanged(onSyncStatus as EventListener)
     window.addEventListener('stockpilot:sync-status', onSyncStatus as EventListener)
 
     return () => {
       clearInterval(intervalId)
+      unsubscribePending()
       window.removeEventListener('stockpilot:sync-status', onSyncStatus as EventListener)
     }
   }, [])
@@ -139,18 +145,19 @@ export default function Header() {
           {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
         </button>
 
-        {/* Notifications */}
-        <button
-          onClick={() => navigate('/notifications')}
-          className="relative p-2 rounded-lg text-gray-200 dark:text-gray-300 hover:text-white dark:hover:text-white hover:bg-white/15 dark:hover:bg-gray-700/70"
-        >
-          <Bell className="w-5 h-5" />
-          {unreadNotificationCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 bg-danger-500 text-white text-xs rounded-full w-4.5 h-4.5 flex items-center justify-center min-w-[18px] min-h-[18px] text-[10px]">
-              {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
-            </span>
-          )}
-        </button>
+        {user?.role !== 'SUPER_ADMIN' && user?.role !== 'AGENT' && (
+          <button
+            onClick={() => navigate('/notifications')}
+            className="relative p-2 rounded-lg text-gray-200 dark:text-gray-300 hover:text-white dark:hover:text-white hover:bg-white/15 dark:hover:bg-gray-700/70"
+          >
+            <Bell className="w-5 h-5" />
+            {unreadNotificationCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 bg-danger-500 text-white text-xs rounded-full w-4.5 h-4.5 flex items-center justify-center min-w-[18px] min-h-[18px] text-[10px]">
+                {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
+              </span>
+            )}
+          </button>
+        )}
 
         {/* User + Logout */}
         <div className="flex items-center gap-2">

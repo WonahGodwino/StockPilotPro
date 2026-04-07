@@ -1,6 +1,6 @@
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
-export type UserRole = 'SUPER_ADMIN' | 'BUSINESS_ADMIN' | 'SALESPERSON'
+export type UserRole = 'SUPER_ADMIN' | 'AGENT' | 'BUSINESS_ADMIN' | 'SALESPERSON'
 
 export interface AuthUser {
   id: string
@@ -112,7 +112,7 @@ export interface SaleCheckoutPayload {
 export interface Expense {
   id: string
   tenantId: string
-  subsidiaryId: string
+  subsidiaryId: string | null
   userId: string
   title: string
   amount: number
@@ -179,12 +179,29 @@ export interface Tenant {
   slug: string
   email: string
   phone?: string
+  address?: string
+  country?: string
+  state?: string
+  lga?: string
   isActive: boolean
   baseCurrency: string
   presenceTimeoutMinutes?: number
+  acquisitionAgentId?: string | null
+  acquisitionAgent?: Pick<AuthUser, 'id' | 'firstName' | 'lastName' | 'email'> | null
   createdAt: string
   subscriptions?: Subscription[]
   _count?: { users: number; subsidiaries: number }
+}
+
+export interface TrustedCustomer {
+  id: string
+  name: string
+  logoUrl?: string | null
+  websiteUrl?: string | null
+  displayOrder: number
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
 }
 
 // ── Plans & Subscriptions ─────────────────────────────────────────────────────

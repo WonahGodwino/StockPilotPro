@@ -8,6 +8,7 @@ import {
 } from '@/lib/sso'
 import { signAccessToken, signRefreshToken, storeRefreshToken } from '@/lib/jwt'
 import { logAudit } from '@/lib/audit'
+import { getActiveSubscriptionForTenant } from '@/lib/subscription-enforcement'
 
 /**
  * GET /api/auth/sso/[provider]/callback?code=xxx&state=xxx
@@ -99,11 +100,9 @@ export async function GET(
       )
     }
 
-    // Check subscription for non-super-admins
+    // Check active subscription for non-super-admins.
     if (user.tenantId && user.role !== 'SUPER_ADMIN') {
-      const activeSub = await prisma.subscription.findFirst({
-        where: { tenantId: user.tenantId, status: 'ACTIVE' },
-      })
+      const activeSub = await getActiveSubscriptionForTenant(user.tenantId)
       if (!activeSub) {
         return NextResponse.redirect(
           `${frontendOrigin}/login?sso_error=subscription_expired`

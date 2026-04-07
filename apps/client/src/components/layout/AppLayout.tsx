@@ -14,8 +14,19 @@ export default function AppLayout() {
 
   useEffect(() => {
     if (!user) return
-    // Load subsidiaries
-    api.get('/subsidiaries').then((r) => setSubsidiaries(r.data.data)).catch(() => {})
+    if (user.role !== 'SUPER_ADMIN' && user.role !== 'AGENT') {
+      // Load subsidiaries only for tenant-scoped users
+      api.get('/subsidiaries').then((r) => setSubsidiaries(r.data.data)).catch(() => {})
+    } else {
+      setSubsidiaries([])
+    }
+
+    if (user.role === 'SUPER_ADMIN' || user.role === 'AGENT') {
+      setNotifications([])
+      setUnreadCount(0)
+      return
+    }
+
     // Load notifications
     api.get('/notifications?limit=10').then((r) => {
       setNotifications(r.data.data)

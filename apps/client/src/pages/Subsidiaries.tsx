@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import api from '@/lib/api'
 import type { Subsidiary } from '@/types'
 import { useAuthStore } from '@/store/auth.store'
 import toast from 'react-hot-toast'
 import { Plus, Building2, Edit, ToggleLeft, ToggleRight, X, Loader2, MapPin, Phone } from 'lucide-react'
+import { getCachedSubsidiariesForTenant, replaceCachedSubsidiariesForTenant } from '@/lib/db'
 
 interface SubForm { name: string; address: string; phone: string; email: string }
 const empty: SubForm = { name: '', address: '', phone: '', email: '' }
@@ -18,16 +19,43 @@ export default function Subsidiaries() {
 
   const canManage = user?.role === 'BUSINESS_ADMIN' || user?.role === 'SUPER_ADMIN'
 
-  const load = async () => {
+  const refreshOfflineSubsidiaryCache = useCallback(async () => {
+    if (!navigator.onLine || !user?.tenantId) return
+    const res = await api.get<{ data: Subsidiary[] }>('/subsidiaries')
+    await replaceCachedSubsidiariesForTenant(user.tenantId, res.data.data)
+  }, [user?.tenantId])
+
+  const load = useCallback(async () => {
     setLoading(true)
     try {
+      if (!navigator.onLine && user?.tenantId) {
+        const cached = await getCachedSubsidiariesForTenant(user.tenantId)
+        setItems(cached)
+        return
+      }
+
       const res = await api.get<{ data: Subsidiary[] }>('/subsidiaries')
       setItems(res.data.data)
+      if (user?.tenantId) {
+        void replaceCachedSubsidiariesForTenant(user.tenantId, res.data.data).catch(() => undefined)
+      }
     }
     catch { toast.error('Failed to load branches') } finally { setLoading(false) }
-  }
+  }, [user?.tenantId])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { void load() }, [load])
+
+  useEffect(() => {
+    const onOnline = () => {
+      void load()
+      void refreshOfflineSubsidiaryCache()
+    }
+
+    window.addEventListener('online', onOnline)
+    return () => {
+      window.removeEventListener('online', onOnline)
+    }
+  }, [load, refreshOfflineSubsidiaryCache])
 
   const openCreate = () => { setForm(empty); setModal({ open: true, item: null }) }
   const openEdit = (s: Subsidiary) => { setForm({ name: s.name, address: s.address || '', phone: s.phone || '', email: s.email || '' }); setModal({ open: true, item: s }) }
@@ -37,7 +65,7 @@ export default function Subsidiaries() {
     try {
       if (modal.item) { await api.put(`/subsidiaries/${modal.item.id}`, form); toast.success('Branch updated') }
       else { await api.post('/subsidiaries', form); toast.success('Branch created') }
-      setModal({ open: false, item: null }); load()
+      setModal({ open: false, item: null }); void load(); void refreshOfflineSubsidiaryCache()
     } catch (err: unknown) { toast.error((err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed') }
     finally { setSaving(false) }
   }
@@ -46,7 +74,8 @@ export default function Subsidiaries() {
     try {
       await api.put(`/subsidiaries/${s.id}`, { isActive: !s.isActive })
       toast.success(s.isActive ? 'Branch deactivated' : 'Branch activated')
-      load()
+      void load()
+      void refreshOfflineSubsidiaryCache()
     } catch { toast.error('Failed to update') }
   }
 

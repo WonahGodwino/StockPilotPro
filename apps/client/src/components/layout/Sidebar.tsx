@@ -6,7 +6,7 @@ import type { UserRole } from '@/types'
 import {
   LayoutDashboard, Package, ShoppingCart, Receipt, BarChart2,
   Building2, Users, Bell, ChevronLeft, ChevronRight,
-  TrendingUp, Shield, ChevronDown, Settings, ClipboardList,
+  TrendingUp, Shield, ChevronDown, Settings, ClipboardList, BadgeCheck,
 } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -29,16 +29,16 @@ const navSections: NavSection[] = [
     key: 'general',
     label: 'General',
     items: [
-      { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, roles: ['SUPER_ADMIN', 'BUSINESS_ADMIN', 'SALESPERSON'] },
-      { label: 'Notifications', href: '/notifications', icon: Bell, roles: ['SUPER_ADMIN', 'BUSINESS_ADMIN', 'SALESPERSON'] },
+      { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, roles: ['SUPER_ADMIN', 'AGENT', 'BUSINESS_ADMIN', 'SALESPERSON'] },
+      { label: 'Notifications', href: '/notifications', icon: Bell, roles: ['BUSINESS_ADMIN', 'SALESPERSON'] },
     ],
   },
   {
     key: 'operations',
     label: 'Operations',
     items: [
-      { label: 'Products', href: '/products', icon: Package, roles: ['SUPER_ADMIN', 'BUSINESS_ADMIN', 'SALESPERSON'] },
-      { label: 'Sales / POS', href: '/sales', icon: ShoppingCart, roles: ['SUPER_ADMIN', 'BUSINESS_ADMIN', 'SALESPERSON'] },
+      { label: 'Products', href: '/products', icon: Package, roles: ['BUSINESS_ADMIN', 'SALESPERSON'] },
+      { label: 'Sales / POS', href: '/sales', icon: ShoppingCart, roles: ['BUSINESS_ADMIN', 'SALESPERSON'] },
       { label: 'Expenses', href: '/expenses', icon: Receipt, roles: ['SUPER_ADMIN', 'BUSINESS_ADMIN', 'SALESPERSON'] },
     ],
   },
@@ -48,8 +48,8 @@ const navSections: NavSection[] = [
     items: [
       { label: 'Reports', href: '/reports', icon: BarChart2, roles: ['SUPER_ADMIN', 'BUSINESS_ADMIN'] },
       { label: 'Subsidiaries', href: '/subsidiaries', icon: Building2, roles: ['SUPER_ADMIN', 'BUSINESS_ADMIN'] },
-      { label: 'Users', href: '/users', icon: Users, roles: ['SUPER_ADMIN', 'BUSINESS_ADMIN'] },
-      { label: 'Settings', href: '/settings', icon: Settings, roles: ['SUPER_ADMIN', 'BUSINESS_ADMIN'] },
+      { label: 'Users', href: '/users', icon: Users, roles: ['SUPER_ADMIN', 'AGENT', 'BUSINESS_ADMIN'] },
+      { label: 'Settings', href: '/settings', icon: Settings, roles: ['SUPER_ADMIN', 'AGENT', 'BUSINESS_ADMIN', 'SALESPERSON'] },
     ],
   },
   {
@@ -59,8 +59,18 @@ const navSections: NavSection[] = [
     items: [
       { label: 'Tenants', href: '/admin/tenants', icon: Shield, roles: ['SUPER_ADMIN'] },
       { label: 'Plans', href: '/admin/plans', icon: TrendingUp, roles: ['SUPER_ADMIN'] },
+      { label: 'Trusted Customers', href: '/admin/trusted-customers', icon: BadgeCheck, roles: ['SUPER_ADMIN'] },
       { label: 'Subscription Reminders', href: '/admin/subscription-reminders', icon: Bell, roles: ['SUPER_ADMIN'] },
       { label: 'Subscription Ledger', href: '/admin/subscription-transactions', icon: ClipboardList, roles: ['SUPER_ADMIN'] },
+    ],
+  },
+  {
+    key: 'agentOps',
+    label: 'Agent Ops',
+    onlyRole: 'AGENT',
+    items: [
+      { label: 'Tenants', href: '/admin/tenants', icon: Shield, roles: ['AGENT'] },
+      { label: 'Subscription Ledger', href: '/admin/subscription-transactions', icon: ClipboardList, roles: ['AGENT'] },
     ],
   },
 ]
@@ -74,6 +84,7 @@ export default function Sidebar() {
     operations: true,
     management: true,
     superAdmin: true,
+    agentOps: true,
   })
 
   const visibleSections = useMemo(

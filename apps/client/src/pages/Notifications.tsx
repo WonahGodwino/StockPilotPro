@@ -1,46 +1,97 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { Navigate } from 'react-router-dom'
 import api from '@/lib/api'
 import type { Notification } from '@/types'
 import { useAppStore } from '@/store/app.store'
+import { useAuthStore } from '@/store/auth.store'
 import toast from 'react-hot-toast'
 import { Bell, CheckCheck, AlertTriangle, Info, Package, Loader2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
+import {
+  getCachedNotificationsForTenant,
+  replaceCachedNotificationsForTenant,
+  updateCachedNotificationReadState,
+} from '@/lib/db'
 
 const TYPE_ICONS: Record<string, React.ElementType> = { LOW_STOCK: Package, SUBSCRIPTION_EXPIRY: AlertTriangle, INFO: Info, SYSTEM: Bell }
 const TYPE_COLORS: Record<string, string> = { LOW_STOCK: 'text-amber-500 bg-amber-50', SUBSCRIPTION_EXPIRY: 'text-red-500 bg-red-50', INFO: 'text-blue-500 bg-blue-50', SYSTEM: 'text-gray-500 bg-gray-100' }
 
 export default function Notifications() {
+  const user = useAuthStore((s) => s.user)
   const [items, setItems] = useState<Notification[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'all' | 'unread'>('all')
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
   const setUnread = useAppStore((s) => s.setUnreadCount)
 
-  const load = async () => {
+  if (!user || user.role === 'SUPER_ADMIN' || user.role === 'AGENT') {
+    return <Navigate to="/dashboard" replace />
+  }
+
+  const load = useCallback(async () => {
     setLoading(true)
     try {
+      if (!navigator.onLine && user?.tenantId) {
+        const cached = await getCachedNotificationsForTenant(user.tenantId)
+        const ordered = [...cached].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        setItems(ordered)
+        setUnread(ordered.filter((n) => !n.isRead).length)
+        return
+      }
+
       const res = await api.get<{ data: Notification[]; unreadCount: number }>('/notifications')
       setItems(res.data.data)
       setUnread(res.data.unreadCount)
+      if (user?.tenantId) {
+        await replaceCachedNotificationsForTenant(user.tenantId, res.data.data)
+      }
     }
     catch { toast.error('Failed to load notifications') } finally { setLoading(false) }
-  }
+  }, [setUnread, user?.tenantId])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { void load() }, [load])
+
+  useEffect(() => {
+    const onOnline = () => {
+      setIsOnline(true)
+      void load()
+    }
+    const onOffline = () => setIsOnline(false)
+
+    window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
+    return () => {
+      window.removeEventListener('online', onOnline)
+      window.removeEventListener('offline', onOffline)
+    }
+  }, [load])
 
   const markRead = async (id: string) => {
+    if (!navigator.onLine) {
+      toast.error('Reconnect to mark notifications as read')
+      return
+    }
+
     try {
       await api.put(`/notifications/${id}/read`, {})
       setItems((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)))
       setUnread(Math.max(0, items.filter((n) => !n.isRead).length - 1))
+      await updateCachedNotificationReadState(id, true)
     } catch { toast.error('Failed to mark as read') }
   }
 
   const markAllRead = async () => {
+    if (!navigator.onLine) {
+      toast.error('Reconnect to mark all as read')
+      return
+    }
+
     try {
       const unread = items.filter((n) => !n.isRead)
       await Promise.all(unread.map((n) => api.put(`/notifications/${n.id}/read`, {})))
       setItems((prev) => prev.map((n) => ({ ...n, isRead: true })))
       setUnread(0)
+      await Promise.all(unread.map((n) => updateCachedNotificationReadState(n.id, true)))
       toast.success('All marked as read')
     } catch { toast.error('Failed') }
   }
@@ -54,6 +105,7 @@ export default function Notifications() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Notifications</h1>
           <p className="text-sm text-gray-500 mt-0.5">{unreadCount > 0 ? `${unreadCount} unread` : 'All caught up'}</p>
+          {!isOnline && <p className="text-xs text-amber-600 mt-1">Offline mode: showing cached notifications.</p>}
         </div>
         <div className="flex gap-2">
           {(['all','unread'] as const).map((f) => (

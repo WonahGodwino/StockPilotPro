@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useState, useEffect, useRef } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth.store'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
+import { trackEvent } from '@/lib/analytics'
+import { useSeo } from '@/lib/seo'
 
 function GoogleIcon() {
   return (
@@ -39,7 +41,14 @@ export default function Login() {
 
   const [form, setForm] = useState({ email: '', password: '' })
   const [showPassword, setShowPassword] = useState(false)
+  const [showNewResetPassword, setShowNewResetPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [forgotSubmitting, setForgotSubmitting] = useState(false)
+  const [resetSubmitting, setResetSubmitting] = useState(false)
+  const [view, setView] = useState<'login' | 'forgot' | 'reset'>('login')
+  const [forgotEmail, setForgotEmail] = useState('')
+  const [resetForm, setResetForm] = useState({ email: '', otp: '', newPassword: '' })
+  const hasTrackedLoginFormStart = useRef(false)
 
   const [ssoChecking, setSsoChecking] = useState(false)
   const [ssoInfo, setSsoInfo] = useState<{
@@ -47,6 +56,21 @@ export default function Login() {
     providers: string[]
     tenantId: string | null
   } | null>(null)
+
+  useSeo({
+    title: 'Secure Sign In',
+    description:
+      'Sign in to StockPilot Pro to manage inventory, sales, and financial operations with role-based access and secure workflows.',
+    path: '/login',
+    keywords: 'stockpilot login, secure business login, inventory platform sign in',
+    robots: 'noindex,nofollow',
+  })
+
+  const trackLoginFormStart = () => {
+    if (hasTrackedLoginFormStart.current) return
+    hasTrackedLoginFormStart.current = true
+    trackEvent('login_form_started')
+  }
 
   useEffect(() => {
     const ssoError = searchParams.get('sso_error')
@@ -65,6 +89,7 @@ export default function Login() {
         invalid_state: 'Invalid SSO state. Please try again.',
       }
       toast.error(messages[ssoError] || `SSO error: ${ssoError}`)
+      trackEvent('login_sso_error_received', { error_code: ssoError })
     }
   }, [searchParams])
 
@@ -75,11 +100,17 @@ export default function Login() {
       return
     }
     setSsoChecking(true)
+    trackEvent('login_sso_check_started')
     try {
       const { data } = await api.post('/auth/sso-check', { email })
       setSsoInfo(data)
+      trackEvent('login_sso_check_completed', {
+        sso_enabled: data.ssoEnabled,
+        provider_count: data.providers?.length ?? 0,
+      })
     } catch {
       setSsoInfo(null)
+      trackEvent('login_sso_check_failed')
     } finally {
       setSsoChecking(false)
     }
@@ -89,14 +120,17 @@ export default function Login() {
     e.preventDefault()
     if (!form.email || !form.password) return
     setLoading(true)
+    trackEvent('login_submit_attempted')
     try {
       const { data } = await api.post('/auth/login', form)
       setAuth(data.user, data.accessToken, data.refreshToken)
       toast.success(`Welcome back, ${data.user.firstName}!`)
+      trackEvent('login_submit_succeeded', { role: data.user.role })
       navigate('/dashboard')
     } catch (err: unknown) {
       const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Login failed'
       toast.error(message)
+      trackEvent('login_submit_failed', { has_error_message: Boolean(message) })
     } finally {
       setLoading(false)
     }
@@ -105,28 +139,116 @@ export default function Login() {
   const handleSsoLogin = (provider: string) => {
     if (!ssoInfo?.tenantId) return
     const apiBase = import.meta.env.VITE_API_URL || '/api'
+    trackEvent('login_sso_provider_clicked', { provider })
     window.location.href = `${apiBase}/auth/sso/${provider}?tenantId=${encodeURIComponent(ssoInfo.tenantId)}`
   }
 
   const hasSsoProviders = ssoInfo?.ssoEnabled && (ssoInfo.providers?.length ?? 0) > 0
 
+  const handleForgotSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!forgotEmail.trim()) return
+
+    setForgotSubmitting(true)
+    try {
+      await api.post('/auth/forgot-password', { email: forgotEmail.trim() })
+      toast.success('If your email is registered, an OTP has been sent.')
+      setResetForm((prev) => ({ ...prev, email: forgotEmail.trim() }))
+      setView('reset')
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Unable to process request right now.'
+      toast.error(message)
+    } finally {
+      setForgotSubmitting(false)
+    }
+  }
+
+  const handleResetSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!resetForm.email || !resetForm.otp || !resetForm.newPassword) return
+
+    setResetSubmitting(true)
+    try {
+      await api.post('/auth/reset-password', {
+        email: resetForm.email.trim(),
+        otp: resetForm.otp.trim(),
+        newPassword: resetForm.newPassword,
+      })
+      toast.success('Password reset successful. Please sign in.')
+      setView('login')
+      setForm((prev) => ({ ...prev, email: resetForm.email.trim(), password: '' }))
+      setResetForm((prev) => ({ ...prev, otp: '', newPassword: '' }))
+      setShowNewResetPassword(false)
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to reset password.'
+      toast.error(message)
+    } finally {
+      setResetSubmitting(false)
+    }
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-primary-900 to-gray-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-primary-600 rounded-2xl flex items-center justify-center text-white font-bold text-2xl mx-auto mb-4 shadow-lg">
-            SP
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-primary-900 to-gray-900 p-4">
+      <div className="mx-auto grid w-full max-w-6xl gap-8 py-6 lg:min-h-screen lg:grid-cols-[1.08fr_0.92fr] lg:items-center">
+        <section className="relative overflow-hidden rounded-3xl border border-white/15 bg-white/10 p-7 shadow-2xl backdrop-blur-sm sm:p-8 lg:p-10">
+          <div className="pointer-events-none absolute -top-24 -left-10 h-44 w-44 rounded-full bg-primary-400/25 blur-2xl" />
+          <div className="pointer-events-none absolute -right-14 bottom-0 h-48 w-48 rounded-full bg-cyan-300/20 blur-2xl" />
+          <div className="pointer-events-none absolute top-8 right-8 h-20 w-20 rounded-full border border-cyan-200/25" />
+          <div className="pointer-events-none absolute right-14 top-16 h-2 w-2 animate-pulse rounded-full bg-cyan-200/80" />
+          <div className="pointer-events-none absolute right-20 top-24 h-1.5 w-1.5 animate-pulse rounded-full bg-primary-200/70" style={{ animationDelay: '250ms' }} />
+
+          <Link
+            to="/home"
+            className="relative z-10 inline-flex items-center gap-2 rounded-lg border border-white/30 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-white/20"
+          >
+            Home
+          </Link>
+
+          <div className="relative z-10 mt-8">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary-500 text-2xl font-black text-white shadow-lg shadow-primary-500/35">
+              SP
+            </div>
+            <h1 className="mt-6 text-3xl font-bold text-white sm:text-4xl">StockPilot Pro</h1>
+            <p className="mt-3 text-base font-semibold leading-snug text-white sm:text-lg">
+              AI-Powered Stock & Financial Management Platform
+            </p>
+
+            <div className="mt-7 max-w-xl rounded-2xl border border-white/15 bg-black/10 p-5 shadow-xl shadow-black/20 sm:p-6">
+              <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-cyan-200">Built to lead</p>
+              <p className="mt-3 text-3xl font-black leading-tight text-white sm:text-4xl lg:text-5xl">
+                Built for businesses of every size that need smarter decisions, faster.
+              </p>
+            </div>
+
+            <p className="mt-5 max-w-lg text-sm leading-relaxed text-primary-100 sm:text-base">
+              Track stock, sales, expenses, and financial signals in one place, with practical AI that helps teams move confidently every day.
+            </p>
+
+            <div className="mt-6 flex flex-wrap gap-2">
+              <span className="rounded-full border border-cyan-200/30 bg-cyan-300/10 px-3 py-1 text-xs font-semibold text-cyan-100">Decision Intelligence</span>
+              <span className="rounded-full border border-cyan-200/30 bg-cyan-300/10 px-3 py-1 text-xs font-semibold text-cyan-100">Multi-Branch Ready</span>
+              <span className="rounded-full border border-cyan-200/30 bg-cyan-300/10 px-3 py-1 text-xs font-semibold text-cyan-100">Real-Time Visibility</span>
+            </div>
           </div>
-          <h1 className="text-3xl font-bold text-white">StockPilot Pro</h1>
-          <p className="text-gray-400 mt-2 text-sm">Enterprise Stock & Financial Management</p>
-        </div>
+        </section>
 
-        <div className="bg-white rounded-2xl shadow-2xl p-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-6">Sign in to your account</h2>
+        <section className="w-full lg:justify-self-end">
+          <div className="mx-auto w-full max-w-md rounded-2xl bg-white p-8 shadow-2xl">
+            <div className="mb-6 text-center">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-primary-600 text-lg font-black text-white shadow-lg">
+                SP
+              </div>
+              <p className="mt-3 text-xl font-bold text-gray-900">StockPilot Pro</p>
+            </div>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+            <h2 className="mb-6 text-center text-xl font-semibold text-gray-900">
+              {view === 'login' ? 'Sign in to your account' : view === 'forgot' ? 'Forgot password' : 'Reset password'}
+            </h2>
+
+          {view === 'login' && (
+          <form onSubmit={handleSubmit} onFocusCapture={trackLoginFormStart} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">Email address</label>
+              <label className="mb-1.5 block text-center text-sm font-medium text-gray-700">Email address</label>
               <input
                 type="email"
                 className="input"
@@ -161,20 +283,138 @@ export default function Login() {
               </div>
             </div>
 
+            <div className="text-right">
+              <button
+                type="button"
+                className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                onClick={() => {
+                  setForgotEmail(form.email)
+                  setView('forgot')
+                }}
+              >
+                Forgot password?
+              </button>
+            </div>
+
             <button type="submit" disabled={loading} className="btn-primary w-full py-2.5">
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
               {loading ? 'Signing in...' : 'Sign in'}
             </button>
           </form>
+          )}
 
-          {ssoChecking && (
+          {view === 'forgot' && (
+            <form onSubmit={handleForgotSubmit} className="space-y-5">
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700">Registered email</label>
+                <input
+                  type="email"
+                  className="input"
+                  placeholder="you@company.com"
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                  required
+                  autoComplete="email"
+                />
+                <p className="mt-1 text-xs text-gray-500">If this email exists, a 6-digit OTP valid for 7 minutes will be sent.</p>
+              </div>
+              <button type="submit" disabled={forgotSubmitting} className="btn-primary w-full py-2.5">
+                {forgotSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {forgotSubmitting ? 'Sending OTP...' : 'Send reset OTP'}
+              </button>
+              <button
+                type="button"
+                className="w-full text-sm font-medium text-gray-600 hover:text-gray-800"
+                onClick={() => setView('login')}
+              >
+                Back to sign in
+              </button>
+            </form>
+          )}
+
+          {view === 'reset' && (
+            <form onSubmit={handleResetSubmit} className="space-y-5">
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700">Registered email</label>
+                <input
+                  type="email"
+                  className="input"
+                  placeholder="you@company.com"
+                  value={resetForm.email}
+                  onChange={(e) => setResetForm({ ...resetForm, email: e.target.value })}
+                  required
+                  autoComplete="email"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700">OTP code</label>
+                <input
+                  type="text"
+                  className="input"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="Enter 6-digit OTP"
+                  value={resetForm.otp}
+                  onChange={(e) => setResetForm({ ...resetForm, otp: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+                  required
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700">New password</label>
+                <div className="relative">
+                  <input
+                    type={showNewResetPassword ? 'text' : 'password'}
+                    className="input pr-10"
+                    placeholder="At least 8 characters"
+                    value={resetForm.newPassword}
+                    onChange={(e) => setResetForm({ ...resetForm, newPassword: e.target.value })}
+                    required
+                    minLength={8}
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewResetPassword(!showNewResetPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    {showNewResetPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              <button type="submit" disabled={resetSubmitting} className="btn-primary w-full py-2.5">
+                {resetSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {resetSubmitting ? 'Resetting password...' : 'Reset password'}
+              </button>
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  className="text-xs font-medium text-indigo-600 hover:text-indigo-700"
+                  onClick={() => {
+                    setForgotEmail(resetForm.email)
+                    setView('forgot')
+                  }}
+                >
+                  Resend OTP
+                </button>
+                <button
+                  type="button"
+                  className="text-xs font-medium text-gray-600 hover:text-gray-800"
+                  onClick={() => setView('login')}
+                >
+                  Back to sign in
+                </button>
+              </div>
+            </form>
+          )}
+
+          {view === 'login' && ssoChecking && (
             <div className="mt-5 pt-5 border-t border-gray-100 flex items-center justify-center gap-2 text-sm text-gray-400">
               <Loader2 className="w-4 h-4 animate-spin" />
               Checking SSO availability…
             </div>
           )}
 
-          {!ssoChecking && hasSsoProviders && (
+          {view === 'login' && !ssoChecking && hasSsoProviders && (
             <div className="mt-5 pt-5 border-t border-gray-100">
               <p className="text-xs text-gray-500 text-center mb-3">Or sign in with your organisation account</p>
               <div className="space-y-2">
@@ -197,16 +437,18 @@ export default function Login() {
             </div>
           )}
 
-          <div className="mt-6 pt-6 border-t border-gray-100">
+            <div className="mt-6 pt-6 border-t border-gray-100">
             <p className="text-xs text-gray-500 text-center font-medium">Test credentials are managed in the seed file.</p>
             <p className="text-xs text-gray-400 text-center mt-1">Use your provisioned account details to sign in.</p>
+            <p className="text-xs text-gray-400 text-center mt-2">Business registration is handled internally by platform administrators.</p>
+            </div>
           </div>
-        </div>
 
-        <div className="mt-5 text-center text-xs text-gray-400 space-y-1">
-          <p>StockPilot Pro • Secure Business Operations Platform</p>
-          <p>Copyright {new Date().getFullYear()} StockPilot Pro. All rights reserved.</p>
-        </div>
+          <div className="mt-5 text-center text-xs text-gray-400 space-y-1">
+            <p>StockPilot Pro • Secure Business Operations Platform</p>
+            <p>Copyright {new Date().getFullYear()} StockPilot Pro. All rights reserved.</p>
+          </div>
+        </section>
       </div>
     </div>
   )

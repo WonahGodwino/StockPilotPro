@@ -1,2 +1,2 @@
 -- DropIndex
-DROP INDEX "SubscriptionTransaction_transferProofUploadedByUserId_idx";
+DROP INDEX IF EXISTS "SubscriptionTransaction_transferProofUploadedByUserId_idx";

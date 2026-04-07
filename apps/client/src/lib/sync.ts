@@ -1,5 +1,13 @@
 import api from './api'
-import { addSyncRun, getPendingRecords, getRecentSyncRuns, markSynced, pruneSyncedPendingRecords, pruneSyncRuns } from './db'
+import {
+  addSyncRun,
+  getPendingRecords,
+  getRecentSyncRuns,
+  markSynced,
+  pruneSyncedPendingRecords,
+  pruneSyncRuns,
+  TrustedCustomerPendingPayload,
+} from './db'
 import toast from 'react-hot-toast'
 
 export type SyncStatus = {
@@ -161,12 +169,35 @@ export async function syncPendingRecords() {
 
     let synced = 0
     let failed = 0
+    const trustedCustomerIdMap = new Map<string, string>()
     for (const record of pending) {
       try {
         if (record.type === 'sale') {
           await api.post('/sales', record.data)
         } else if (record.type === 'expense') {
           await api.post('/expenses', record.data)
+        } else if (record.type === 'trustedCustomer') {
+          const operation = record.data as TrustedCustomerPendingPayload
+          const mappedId = trustedCustomerIdMap.get(operation.trustedCustomerId) || operation.trustedCustomerId
+
+          if (operation.operation === 'create' && operation.payload) {
+            const response = await api.post<{ data?: { id?: string } }>('/trusted-customers', operation.payload)
+            const serverId = response?.data?.data?.id
+            if (serverId) {
+              trustedCustomerIdMap.set(operation.trustedCustomerId, serverId)
+            }
+          } else if (operation.operation === 'update' && operation.payload) {
+            if (mappedId.startsWith('local_tc_')) {
+              throw new Error('Queued update references unsynced trusted customer create')
+            }
+            await api.put(`/trusted-customers/${mappedId}`, operation.payload)
+          } else if (operation.operation === 'delete') {
+            if (mappedId.startsWith('local_tc_')) {
+              // Local-only record removed before create reached server.
+            } else {
+              await api.delete(`/trusted-customers/${mappedId}`)
+            }
+          }
         }
         if (record.id !== undefined) {
           await markSynced(record.id)

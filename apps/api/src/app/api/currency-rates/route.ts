@@ -145,6 +145,27 @@ export async function GET(req: NextRequest) {
           })
         }
 
+        const inverseSnapshot = tenantId
+          ? await prisma.currencyRate.findFirst({
+              where: { tenantId, fromCurrency: toCurrency, toCurrency: fromCurrency },
+              orderBy: { date: 'desc' },
+            })
+          : null
+
+        if (inverseSnapshot) {
+          return NextResponse.json({
+            data: {
+              fromCurrency,
+              toCurrency,
+              rate: 1 / Number(inverseSnapshot.rate),
+              source: 'snapshot',
+              fetchedAt: inverseSnapshot.date.toISOString(),
+              snapshotId: inverseSnapshot.id,
+              warning: (liveError as Error).message,
+            },
+          })
+        }
+
         return apiError((liveError as Error).message || 'Unable to fetch live FX rate', 502)
       }
     }

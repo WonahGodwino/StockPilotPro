@@ -6,6 +6,8 @@ import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { isSuperAdmin } from '@/lib/rbac'
 import { logAudit } from '@/lib/audit'
 
+const benefitsSchema = z.array(z.string().min(1)).default([])
+
 const createPlanSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
@@ -14,7 +16,8 @@ const createPlanSchema = z.object({
   billingCycle: z.nativeEnum(BillingCycle).default(BillingCycle.MONTHLY),
   maxSubsidiaries: z.number().int().min(1),
   extraSubsidiaryPrice: z.number().min(0).default(0),
-  features: z.array(z.string()).default([]),
+  features: benefitsSchema.optional(),
+  benefits: benefitsSchema.optional(),
 })
 
 export async function OPTIONS() {
@@ -41,6 +44,7 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json()
     const data = createPlanSchema.parse(body)
+    const benefits = data.benefits ?? data.features ?? []
 
     const createData: Prisma.PlanCreateInput = {
       name: data.name,
@@ -50,7 +54,7 @@ export async function POST(req: NextRequest) {
       billingCycle: data.billingCycle,
       maxSubsidiaries: data.maxSubsidiaries,
       extraSubsidiaryPrice: data.extraSubsidiaryPrice,
-      features: data.features as Prisma.InputJsonValue,
+      features: benefits as Prisma.InputJsonValue,
       createdBy: user.userId,
     }
 

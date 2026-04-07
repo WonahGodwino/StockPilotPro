@@ -5,13 +5,14 @@ import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { isSuperAdmin, requirePermission } from '@/lib/rbac'
 import { logAudit } from '@/lib/audit'
+import { getActiveSubscriptionForTenant, getRoleSeatLimit } from '@/lib/subscription-enforcement'
 
 const updateUserSchema = z.object({
   email: z.string().email().optional(),
   password: z.string().min(8).optional(),
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
-  role: z.enum(['BUSINESS_ADMIN', 'SALESPERSON']).optional(),
+  role: z.enum(['BUSINESS_ADMIN', 'SALESPERSON', 'AGENT']).optional(),
   subsidiaryId: z.string().nullable().optional(),
   phone: z.string().optional(),
   isActive: z.boolean().optional(),
@@ -29,9 +30,42 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const existing = await prisma.user.findUnique({ where: { id: params.id } })
     if (!existing || existing.archived) return apiError('User not found', 404)
     if (!isSuperAdmin(user) && existing.tenantId !== user.tenantId) return apiError('Forbidden', 403)
+    if (isSuperAdmin(user) && String(existing.role) !== 'AGENT') {
+      return apiError('SUPER_ADMIN can only manage AGENT users', 403)
+    }
 
     const body = await req.json()
     const data = updateUserSchema.parse(body)
+
+    if (isSuperAdmin(user) && data.role && data.role !== 'AGENT') {
+      return apiError('SUPER_ADMIN can only manage AGENT users', 403)
+    }
+
+    if (!isSuperAdmin(user) && data.role === 'AGENT') {
+      return apiError('Only SUPER_ADMIN can assign AGENT role', 403)
+    }
+
+    const nextRole = (data.role ?? existing.role) as 'BUSINESS_ADMIN' | 'SALESPERSON' | 'AGENT'
+    if (!isSuperAdmin(user) && existing.tenantId && (nextRole === 'BUSINESS_ADMIN' || nextRole === 'SALESPERSON')) {
+      const subscription = await getActiveSubscriptionForTenant(existing.tenantId)
+      if (!subscription) return apiError('No active subscription', 403)
+
+      const limit = getRoleSeatLimit(subscription.plan, nextRole)
+      if (limit !== null) {
+        const currentCount = await prisma.user.count({
+          where: {
+            tenantId: existing.tenantId,
+            role: nextRole,
+            archived: false,
+            NOT: { id: existing.id },
+          },
+        })
+
+        if (currentCount >= limit) {
+          return apiError(`Your current package allows only ${limit} ${nextRole} account(s). Upgrade required.`, 403)
+        }
+      }
+    }
 
     if (data.email && data.email !== existing.email) {
       const duplicate = await prisma.user.findUnique({ where: { email: data.email } })
@@ -47,8 +81,9 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
         password: hashed,
         firstName: data.firstName,
         lastName: data.lastName,
-        role: data.role,
-        subsidiaryId: data.subsidiaryId === null ? null : data.subsidiaryId,
+        role: data.role as never,
+        tenantId: data.role === 'AGENT' ? null : undefined,
+        subsidiaryId: data.role === 'AGENT' ? null : (data.subsidiaryId === null ? null : data.subsidiaryId),
         phone: data.phone,
         isActive: data.isActive,
         updatedBy: user.userId,

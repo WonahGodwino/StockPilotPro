@@ -64,15 +64,55 @@ async function main() {
 
   const enterprisePlan = await prisma.plan.upsert({
     where: { id: 'plan_enterprise' },
-    update: {},
+    update: {
+      name: 'Enterprise',
+      description: 'AI-powered operations with unlimited scale',
+      price: 599.99,
+      maxSubsidiaries: 999999,
+      extraSubsidiaryPrice: 0,
+      features: {
+        reports: true,
+        export: true,
+        multiCurrency: true,
+        ENTERPRISE_PACKAGE: true,
+        ENTERPRISE_AI_ENABLED: true,
+        UNLIMITED_BRANCHES: true,
+        UNLIMITED_SALESPERSONS: true,
+        AI_DEMAND_FORECAST: true,
+        AI_REORDER_ADVISOR: true,
+        AI_PRICING_MARGIN_ADVISOR: true,
+        AI_CASHFLOW_FORECAST: true,
+        AI_EXPENSE_RISK_ALERTS: true,
+        AI_ANOMALY_DETECTION: true,
+        AI_BRANCH_PERFORMANCE_COPILOT: true,
+        AI_NATURAL_LANGUAGE_ASSISTANT: true,
+      },
+      isActive: true,
+    },
     create: {
       id: 'plan_enterprise',
       name: 'Enterprise',
-      description: 'Unlimited growth potential',
+      description: 'AI-powered operations with unlimited scale',
       price: 599.99,
-      maxSubsidiaries: 20,
-      extraSubsidiaryPrice: 9.99,
-      features: { reports: true, export: true, multiCurrency: true },
+      maxSubsidiaries: 999999,
+      extraSubsidiaryPrice: 0,
+      features: {
+        reports: true,
+        export: true,
+        multiCurrency: true,
+        ENTERPRISE_PACKAGE: true,
+        ENTERPRISE_AI_ENABLED: true,
+        UNLIMITED_BRANCHES: true,
+        UNLIMITED_SALESPERSONS: true,
+        AI_DEMAND_FORECAST: true,
+        AI_REORDER_ADVISOR: true,
+        AI_PRICING_MARGIN_ADVISOR: true,
+        AI_CASHFLOW_FORECAST: true,
+        AI_EXPENSE_RISK_ALERTS: true,
+        AI_ANOMALY_DETECTION: true,
+        AI_BRANCH_PERFORMANCE_COPILOT: true,
+        AI_NATURAL_LANGUAGE_ASSISTANT: true,
+      },
       isActive: true,
     },
   })
@@ -118,6 +158,30 @@ async function main() {
   })
   console.log('✅ Super Admin created: superadmin@stockpilot.pro (tenant: StockPilot Pro)')
 
+  const businessAgent = await prisma.user.upsert({
+    where: { email: 'agent@stockpilot.pro' },
+    update: {
+      tenantId: null,
+      subsidiaryId: null,
+      password: testPassword,
+      firstName: 'Business',
+      lastName: 'Agent',
+      role: 'AGENT' as UserRole,
+      isActive: true,
+    },
+    create: {
+      tenantId: null,
+      subsidiaryId: null,
+      email: 'agent@stockpilot.pro',
+      password: testPassword,
+      firstName: 'Business',
+      lastName: 'Agent',
+      role: 'AGENT' as UserRole,
+      isActive: true,
+    },
+  })
+  console.log('✅ Agent created: agent@stockpilot.pro')
+
   // Subscription for main tenant
   const now = new Date()
   const nextYear = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate())
@@ -140,13 +204,14 @@ async function main() {
   // ── Demo Tenant ────────────────────────────────────────
   const demoTenant = await prisma.tenant.upsert({
     where: { slug: 'demo-corp' },
-    update: {},
+    update: { acquisitionAgentId: businessAgent.id },
     create: {
       name: 'Demo Corporation',
       slug: 'demo-corp',
       email: 'info@democorp.com',
       phone: '+1-555-0100',
       isActive: true,
+      acquisitionAgentId: businessAgent.id,
     },
   })
 

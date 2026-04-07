@@ -7,8 +7,40 @@ import { useAuthStore } from '@/store/auth.store'
 import ExpenseModal from '@/components/expenses/ExpenseModal'
 import Pagination from '@/components/Pagination'
 import { makeCurrencyFormatter, getCurrencySymbol } from '@/lib/currency'
+import { getCachedExpensesForTenant, getPendingExpenseRecords, replaceCachedExpensesForTenant, subscribePendingRecordsChanged } from '@/lib/db'
 
 const CATEGORIES = ['Rent', 'Utilities', 'Salaries', 'Marketing', 'Transportation', 'Maintenance', 'Supplies', 'Other']
+
+function toLocalOfflineExpense(
+  record: Awaited<ReturnType<typeof getPendingExpenseRecords>>[number],
+  user: ReturnType<typeof useAuthStore.getState>['user']
+): Expense {
+  return {
+    id: `offline-${record.localId}`,
+    tenantId: user?.tenantId || '',
+    subsidiaryId: record.data.subsidiaryId ?? null,
+    userId: user?.id || 'offline-user',
+    title: record.data.title,
+    amount: Number(record.data.amount),
+    category: record.data.category,
+    date: record.data.date,
+    currency: record.data.currency,
+    fxRate: Number(record.data.fxRate) || 1,
+    notes: record.data.notes,
+    createdAt: record.createdAt,
+    user: user ? { firstName: user.firstName, lastName: user.lastName } : { firstName: 'Offline', lastName: 'User' },
+  }
+}
+
+function toBaseExpenseAmount(amountRaw: unknown, fxRateRaw: unknown, currency: string | undefined, baseCurrency: string): number {
+  const amount = Number(amountRaw)
+  if (!Number.isFinite(amount)) return 0
+  if (!currency || currency === baseCurrency) return amount
+
+  const rate = Number(fxRateRaw)
+  if (!Number.isFinite(rate) || rate <= 0) return amount
+  return amount / rate
+}
 
 export default function Expenses() {
   const user = useAuthStore((s) => s.user)
@@ -30,6 +62,44 @@ export default function Expenses() {
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
 
+  const applyRoleFilter = (records: Expense[]) => {
+    if (!user) return []
+    if (user.role === 'SALESPERSON') {
+      if (!user.subsidiaryId) return []
+      return records.filter((item) => item.subsidiaryId === user.subsidiaryId)
+    }
+    return records
+  }
+
+  const applyFilters = (records: Expense[]) => {
+    const normalizedSearch = search.trim().toLowerCase()
+    return records.filter((item) => {
+      const matchesCategory = !category || item.category === category
+      const matchesSearch = !normalizedSearch || item.title.toLowerCase().includes(normalizedSearch)
+      const itemDate = new Date(item.date).getTime()
+      const matchesFrom = !dateFrom || itemDate >= new Date(dateFrom).getTime()
+      const matchesTo = !dateTo || itemDate <= new Date(`${dateTo}T23:59:59`).getTime()
+      return matchesCategory && matchesSearch && matchesFrom && matchesTo
+    })
+  }
+
+  const refreshOfflineExpenseCache = async () => {
+    if (!navigator.onLine || !user?.tenantId) return
+
+    const allAccessible: Expense[] = []
+    let cursor = 1
+    const pageSize = 200
+    while (cursor <= 50) {
+      const { data } = await api.get(`/expenses?page=${cursor}&limit=${pageSize}`)
+      const rows = data.data as Expense[]
+      allAccessible.push(...rows)
+      if (rows.length < pageSize || allAccessible.length >= Number(data.total || 0)) break
+      cursor += 1
+    }
+
+    await replaceCachedExpensesForTenant(user.tenantId, allAccessible)
+  }
+
   const load = async () => {
     setLoading(true)
     try {
@@ -40,14 +110,76 @@ export default function Expenses() {
       if (dateTo) params.set('to', new Date(dateTo + 'T23:59:59').toISOString())
       params.set('page', String(page))
       params.set('limit', String(LIMIT))
+      const pendingOffline = await getPendingExpenseRecords()
+      const pendingAsExpenses = pendingOffline.map((record) => toLocalOfflineExpense(record, user))
+
+      if (!navigator.onLine) {
+        const cached = user?.tenantId ? await getCachedExpensesForTenant(user.tenantId) : []
+        const cachedScoped = applyRoleFilter(cached)
+
+        const existingSyncRefs = new Set<string>()
+        for (const cachedExpense of cachedScoped) {
+          const ref = (cachedExpense as Expense & { syncRef?: string; transactionRef?: string }).syncRef
+            || (cachedExpense as Expense & { syncRef?: string; transactionRef?: string }).transactionRef
+          if (ref) existingSyncRefs.add(ref)
+        }
+
+        const unresolvedPending = pendingOffline
+          .filter((record) => {
+            const dedupeRef = record.data.transactionRef || record.data.syncRef || record.localId
+            return !existingSyncRefs.has(dedupeRef)
+          })
+          .map((record) => toLocalOfflineExpense(record, user))
+
+        const mergedOffline = [...unresolvedPending, ...cachedScoped]
+        const filteredOffline = applyFilters(mergedOffline)
+
+        const start = (page - 1) * LIMIT
+        const end = start + LIMIT
+        setExpenses(filteredOffline.slice(start, end))
+        setTotal(filteredOffline.length)
+        return
+      }
+
       const { data } = await api.get(`/expenses?${params}`)
-      setExpenses(data.data)
-      setTotal(data.total)
+      const existingSyncRefs = new Set<string>()
+      for (const remoteExpense of data.data as Expense[]) {
+        const ref = (remoteExpense as Expense & { syncRef?: string; transactionRef?: string }).syncRef
+          || (remoteExpense as Expense & { syncRef?: string; transactionRef?: string }).transactionRef
+        if (ref) existingSyncRefs.add(ref)
+      }
+
+      const unresolvedPending = pendingOffline
+        .filter((record) => {
+          const dedupeRef = record.data.transactionRef || record.data.syncRef || record.localId
+          return !existingSyncRefs.has(dedupeRef)
+        })
+        .map((record) => toLocalOfflineExpense(record, user))
+
+      const merged = page === 1
+        ? [...unresolvedPending, ...(data.data as Expense[])]
+        : (data.data as Expense[])
+      setExpenses(applyRoleFilter(merged))
+      setTotal(Number(data.total || 0) + unresolvedPending.length)
+
+      void refreshOfflineExpenseCache()
     } catch { toast.error('Failed to load expenses') }
     finally { setLoading(false) }
   }
 
   useEffect(() => { load() }, [page, search, category, dateFrom, dateTo])
+
+  useEffect(() => {
+    const refresh = () => { void load() }
+    const unsubscribePending = subscribePendingRecordsChanged(refresh as EventListener)
+    window.addEventListener('stockpilot:sync-status', refresh as EventListener)
+    window.addEventListener('online', refresh)
+    return () => {
+      unsubscribePending()
+      window.removeEventListener('stockpilot:sync-status', refresh as EventListener)
+      window.removeEventListener('online', refresh)
+    }
+  }, [page, search, category, dateFrom, dateTo, user])
 
   const confirmDelete = async () => {
     if (!confirmId) return
@@ -59,7 +191,10 @@ export default function Expenses() {
     } catch { toast.error('Failed to archive') }
   }
 
-  const totalAmount = expenses.reduce((s, e) => s + Number(e.amount), 0)
+  const totalAmount = expenses.reduce(
+    (sum, expense) => sum + toBaseExpenseAmount(expense.amount, expense.fxRate, expense.currency, baseCurrency),
+    0
+  )
 
   return (
     <div className="space-y-6">
@@ -160,13 +295,22 @@ export default function Expenses() {
               ) : (
                 expenses.map((e) => (
                   <tr key={e.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium text-gray-900">{e.title}</td>
+                    <td className="px-4 py-3 font-medium text-gray-900">
+                      <div className="flex items-center gap-2">
+                        <span>{e.title}</span>
+                        {e.id.startsWith('offline-') && (
+                          <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+                            Pending Offline
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-3">
                       <span className="badge bg-gray-100 text-gray-600">{e.category}</span>
                     </td>
                     <td className="px-4 py-3 text-right font-medium text-danger-600">
                       {e.currency && e.currency !== baseCurrency
-                        ? `${getCurrencySymbol(e.currency)}${Number(e.amount).toFixed(2)} (${fmt(Number(e.amount) / Number(e.fxRate || 1))})`
+                        ? `${getCurrencySymbol(e.currency)}${Number(e.amount).toFixed(2)} (${fmt(toBaseExpenseAmount(e.amount, e.fxRate, e.currency, baseCurrency))})`
                         : fmt(Number(e.amount))
                       }
                     </td>
@@ -176,11 +320,20 @@ export default function Expenses() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
-                        <button onClick={() => { setEditing(e); setModalOpen(true) }} className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-primary-600">
+                        <button
+                          onClick={() => { setEditing(e); setModalOpen(true) }}
+                          title={e.id.startsWith('offline-') ? 'Edit pending offline record' : 'Edit expense'}
+                          className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-primary-600"
+                        >
                           <Edit2 className="w-4 h-4" />
                         </button>
                         {canDelete && (
-                          <button onClick={() => setConfirmId(e.id)} className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-danger-600">
+                          <button
+                            onClick={() => setConfirmId(e.id)}
+                            disabled={e.id.startsWith('offline-')}
+                            title={e.id.startsWith('offline-') ? 'Archive will be available after sync completes' : 'Archive expense'}
+                            className="p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-danger-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
                             <Trash2 className="w-4 h-4" />
                           </button>
                         )}
@@ -197,7 +350,12 @@ export default function Expenses() {
 
       {/* Expense create/edit modal */}
       {modalOpen && (
-        <ExpenseModal expense={editing} onClose={() => setModalOpen(false)} onSaved={() => { setModalOpen(false); load() }} />
+        <ExpenseModal
+          expense={editing}
+          pendingLocalId={editing?.id.startsWith('offline-') ? editing.id.replace('offline-', '') : null}
+          onClose={() => setModalOpen(false)}
+          onSaved={() => { setModalOpen(false); load() }}
+        />
       )}
 
       {/* Confirmation dialog */}

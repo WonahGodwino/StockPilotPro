@@ -110,6 +110,19 @@ export async function POST(req: NextRequest) {
 
     assertSubsidiaryAccess(user, data.subsidiaryId)
 
+    const subsidiary = await prisma.subsidiary.findFirst({
+      where: {
+        id: data.subsidiaryId,
+        tenantId: user.tenantId!,
+        archived: false,
+        isActive: true,
+      },
+      select: { id: true },
+    })
+    if (!subsidiary) {
+      return apiError('Invalid subsidiary selected', 422)
+    }
+
     // Strong idempotency guard: prefer transactionRef, fallback to syncRef.
     if (idempotencyRef) {
       const existing = await prisma.sale.findFirst({
@@ -243,6 +256,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     if (err instanceof z.ZodError) return NextResponse.json({ error: err.errors }, { status: 422 })
     if ((err as Error).message?.includes('Forbidden')) return apiError((err as Error).message, 403)
+    if ((err as { code?: string }).code === 'P2003') return apiError('Invalid subsidiary selected', 422)
     if ((err as { code?: string }).code === 'P2002') {
       if (idempotencyRef && tenantId) {
         const existing = await prisma.sale.findFirst({

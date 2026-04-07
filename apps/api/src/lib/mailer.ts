@@ -52,7 +52,7 @@ export async function sendEmail(input: SendEmailInput): Promise<{ sent: boolean;
 
     return { sent: true }
   } catch (err) {
-    logger.error('Failed to send email', { err, action: 'subscription_reminder_email' })
+    logger.error('Failed to send email', { err, action: 'send_email' })
     return { sent: false, error: 'send_failed' }
   }
 }

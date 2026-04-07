@@ -6,6 +6,7 @@ import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { isSuperAdmin } from '@/lib/rbac'
 import { appendLifecycleEvent } from '@/lib/subscription-transactions'
 import { logAudit } from '@/lib/audit'
+import { isAgent, isTenantAssignedToAgent } from '@/lib/agent-access'
 
 const patchSchema = z.object({
   transferProofUrl: z.string().max(4000).optional(),
@@ -32,7 +33,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     })
 
     if (!tx) return apiError('Transaction not found', 404)
-    if (!isSuperAdmin(user) && tx.tenantId !== user.tenantId) return apiError('Forbidden', 403)
+    if (isAgent(user)) {
+      const allowed = await isTenantAssignedToAgent(user.userId, tx.tenantId)
+      if (!allowed) return apiError('Forbidden', 403)
+    } else if (!isSuperAdmin(user) && tx.tenantId !== user.tenantId) {
+      return apiError('Forbidden', 403)
+    }
 
     return NextResponse.json({ data: tx })
   } catch (err) {
@@ -49,7 +55,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     const existing = await prisma.subscriptionTransaction.findUnique({ where: { id: params.id } })
     if (!existing) return apiError('Transaction not found', 404)
-    if (!isSuperAdmin(user) && existing.tenantId !== user.tenantId) return apiError('Forbidden', 403)
+    if (isAgent(user)) {
+      const allowed = await isTenantAssignedToAgent(user.userId, existing.tenantId)
+      if (!allowed) return apiError('Forbidden', 403)
+    } else if (!isSuperAdmin(user) && existing.tenantId !== user.tenantId) {
+      return apiError('Forbidden', 403)
+    }
 
     const body = await req.json()
     const input = patchSchema.parse(body)

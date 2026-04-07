@@ -59,6 +59,27 @@ Exit criteria:
 - Key growth features are prioritized with measurable adoption metrics.
 - Performance budget remains within acceptable limits after enhancements.
 
+## M4 — Enterprise AI Package Acceleration
+Target: ship practical AI services as a subscription-gated Enterprise package.
+
+Scope from issue log:
+- Enterprise entitlement and access control: #54, #55, #66
+- Data foundation (tenant + platform + public signals): #56, #57
+- Practical AI services: #58, #59, #60, #61
+- Enterprise UX and actioning: #62, #63, #64
+- Reliability and measurement: #65
+
+Execution model:
+- Run backend platform track and frontend experience track in parallel.
+- Prioritize guardrails and tenant isolation before broad feature exposure.
+- Release incrementally behind entitlement checks for Enterprise tenants only.
+
+Exit criteria:
+- Enterprise-only gating is enforced across API and UI.
+- Unlimited branches is active for Enterprise tenants.
+- AI recommendations are explainable, auditable, and source-attributed.
+- Practical business impact metrics are visible to product and operations.
+
 ## Operating Notes
 - Sensitive content is intentionally excluded from GitHub issue bodies.
 - Demo credentials and secrets must remain outside issues and outside committed env files.

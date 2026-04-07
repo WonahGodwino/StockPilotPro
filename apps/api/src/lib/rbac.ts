@@ -30,6 +30,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'view:analytics',
     'view:profit_loss',
   ],
+  AGENT: [],
   BUSINESS_ADMIN: [
     'manage:users',
     'manage:subsidiaries',
@@ -70,6 +71,10 @@ export function isBusinessAdmin(user: JWTPayload): boolean {
 
 export function isSalesperson(user: JWTPayload): boolean {
   return user.role === UserRole.SALESPERSON
+}
+
+export function isAgent(user: JWTPayload): boolean {
+  return user.role === 'AGENT'
 }
 
 // Ensure a user can only access data belonging to their tenant

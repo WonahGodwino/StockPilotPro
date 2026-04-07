@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import api from '@/lib/api'
+import { getApiErrorMessage } from '@/lib/apiError'
 import type { Product } from '@/types'
 import toast from 'react-hot-toast'
+import { useAuthStore } from '@/store/auth.store'
+import { makeCurrencyFormatter } from '@/lib/currency'
 import { X, Loader2, AlertTriangle } from 'lucide-react'
 
 interface Props {
@@ -14,6 +17,9 @@ interface Props {
 const UNIT_OPTIONS = ['packet', 'pcs', 'carton', 'bag']
 
 export default function DamageModal({ product, products = [], onClose, onSaved }: Props) {
+  const user = useAuthStore((s) => s.user)
+  const baseCurrency = user?.tenant?.baseCurrency || 'USD'
+  const fmt = makeCurrencyFormatter(baseCurrency)
   const [loading, setLoading] = useState(false)
   const [loadingProducts, setLoadingProducts] = useState(false)
   const [remoteProducts, setRemoteProducts] = useState<Product[]>([])
@@ -109,7 +115,7 @@ export default function DamageModal({ product, products = [], onClose, onSaved }
       onSaved()
       onClose()
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to register damage'
+      const msg = getApiErrorMessage(err, 'Failed to register damage')
       toast.error(msg)
     } finally {
       setLoading(false)
@@ -219,7 +225,7 @@ export default function DamageModal({ product, products = [], onClose, onSaved }
               <option value="RAW_MATERIAL">Raw material (use purchase price)</option>
             </select>
             <p className="text-xs text-gray-500 mt-1">
-              Unit price used: ${baseUnitPrice.toFixed(2)} • Estimated damage cost: ${estimatedCost.toFixed(2)}
+              Unit price used: {fmt(baseUnitPrice)} • Estimated damage cost: {fmt(estimatedCost)}
             </p>
           </div>
 

@@ -3,6 +3,12 @@ import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { hasPermission, isSuperAdmin } from '@/lib/rbac'
 
+function toBaseCurrency(amount: number, currency: string, fxRate: number, baseCurrency: string): number {
+  if (currency === baseCurrency) return amount
+  if (!Number.isFinite(fxRate) || fxRate <= 0) return amount
+  return amount / fxRate
+}
+
 export async function OPTIONS() {
   return handleOptions()
 }
@@ -28,6 +34,12 @@ export async function GET(req: NextRequest) {
       archived: false,
       ...(subsidiaryId ? { subsidiaryId } : {}),
     }
+
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { baseCurrency: true },
+    })
+    const baseCurrency = tenant?.baseCurrency || 'USD'
 
     const now = new Date()
 
@@ -55,21 +67,19 @@ export async function GET(req: NextRequest) {
     ] = await Promise.all([
       Promise.all([
         // Today's sales (count + total)
-        prisma.sale.aggregate({
+        prisma.sale.findMany({
           where: { ...baseWhere, createdAt: { gte: todayStart, lte: todayEnd } },
-          _sum: { totalAmount: true },
-          _count: { id: true },
+          select: { totalAmount: true, currency: true, fxRate: true },
         }),
         // This month's revenue
-        prisma.sale.aggregate({
+        prisma.sale.findMany({
           where: { ...baseWhere, createdAt: { gte: monthStart } },
-          _sum: { totalAmount: true },
-          _count: { id: true },
+          select: { totalAmount: true, currency: true, fxRate: true },
         }),
         // This month's expenses
-        prisma.expense.aggregate({
+        prisma.expense.findMany({
           where: { ...baseWhere, date: { gte: monthStart } },
-          _sum: { amount: true },
+          select: { amount: true, currency: true, fxRate: true },
         }),
         // All non-archived products ΓÇö used for both totalProducts and lowStockCount
         // (Prisma doesn't support column-vs-column comparisons, so we filter in app)
@@ -85,13 +95,25 @@ export async function GET(req: NextRequest) {
       // 7-day sales trend (one aggregate per day, fired in parallel with the main queries)
       Promise.all(
         trendDays.map(({ start, end }) =>
-          prisma.sale.aggregate({
+          prisma.sale.findMany({
             where: { ...baseWhere, createdAt: { gte: start, lte: end } },
-            _sum: { totalAmount: true },
+            select: { totalAmount: true, currency: true, fxRate: true },
           })
         )
       ),
     ])
+
+    const todaySalesTotal = todaySales.reduce((sum, sale) => {
+      return sum + toBaseCurrency(Number(sale.totalAmount || 0), sale.currency, Number(sale.fxRate || 1), baseCurrency)
+    }, 0)
+
+    const monthSalesTotal = monthSales.reduce((sum, sale) => {
+      return sum + toBaseCurrency(Number(sale.totalAmount || 0), sale.currency, Number(sale.fxRate || 1), baseCurrency)
+    }, 0)
+
+    const monthExpensesTotal = monthExpenses.reduce((sum, expense) => {
+      return sum + toBaseCurrency(Number(expense.amount || 0), expense.currency, Number(expense.fxRate || 1), baseCurrency)
+    }, 0)
 
     // Derive product stats from the single products query
     const totalProducts = allActiveProducts.length  // all are ACTIVE (filtered in query)
@@ -102,23 +124,28 @@ export async function GET(req: NextRequest) {
     // Map trend aggregates back to { date, revenue } ΓÇö zero-filled for days with no sales
     const salesTrend = trendDays.map(({ date }, i) => ({
       date,
-      total: Number(trendAggregates[i]._sum.totalAmount || 0),
-      revenue: Number(trendAggregates[i]._sum.totalAmount || 0),
+      total: trendAggregates[i].reduce((sum, sale) => {
+        return sum + toBaseCurrency(Number(sale.totalAmount || 0), sale.currency, Number(sale.fxRate || 1), baseCurrency)
+      }, 0),
+      revenue: trendAggregates[i].reduce((sum, sale) => {
+        return sum + toBaseCurrency(Number(sale.totalAmount || 0), sale.currency, Number(sale.fxRate || 1), baseCurrency)
+      }, 0),
     }))
 
     return NextResponse.json({
       data: {
-        salesThisMonth: Number(monthSales._sum.totalAmount || 0),
-        salesCount: monthSales._count.id,
-        todaySalesCount: todaySales._count.id,
-        todaySalesTotal: Number(todaySales._sum.totalAmount || 0),
-        revenueThisMonth: Number(monthSales._sum.totalAmount || 0),
-        expensesThisMonth: Number(monthExpenses._sum.amount || 0),
+        salesThisMonth: monthSalesTotal,
+        salesCount: monthSales.length,
+        todaySalesCount: todaySales.length,
+        todaySalesTotal,
+        revenueThisMonth: monthSalesTotal,
+        expensesThisMonth: monthExpensesTotal,
         totalProducts,
         lowStockCount,
         activeSubsidiaries,
         unreadNotifications,
         salesTrend,
+        baseCurrency,
       },
     })
   } catch (err) {

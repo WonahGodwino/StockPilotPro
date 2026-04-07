@@ -17,6 +17,7 @@ interface PlatformStats {
   totalSubsidiaries: number
   activeSubscriptions: number
   expiredSubscriptions: number
+  suspendedSubscriptions: number
   totalRevenue: number
   baseCurrency: string
   planBreakdown: PlanBreakdown[]
@@ -53,6 +54,13 @@ export default function SuperAdminDashboard() {
   const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly'>('monthly')
 
   const fmt = makeCurrencyFormatter(stats?.baseCurrency || 'USD', { minimumFractionDigits: 0 })
+  const formatTrendDate = (value: string) => {
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return value
+    return period === 'yearly'
+      ? parsed.toLocaleDateString(undefined, { month: 'short', year: '2-digit' })
+      : parsed.toLocaleDateString(undefined, { month: 'short', day: '2-digit' })
+  }
 
   const fetchStats = (selectedPeriod: string) => {
     setLoading(true)
@@ -92,6 +100,10 @@ export default function SuperAdminDashboard() {
   }
 
   const topPlan = stats?.planBreakdown && stats.planBreakdown.length > 0 ? stats.planBreakdown[0] : null
+  const totalSubscriptionStates = stats.activeSubscriptions + stats.expiredSubscriptions + stats.suspendedSubscriptions
+  const activeShare = totalSubscriptionStates > 0
+    ? ((stats.activeSubscriptions / totalSubscriptionStates) * 100).toFixed(1)
+    : '0.0'
 
   return (
     <div className="space-y-6">
@@ -175,7 +187,7 @@ export default function SuperAdminDashboard() {
           <div className="card p-4 border-l-4 border-success-500">
             <p className="text-xs font-semibold text-gray-500 uppercase">Active</p>
             <p className="text-2xl font-bold text-success-600 mt-1">{stats.activeSubscriptions}</p>
-            <p className="text-xs text-gray-400 mt-1">{((stats.activeSubscriptions / (stats.activeSubscriptions + stats.expiredSubscriptions + 1)) * 100).toFixed(1)}% of subscriptions</p>
+            <p className="text-xs text-gray-400 mt-1">{activeShare}% of subscriptions</p>
           </div>
           <div className="card p-4 border-l-4 border-warning-500">
             <p className="text-xs font-semibold text-gray-500 uppercase">Expired</p>
@@ -248,7 +260,7 @@ export default function SuperAdminDashboard() {
             <ResponsiveContainer width="100%" height={250}>
               <LineChart data={stats.companyGrowth}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v) => v.slice(5)} />
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={formatTrendDate} />
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
                 <Line type="monotone" dataKey="count" stroke="#2563eb" strokeWidth={2} dot={{ fill: '#2563eb', r: 4 }} />
@@ -264,7 +276,7 @@ export default function SuperAdminDashboard() {
             <ResponsiveContainer width="100%" height={250}>
               <BarChart data={stats.subscriptionTrend}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={(v) => v.slice(5)} />
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={formatTrendDate} />
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
                 <Legend />

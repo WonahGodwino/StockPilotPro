@@ -117,12 +117,14 @@ export async function GET(req: NextRequest) {
 
     const salesBySubsidiary = new Map<string, number>()
     const expensesBySubsidiary = new Map<string, number>()
+    const MAIN_COMPANY_KEY = '__main_company__'
 
     for (const point of salesPoints) {
       salesBySubsidiary.set(point.subsidiaryId, (salesBySubsidiary.get(point.subsidiaryId) || 0) + 1)
     }
     for (const point of expensePoints) {
-      expensesBySubsidiary.set(point.subsidiaryId, (expensesBySubsidiary.get(point.subsidiaryId) || 0) + 1)
+      const expenseBucket = point.subsidiaryId ?? MAIN_COMPANY_KEY
+      expensesBySubsidiary.set(expenseBucket, (expensesBySubsidiary.get(expenseBucket) || 0) + 1)
     }
 
     const bySubsidiary = subsidiaries.map((s) => {
@@ -135,7 +137,20 @@ export async function GET(req: NextRequest) {
         syncedExpenses,
         totalSynced: syncedSales + syncedExpenses,
       }
-    }).sort((a, b) => b.totalSynced - a.totalSynced)
+    })
+
+    const mainCompanyExpenses = expensesBySubsidiary.get(MAIN_COMPANY_KEY) || 0
+    if (mainCompanyExpenses > 0) {
+      bySubsidiary.push({
+        subsidiaryId: 'main',
+        subsidiaryName: 'Main Company',
+        syncedSales: 0,
+        syncedExpenses: mainCompanyExpenses,
+        totalSynced: mainCompanyExpenses,
+      })
+    }
+
+    bySubsidiary.sort((a, b) => b.totalSynced - a.totalSynced)
 
     const dayRollup = new Map<string, { syncedSales: number; syncedExpenses: number }>()
     for (const point of salesPoints) {

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import toast from 'react-hot-toast'
 import { ArrowRightLeft, Loader2, RefreshCw, Save } from 'lucide-react'
 import api from '@/lib/api'
 import { useAuthStore } from '@/store/auth.store'
 import { SUPPORTED_CURRENCIES } from '@/lib/currency'
 import type { CurrencyRate } from '@/types'
+import { getCachedCurrencyRatesForTenant, replaceCachedCurrencyRatesForTenant } from '@/lib/db'
 
 export default function ExchangeRateSettings() {
   const user = useAuthStore((s) => s.user)
@@ -16,27 +17,52 @@ export default function ExchangeRateSettings() {
   const [selectedCurrency, setSelectedCurrency] = useState('EUR')
   const [rateValue, setRateValue] = useState('1')
   const [rateSource, setRateSource] = useState<'live' | 'snapshot' | 'manual' | null>(null)
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
 
   const quoteCurrencies = useMemo(
     () => SUPPORTED_CURRENCIES.filter((currency) => currency.code !== baseCurrency),
     [baseCurrency]
   )
 
-  const loadRates = async () => {
+  const loadRates = useCallback(async () => {
     setLoading(true)
     try {
+      if (!navigator.onLine && user?.tenantId) {
+        const cached = await getCachedCurrencyRatesForTenant(user.tenantId)
+        const ordered = [...cached].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        setRates(ordered)
+        return
+      }
+
       const { data } = await api.get('/currency-rates')
       setRates(data.data)
+      if (user?.tenantId) {
+        await replaceCachedCurrencyRatesForTenant(user.tenantId, data.data)
+      }
     } catch {
       toast.error('Failed to load saved exchange rates')
     } finally {
       setLoading(false)
     }
-  }
+  }, [user?.tenantId])
 
   useEffect(() => {
     void loadRates()
-  }, [])
+  }, [loadRates])
+
+  useEffect(() => {
+    const onOnline = () => {
+      setIsOnline(true)
+      void loadRates()
+    }
+    const onOffline = () => setIsOnline(false)
+    window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
+    return () => {
+      window.removeEventListener('online', onOnline)
+      window.removeEventListener('offline', onOffline)
+    }
+  }, [loadRates])
 
   useEffect(() => {
     if (selectedCurrency === baseCurrency && quoteCurrencies.length > 0) {
@@ -45,6 +71,11 @@ export default function ExchangeRateSettings() {
   }, [baseCurrency, quoteCurrencies, selectedCurrency])
 
   const fetchLiveRate = async () => {
+    if (!navigator.onLine) {
+      toast.error('Reconnect to fetch live exchange rate')
+      return
+    }
+
     setFetchingLive(true)
     try {
       const { data } = await api.get(`/currency-rates?fromCurrency=${baseCurrency}&toCurrency=${selectedCurrency}&live=true`)
@@ -111,6 +142,10 @@ export default function ExchangeRateSettings() {
         </div>
       </div>
 
+      {!isOnline && (
+        <p className="text-xs text-amber-600">Offline mode: showing cached exchange rates. Reconnect to fetch live or save changes.</p>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_1fr_auto_auto] gap-3 items-end">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Base Currency</label>
@@ -143,7 +178,7 @@ export default function ExchangeRateSettings() {
           {fetchingLive ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
           Fetch Live
         </button>
-        <button type="button" className="btn-primary" onClick={handleSave} disabled={saving}>
+        <button type="button" className="btn-primary" onClick={handleSave} disabled={saving || !isOnline}>
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           Save Rate
         </button>

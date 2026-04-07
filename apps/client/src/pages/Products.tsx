@@ -7,7 +7,8 @@ import toast from 'react-hot-toast'
 import ProductModal from '@/components/products/ProductModal'
 import DamageModal from '@/components/products/DamageModal'
 import Pagination from '@/components/Pagination'
-import { cacheProducts } from '@/lib/db'
+import { getCachedProductsForTenant, replaceCachedProductsForTenant } from '@/lib/db'
+import { makeCurrencyFormatter } from '@/lib/currency'
 
 const PAGE_SIZE = 20
 
@@ -43,6 +44,8 @@ function ExpiryStatusBadge({ expiryDate }: { expiryDate?: string }) {
 
 export default function Products() {
   const user = useAuthStore((s) => s.user)
+  const baseCurrency = user?.tenant?.baseCurrency || 'USD'
+  const fmt = makeCurrencyFormatter(baseCurrency)
   const [products, setProducts] = useState<Product[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -59,10 +62,66 @@ export default function Products() {
   const canManage = user?.role !== 'SALESPERSON'
   const canDelete = user?.role === 'BUSINESS_ADMIN' || user?.role === 'SUPER_ADMIN'
 
+  const applyRoleFilter = (records: Product[]) => {
+    if (!user) return []
+    const scoped = user.subsidiaryId
+      ? records.filter((item) => item.subsidiaryId === user.subsidiaryId)
+      : records
+
+    if (user.role === 'SALESPERSON') {
+      return scoped.filter((item) => item.status === 'ACTIVE' || item.status === 'DRAFT')
+    }
+    return scoped
+  }
+
+  const applyFilters = (records: Product[]) => {
+    const normalizedSearch = search.trim().toLowerCase()
+    return records.filter((item) => {
+      const matchesSearch = !normalizedSearch
+        || item.name.toLowerCase().includes(normalizedSearch)
+        || (item.barcode || '').toLowerCase().includes(normalizedSearch)
+      const matchesStatus = !statusFilter || item.status === statusFilter
+      const matchesType = !typeFilter || item.type === typeFilter
+      return matchesSearch && matchesStatus && matchesType
+    })
+  }
+
+  const refreshOfflineProductCache = async () => {
+    if (!navigator.onLine || !user?.tenantId) return
+
+    const allAccessible: Product[] = []
+    let cursor = 1
+    const pageSize = 200
+    while (cursor <= 50) {
+      const params = new URLSearchParams()
+      params.set('page', String(cursor))
+      params.set('limit', String(pageSize))
+      if (user.subsidiaryId) params.set('subsidiaryId', user.subsidiaryId)
+      const { data } = await api.get(`/products?${params}`)
+      const rows = data.data as Product[]
+      allAccessible.push(...rows)
+      if (rows.length < pageSize || allAccessible.length >= Number(data.total || 0)) break
+      cursor += 1
+    }
+
+    await replaceCachedProductsForTenant(user.tenantId, allAccessible)
+  }
+
   const load = async (p = page) => {
     setLoading(true)
     setReloadError(null)
     try {
+      if (!navigator.onLine && user?.tenantId) {
+        const cached = await getCachedProductsForTenant(user.tenantId, user.subsidiaryId || undefined)
+        const visible = applyRoleFilter(cached)
+        const filtered = applyFilters(visible)
+        const start = (p - 1) * PAGE_SIZE
+        const end = start + PAGE_SIZE
+        setProducts(filtered.slice(start, end))
+        setTotal(filtered.length)
+        return
+      }
+
       const params = new URLSearchParams()
       if (search) params.set('search', search)
       if (statusFilter) params.set('status', statusFilter)
@@ -70,10 +129,10 @@ export default function Products() {
       params.set('page', String(p))
       params.set('limit', String(PAGE_SIZE))
       const { data } = await api.get(`/products?${params}`)
-      setProducts(data.data)
+      setProducts(applyRoleFilter(data.data))
       setTotal(data.total ?? data.data.length)
-      // Keep UI responsive even if offline cache write is slow/fails.
-      void cacheProducts(data.data).catch(() => undefined)
+      // Keep UI responsive even if offline cache refresh is slow/fails.
+      void refreshOfflineProductCache().catch(() => undefined)
     } catch {
       setReloadError('Could not refresh products. Please try again.')
       toast.error('Failed to load products')
@@ -105,7 +164,7 @@ export default function Products() {
           <p className="text-sm text-gray-500 mt-1">
             {total} items &nbsp;·&nbsp; Inventory worth:{' '}
             <span className="font-semibold text-gray-700">
-              ${totalWorth.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              {fmt(totalWorth)}
             </span>
           </p>
         </div>
@@ -209,8 +268,8 @@ export default function Products() {
                           <span className="ml-1.5 badge bg-danger-50 text-danger-600">Low</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-600">${cost.toFixed(2)}</td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-900">${sell.toFixed(2)}</td>
+                      <td className="px-4 py-3 text-right text-gray-600">{fmt(cost)}</td>
+                      <td className="px-4 py-3 text-right font-medium text-gray-900">{fmt(sell)}</td>
                       <td className="px-4 py-3 text-right">
                         <span className={`font-medium ${marginColor(marginPct)}`}>
                           {marginPct.toFixed(1)}%

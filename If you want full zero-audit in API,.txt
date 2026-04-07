@@ -1,0 +1,1 @@
+If you want full zero-audit in API, I can do a controlled migration plan to Next 16 for package.json, run builds/tests, and patch any breaking changes.
