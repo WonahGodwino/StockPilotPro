@@ -96,7 +96,6 @@ export async function POST(_req: NextRequest) {
 
     const status = dbConnectivityOk && backupVerificationOk && restoreDrillOk ? 'SUCCESS' : 'FAILED'
     const completedAt = new Date()
-
     const row = await backupRestoreDrillRun.create({
       data: {
         status,
