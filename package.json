@@ -13,6 +13,7 @@
     "test:enterprise-ai-endpoints": "npm run test:enterprise-ai-endpoints -w stockpilot-api",
     "test:enterprise-ai-http": "npm run test:enterprise-ai-http -w stockpilot-api",
     "test:enterprise-ai-all": "npm run test:enterprise-ai-all -w stockpilot-api",
+    "test:api-core-risk": "npm run test:core-risk -w stockpilot-api",
     "db:migrate": "npm run db:migrate -w stockpilot-api",
     "db:seed": "npm run db:seed -w stockpilot-api",
     "db:studio": "npm run db:studio -w stockpilot-api"
