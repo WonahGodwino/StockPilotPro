@@ -177,6 +177,18 @@ export async function POST(req: NextRequest) {
     const grossTotal = subtotals.reduce((s, i) => s + i.subtotal, 0)
     const totalAmount = Math.max(0, grossTotal - data.discount)
 
+    let resolvedCustomerId: string | undefined
+    if (data.customerId) {
+      const customer = await prisma.customer.findFirst({
+        where: { id: data.customerId, tenantId: user.tenantId!, archived: false },
+        select: { id: true },
+      })
+      if (!customer) {
+        return apiError('Customer not found', 422)
+      }
+      resolvedCustomerId = customer.id
+    }
+
     const sale = await prisma.$transaction(async (tx) => {
       // Generate unique sequential receipt number inside the transaction
       const receiptNumber = await generateReceiptNumber(tx, user.tenantId!)
@@ -190,15 +202,6 @@ export async function POST(req: NextRequest) {
             data: { quantity: { decrement: item.quantity } },
           })
         }
-      }
-
-      // Validate customerId belongs to this tenant
-      let resolvedCustomerId: string | undefined = undefined
-      if (data.customerId) {
-        const cust = await tx.customer.findFirst({
-          where: { id: data.customerId, tenantId: user.tenantId!, archived: false },
-        })
-        if (cust) resolvedCustomerId = cust.id
       }
 
       const createdSale = await tx.sale.create({
