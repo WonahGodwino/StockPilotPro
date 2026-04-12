@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, type MouseEvent } from 'react'
+import { useState, useEffect, useRef, useCallback, type MouseEvent as ReactMouseEvent } from 'react'
 import { Search, X, UserPlus, Star, ChevronDown } from 'lucide-react'
 import api from '@/lib/api'
 import type { Customer } from '@/types'
@@ -49,7 +49,7 @@ export default function CustomerSelector({ selectedCustomer, onSelect }: Props) 
 
   // Close on outside click
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
+    const handler = (e: globalThis.MouseEvent) => {
       if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
         setOpen(false)
         setShowCreate(false)
@@ -86,7 +86,7 @@ export default function CustomerSelector({ selectedCustomer, onSelect }: Props) 
     setQuery('')
   }
 
-  const handleClear = (e: MouseEvent) => {
+  const handleClear = (e: ReactMouseEvent) => {
     e.stopPropagation()
     onSelect(null)
   }
