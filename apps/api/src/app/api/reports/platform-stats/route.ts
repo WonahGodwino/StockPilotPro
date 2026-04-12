@@ -8,8 +8,9 @@ function toNumber(value: unknown): number {
   return Number.isFinite(numeric) ? numeric : 0
 }
 
-async function getTransactionToBaseRate(baseTenantId: string, baseCurrency: string, transactionCurrency: string): Promise<number> {
+async function getTransactionToBaseRate(baseTenantId: string | null | undefined, baseCurrency: string, transactionCurrency: string): Promise<number> {
   if (transactionCurrency === baseCurrency) return 1
+  if (!baseTenantId) return 1
 
   const direct = await prisma.currencyRate.findFirst({
     where: { tenantId: baseTenantId, fromCurrency: baseCurrency, toCurrency: transactionCurrency },
@@ -120,6 +121,7 @@ export async function GET(req: NextRequest) {
       ? await prisma.tenant.findUnique({ where: { id: user.tenantId }, select: { baseCurrency: true } })
       : null
     const baseCurrency = platformTenant?.baseCurrency || 'USD'
+    const fxTenantId = user.tenantId || null
 
       // Get total companies (tenants) - exclude the platform owner's own company
       const totalCompanies = await prisma.tenant.count({
@@ -161,10 +163,10 @@ export async function GET(req: NextRequest) {
       )
     )
 
-    const latestRates = billingCurrencies.length > 0
+    const latestRates = fxTenantId && billingCurrencies.length > 0
       ? await prisma.currencyRate.findMany({
           where: {
-            tenantId: user.tenantId!,
+            tenantId: fxTenantId,
             OR: [
               { fromCurrency: baseCurrency, toCurrency: { in: billingCurrencies } },
               { fromCurrency: { in: billingCurrencies }, toCurrency: baseCurrency },
@@ -244,7 +246,7 @@ export async function GET(req: NextRequest) {
       const converted = await Promise.all(rows.map(async (row) => {
         const amount = toNumber(row.amount)
         if (row.currency === baseCurrency) return amount
-        const rate = await getTransactionToBaseRate(user.tenantId!, baseCurrency, row.currency)
+        const rate = await getTransactionToBaseRate(fxTenantId, baseCurrency, row.currency)
         return amount / rate
       }))
       return converted.reduce((sum, val) => sum + val, 0)

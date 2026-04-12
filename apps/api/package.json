@@ -14,6 +14,7 @@
     "test:subscription": "ts-node -P tests/tsconfig.json tests/subscription.spec.ts",
     "test:tenants": "ts-node -P tests/tsconfig.json tests/tenants.spec.ts",
     "test:customer-loyalty": "ts-node -r tsconfig-paths/register -P tests/tsconfig.json tests/customer-loyalty.spec.ts",
+    "test:core-risk": "npm run test:rbac && npm run test:jwt && npm run test:subscription && npm run test:customer-loyalty",
     "test:currency": "ts-node -P tests/tsconfig.json tests/currency.spec.ts",
     "test:enterprise-ai": "ts-node -P tests/tsconfig.json tests/enterprise-ai.spec.ts",
     "test:enterprise-ai-endpoints": "ts-node -P tests/tsconfig.json tests/enterprise-ai-endpoints.spec.ts",
