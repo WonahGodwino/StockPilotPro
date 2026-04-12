@@ -29,6 +29,48 @@ import {
   ChevronUp,
 } from 'lucide-react'
 
+type HeroExperimentVariant = {
+  id: 'A' | 'B'
+  headline: string
+  subhead: string
+  primaryCta: string
+  secondaryCta: string
+}
+
+const HERO_EXPERIMENT_STORAGE_KEY = 'stockpilot:home:hero-experiment-variant'
+
+const HERO_EXPERIMENT_VARIANTS: HeroExperimentVariant[] = [
+  {
+    id: 'A',
+    headline: 'Run inventory, sales, expenses, and growth from one intelligent platform.',
+    subhead:
+      'StockPilot Pro helps businesses of every size manage daily operations while using AI to improve forecasting, pricing, branch performance, and financial control.',
+    primaryCta: 'Book a Demo',
+    secondaryCta: 'View Packages',
+  },
+  {
+    id: 'B',
+    headline: 'Move from reactive operations to predictive growth with practical AI.',
+    subhead:
+      'Unify stock, sales, and finance into one command center so your team can forecast demand earlier and act faster across every branch.',
+    primaryCta: 'See It in Action',
+    secondaryCta: 'Compare Plans',
+  },
+]
+
+function resolveHeroExperimentVariant(): HeroExperimentVariant {
+  if (typeof window === 'undefined') return HERO_EXPERIMENT_VARIANTS[0]
+
+  const existing = window.localStorage.getItem(HERO_EXPERIMENT_STORAGE_KEY)
+  if (existing === 'A' || existing === 'B') {
+    return HERO_EXPERIMENT_VARIANTS.find((variant) => variant.id === existing) || HERO_EXPERIMENT_VARIANTS[0]
+  }
+
+  const selected = Math.random() < 0.5 ? 'A' : 'B'
+  window.localStorage.setItem(HERO_EXPERIMENT_STORAGE_KEY, selected)
+  return HERO_EXPERIMENT_VARIANTS.find((variant) => variant.id === selected) || HERO_EXPERIMENT_VARIANTS[0]
+}
+
 type PackageCard = {
   name: string
   price: string
@@ -252,6 +294,7 @@ const TRUSTED_CUSTOMERS_ROTATION_MS = 4000
 const HOME_TRUSTED_CUSTOMERS_CACHE_KEY = 'stockpilot:public:trusted-customers'
 
 export default function Home() {
+  const heroVariant = resolveHeroExperimentVariant()
   const apiBase = import.meta.env.VITE_API_URL || '/api'
   const apiOrigin = apiBase.startsWith('http') ? new URL(apiBase).origin : window.location.origin
 
@@ -282,6 +325,10 @@ export default function Home() {
       'inventory management software, stock and sales tracking, business financial control, AI business operations, multi-branch management platform',
     image: '/favicon.svg',
   })
+
+  useEffect(() => {
+    trackEvent('home_hero_ab_variant_viewed', { variant: heroVariant.id })
+  }, [heroVariant.id])
 
   const trackContactFormStart = () => {
     if (hasTrackedContactFormStart.current) return
@@ -486,27 +533,27 @@ export default function Home() {
               StockPilot Pro • AI-Powered Operations Platform
             </p>
             <h1 className="text-4xl font-extrabold leading-tight text-white md:text-5xl lg:text-6xl">
-              Run inventory, sales, expenses, and growth from one intelligent platform.
+              {heroVariant.headline}
             </h1>
             <p className="mt-5 max-w-2xl text-base leading-relaxed text-slate-200 md:text-lg">
-              StockPilot Pro helps businesses of every size manage daily operations while using AI to improve forecasting, pricing, branch performance, and financial control.
+              {heroVariant.subhead}
             </p>
 
             <div className="mt-8 flex flex-wrap gap-3">
               <a
                 href="#contact"
-                onClick={() => trackEvent('home_cta_clicked', { cta: 'book_demo', placement: 'hero' })}
+                onClick={() => trackEvent('home_cta_clicked', { cta: 'hero_primary', placement: 'hero', variant: heroVariant.id })}
                 className="inline-flex items-center gap-2 rounded-xl bg-cyan-500 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-cyan-400"
               >
-                Book a Demo
+                {heroVariant.primaryCta}
                 <ArrowRight className="h-4 w-4" />
               </a>
               <a
                 href="#packages"
-                onClick={() => trackEvent('home_cta_clicked', { cta: 'view_packages', placement: 'hero' })}
+                onClick={() => trackEvent('home_cta_clicked', { cta: 'hero_secondary', placement: 'hero', variant: heroVariant.id })}
                 className="inline-flex items-center gap-2 rounded-xl border border-white/30 bg-transparent px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
               >
-                View Packages
+                {heroVariant.secondaryCta}
               </a>
             </div>
 
