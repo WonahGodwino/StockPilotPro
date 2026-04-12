@@ -184,6 +184,7 @@ model Tenant {
   currencyRates   CurrencyRate[]
   syncTelemetry   SyncTelemetry[]
   subscriptionTransactions SubscriptionTransaction[]
+  customers        Customer[]
 
   @@index([acquisitionAgentId])
 }
@@ -485,14 +486,18 @@ model Sale {
   updatedBy       String?
   archived        Boolean       @default(false)
 
+  customerId      String?
+
   tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   subsidiary      Subsidiary    @relation(fields: [subsidiaryId], references: [id])
   user            User          @relation(fields: [userId], references: [id])
+  customer        Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
   items           SaleItem[]
 
   @@index([tenantId])
   @@index([subsidiaryId])
   @@index([userId])
+  @@index([customerId])
   @@index([createdAt])
   @@unique([tenantId, syncRef])
   @@unique([tenantId, transactionRef])
@@ -552,6 +557,58 @@ model Expense {
   @@index([date])
   @@unique([tenantId, syncRef])
   @@unique([tenantId, transactionRef])
+}
+
+// ──────────────────────────────────────────────
+// CUSTOMERS (Loyalty / Repeat Buyer Module)
+// ──────────────────────────────────────────────
+
+model Customer {
+  id              String    @id @default(cuid())
+  tenantId        String
+  name            String
+  phone           String?
+  email           String?
+  address         String?
+  notes           String?
+  loyaltyPoints   Int       @default(0)
+  totalSpend      Decimal   @db.Decimal(14, 2) @default(0)
+  visitCount      Int       @default(0)
+  lastVisitedAt   DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  createdBy       String?
+  updatedBy       String?
+  archived        Boolean   @default(false)
+
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sales           Sale[]
+  loyaltyLedger   LoyaltyLedger[]
+
+  @@index([tenantId])
+  @@index([tenantId, phone])
+  @@index([tenantId, email])
+  @@index([tenantId, loyaltyPoints])
+}
+
+model LoyaltyLedger {
+  id              String    @id @default(cuid())
+  tenantId        String
+  customerId      String
+  saleId          String?
+  type            String    // EARN | REDEEM | ADJUST
+  points          Int       // positive = earn, negative = redeem
+  balanceBefore   Int
+  balanceAfter    Int
+  note            String?
+  createdByUserId String?
+  createdAt       DateTime  @default(now())
+
+  customer        Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([tenantId, customerId])
+  @@index([saleId])
 }
 
 model BackupRestoreDrillRun {

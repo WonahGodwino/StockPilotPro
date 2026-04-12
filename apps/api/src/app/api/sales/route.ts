@@ -25,6 +25,7 @@ const createSaleSchema = z.object({
   syncRef: z.string().min(6).max(120).optional(),
   transactionRef: z.string().min(6).max(180).optional(),
   notes: z.string().optional(),
+  customerId: z.string().optional(),
 })
 
 export async function OPTIONS() {
@@ -191,7 +192,16 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      return tx.sale.create({
+      // Validate customerId belongs to this tenant
+      let resolvedCustomerId: string | undefined = undefined
+      if (data.customerId) {
+        const cust = await tx.customer.findFirst({
+          where: { id: data.customerId, tenantId: user.tenantId!, archived: false },
+        })
+        if (cust) resolvedCustomerId = cust.id
+      }
+
+      const createdSale = await tx.sale.create({
         data: {
           tenantId: user.tenantId!,
           subsidiaryId: data.subsidiaryId,
@@ -207,6 +217,7 @@ export async function POST(req: NextRequest) {
           receiptNumber,
           notes: data.notes,
           createdBy: user.userId,
+          customerId: resolvedCustomerId,
           items: {
             create: subtotals.map((item) => ({
               productId: item.productId,
@@ -225,6 +236,53 @@ export async function POST(req: NextRequest) {
           user: { select: { firstName: true, lastName: true } },
         },
       })
+
+      // Loyalty accrual: 1 point per whole unit of the base-currency amount
+      if (resolvedCustomerId) {
+        const earnedPoints = Math.floor(totalAmount)
+        const customer = await tx.customer.findFirst({
+          where: { id: resolvedCustomerId },
+          select: { loyaltyPoints: true },
+        })
+        if (customer && earnedPoints > 0) {
+          const balanceBefore = customer.loyaltyPoints
+          const balanceAfter = balanceBefore + earnedPoints
+          await tx.customer.update({
+            where: { id: resolvedCustomerId },
+            data: {
+              loyaltyPoints: balanceAfter,
+              totalSpend: { increment: totalAmount },
+              visitCount: { increment: 1 },
+              lastVisitedAt: new Date(),
+            },
+          })
+          await tx.loyaltyLedger.create({
+            data: {
+              tenantId: user.tenantId!,
+              customerId: resolvedCustomerId,
+              saleId: createdSale.id,
+              type: 'EARN',
+              points: earnedPoints,
+              balanceBefore,
+              balanceAfter,
+              note: `Earned from sale ${receiptNumber}`,
+              createdByUserId: user.userId,
+            },
+          })
+        } else if (customer) {
+          // Zero-value sale: still count the visit
+          await tx.customer.update({
+            where: { id: resolvedCustomerId },
+            data: {
+              totalSpend: { increment: totalAmount },
+              visitCount: { increment: 1 },
+              lastVisitedAt: new Date(),
+            },
+          })
+        }
+      }
+
+      return createdSale
     })
 
     // Trigger low stock checks asynchronously
