@@ -42,6 +42,7 @@ export default function Login() {
   const [form, setForm] = useState({ email: '', password: '' })
   const [showPassword, setShowPassword] = useState(false)
   const [showNewResetPassword, setShowNewResetPassword] = useState(false)
+  const [capsLockOn, setCapsLockOn] = useState(false)
   const [loading, setLoading] = useState(false)
   const [forgotSubmitting, setForgotSubmitting] = useState(false)
   const [resetSubmitting, setResetSubmitting] = useState(false)
@@ -144,6 +145,10 @@ export default function Login() {
   }
 
   const hasSsoProviders = ssoInfo?.ssoEnabled && (ssoInfo.providers?.length ?? 0) > 0
+
+  const updateCapsLockState = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    setCapsLockOn(event.getModifierState('CapsLock'))
+  }
 
   const handleForgotSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -270,6 +275,9 @@ export default function Login() {
                   placeholder="••••••••"
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  onKeyUp={updateCapsLockState}
+                  onKeyDown={updateCapsLockState}
+                  onBlur={() => setCapsLockOn(false)}
                   required
                   autoComplete="current-password"
                 />
@@ -281,6 +289,9 @@ export default function Login() {
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              {capsLockOn && (
+                <p className="mt-1 text-xs font-medium text-amber-600">Caps Lock is on</p>
+              )}
             </div>
 
             <div className="text-right">
@@ -368,6 +379,9 @@ export default function Login() {
                     placeholder="At least 8 characters"
                     value={resetForm.newPassword}
                     onChange={(e) => setResetForm({ ...resetForm, newPassword: e.target.value })}
+                    onKeyUp={updateCapsLockState}
+                    onKeyDown={updateCapsLockState}
+                    onBlur={() => setCapsLockOn(false)}
                     required
                     minLength={8}
                     autoComplete="new-password"
@@ -380,6 +394,9 @@ export default function Login() {
                     {showNewResetPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
+                {capsLockOn && (
+                  <p className="mt-1 text-xs font-medium text-amber-600">Caps Lock is on</p>
+                )}
               </div>
               <button type="submit" disabled={resetSubmitting} className="btn-primary w-full py-2.5">
                 {resetSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
