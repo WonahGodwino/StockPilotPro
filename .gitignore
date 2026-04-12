@@ -46,5 +46,8 @@ prisma/migrations/
 apps/api/public/uploads/subscription-proofs/*
 !apps/api/public/uploads/subscription-proofs/.gitkeep
 
+# Backup artifacts (auto-generated)
+backups/
+
 # TypeScript
 *.tsbuildinfo
