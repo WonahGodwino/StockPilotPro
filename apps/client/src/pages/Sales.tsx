@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { Search, Barcode, Trash2, Minus, Plus, ShoppingCart, WifiOff, History, ShoppingBag, AlertTriangle } from 'lucide-react'
 import { useCartStore } from '@/store/cart.store'
-import type { Product, Sale, SaleCheckoutPayload, Subsidiary } from '@/types'
+import type { Product, Sale, SaleCheckoutPayload, Subsidiary, Customer } from '@/types'
 import api from '@/lib/api'
 import toast from 'react-hot-toast'
 import {
@@ -16,6 +16,7 @@ import { useAuthStore } from '@/store/auth.store'
 import Receipt from '@/components/sales/Receipt'
 import Pagination from '@/components/Pagination'
 import { makeCurrencyFormatter, getCurrencySymbol, SUPPORTED_CURRENCIES } from '@/lib/currency'
+import CustomerSelector from '@/components/customers/CustomerSelector'
 
 let _audioCtx: AudioContext | null = null
 function getAudioContext(): AudioContext | null {
@@ -68,6 +69,7 @@ export default function SalesPage() {
   const [rateError, setRateError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [completedSale, setCompletedSale] = useState<{ id: string; receiptNumber: string; offline?: boolean } | null>(null)
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [scanState, setScanState] = useState<'idle' | 'success' | 'error'>('idle')
   const barcodeBuffer = useRef('')
   const barcodeTimer = useRef<ReturnType<typeof setTimeout>>()
@@ -398,6 +400,7 @@ export default function SalesPage() {
         amountPaid,
         currency: saleCurrency,
         fxRate: saleFxRate,
+        customerId: selectedCustomer?.id,
         items: cart.items.map((i) => ({
           productId: i.product.id,
           quantity: i.quantity,
@@ -413,6 +416,7 @@ export default function SalesPage() {
         cart.clearCart()
         setDiscount(0)
         setAmountPaid(0)
+        setSelectedCustomer(null)
         setCompletedSale({ id: localId, receiptNumber: `OFFLINE-${Date.now()}`, offline: true })
         toast.success('Sale saved offline — will sync when back online')
         return
@@ -423,6 +427,7 @@ export default function SalesPage() {
       cart.clearCart()
       setDiscount(0)
       setAmountPaid(0)
+      setSelectedCustomer(null)
       toast.success('Sale completed!')
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Checkout failed'
@@ -696,6 +701,33 @@ export default function SalesPage() {
 
           {/* Totals & Checkout */}
           <div className="p-4 border-t border-gray-100 space-y-3">
+            <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wide text-amber-800">Repeat Buyer</span>
+                {selectedCustomer && (
+                  <span className="text-xs font-semibold text-amber-700">
+                    Earns {Math.floor(Math.max(0, total))} pts
+                  </span>
+                )}
+              </div>
+              <CustomerSelector selectedCustomer={selectedCustomer} onSelect={setSelectedCustomer} />
+              {selectedCustomer && (
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="rounded-lg bg-white/80 px-2 py-2 text-center">
+                    <div className="text-gray-400">Points</div>
+                    <div className="font-semibold text-amber-700">{selectedCustomer.loyaltyPoints}</div>
+                  </div>
+                  <div className="rounded-lg bg-white/80 px-2 py-2 text-center">
+                    <div className="text-gray-400">Visits</div>
+                    <div className="font-semibold text-gray-900">{selectedCustomer.visitCount}</div>
+                  </div>
+                  <div className="rounded-lg bg-white/80 px-2 py-2 text-center">
+                    <div className="text-gray-400">Spend</div>
+                    <div className="font-semibold text-gray-900">{fmt(Number(selectedCustomer.totalSpend || 0))}</div>
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-gray-500">Subtotal</span>
               <span>

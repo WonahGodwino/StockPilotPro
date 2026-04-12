@@ -65,6 +65,7 @@ export interface Sale {
   tenantId: string
   subsidiaryId: string
   userId: string
+  customerId?: string | null
   totalAmount: number
   discount: number
   amountPaid: number
@@ -77,6 +78,7 @@ export interface Sale {
   items: SaleItem[]
   user?: { firstName: string; lastName: string }
   subsidiary?: { name: string }
+  customer?: { id: string; name: string; loyaltyPoints: number } | null
 }
 
 // Cart item (frontend only)
@@ -98,6 +100,7 @@ export interface SaleCheckoutPayload {
   syncRef?: string
   transactionRef?: string
   notes?: string
+  customerId?: string
   items: {
     productId: string
     quantity: number
@@ -202,6 +205,33 @@ export interface TrustedCustomer {
   isActive: boolean
   createdAt: string
   updatedAt: string
+}
+
+// Loyalty / Repeat Buyer
+export interface Customer {
+  id: string
+  tenantId: string
+  name: string
+  phone?: string | null
+  email?: string | null
+  address?: string | null
+  notes?: string | null
+  loyaltyPoints: number
+  totalSpend: number
+  visitCount: number
+  lastVisitedAt?: string | null
+  createdAt: string
+}
+
+export interface LoyaltyLedgerEntry {
+  id: string
+  type: 'EARN' | 'REDEEM' | 'ADJUST'
+  points: number
+  balanceBefore: number
+  balanceAfter: number
+  note?: string | null
+  saleId?: string | null
+  createdAt: string
 }
 
 // ── Plans & Subscriptions ─────────────────────────────────────────────────────

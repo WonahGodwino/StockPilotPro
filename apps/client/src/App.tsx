@@ -15,6 +15,7 @@ const SsoCallback = lazy(() => import('@/pages/SsoCallback'))
 const Dashboard = lazy(() => import('@/pages/Dashboard'))
 const Products = lazy(() => import('@/pages/Products'))
 const SalesPage = lazy(() => import('@/pages/Sales'))
+const CustomersPage = lazy(() => import('@/pages/Customers'))
 const Expenses = lazy(() => import('@/pages/Expenses'))
 const Reports = lazy(() => import('@/pages/Reports'))
 const Subsidiaries = lazy(() => import('@/pages/Subsidiaries'))
@@ -164,6 +165,7 @@ export default function App() {
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="products" element={<Products />} />
             <Route path="sales" element={<SalesPage />} />
+            <Route path="customers" element={<CustomersPage />} />
             <Route path="expenses" element={<Expenses />} />
             <Route path="reports" element={<Reports />} />
             <Route path="subsidiaries" element={<Subsidiaries />} />
@@ -225,6 +227,7 @@ export default function App() {
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="products" element={<Products />} />
             <Route path="sales" element={<SalesPage />} />
+            <Route path="customers" element={<CustomersPage />} />
             <Route path="expenses" element={<Expenses />} />
             <Route path="reports" element={<Reports />} />
             <Route path="subsidiaries" element={<Subsidiaries />} />
