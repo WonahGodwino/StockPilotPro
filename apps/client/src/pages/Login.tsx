@@ -434,6 +434,14 @@ export default function Login() {
                   )
                 })}
               </div>
+              <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                <p className="text-[11px] font-semibold text-gray-700">SSO security notes</p>
+                <ul className="mt-1 space-y-1 text-[11px] leading-relaxed text-gray-600">
+                  <li>Only approved admin accounts can use SSO providers configured for your tenant.</li>
+                  <li>Authentication happens on provider-owned pages. StockPilot never stores your provider password.</li>
+                  <li>If SSO access is denied, contact your tenant admin to verify provider and role assignment.</li>
+                </ul>
+              </div>
             </div>
           )}
 
