@@ -127,7 +127,7 @@ export async function GET(req: NextRequest) {
       const totalCompanies = await prisma.tenant.count({
         where: { 
           archived: false,
-          id: { not: user.tenantId! }, // Exclude platform owner's company
+          id: { not: user.tenantId ?? '' }, // Exclude platform owner's company
         },
       })
 
@@ -136,7 +136,7 @@ export async function GET(req: NextRequest) {
       where: { 
         archived: false,
         NOT: {
-          tenantId: user.tenantId!,
+          tenantId: user.tenantId ?? '',
         },
       },
     })
@@ -144,7 +144,7 @@ export async function GET(req: NextRequest) {
     // Get current subscription status summary across all tenants (not date-windowed).
     const allSubscriptions = await prisma.subscription.findMany({
       where: {
-        tenantId: { not: user.tenantId! },
+        tenantId: { not: user.tenantId ?? '' },
       },
       include: { plan: true },
     })
@@ -212,14 +212,14 @@ export async function GET(req: NextRequest) {
     const [lifetimeSubscriptionTransactions, periodSubscriptionTransactions, allExpenses, periodExpenses] = await Promise.all([
       prisma.subscriptionTransaction.findMany({
         where: {
-          tenantId: { not: user.tenantId! },
+          tenantId: { not: user.tenantId ?? '' },
           status: { in: ['ACTIVE', 'VERIFIED'] },
         },
         select: { amount: true, currency: true },
       }),
       prisma.subscriptionTransaction.findMany({
         where: {
-          tenantId: { not: user.tenantId! },
+          tenantId: { not: user.tenantId ?? '' },
           status: { in: ['ACTIVE', 'VERIFIED'] },
           createdAt: { gte: startDate, lte: endDate },
         },
@@ -227,14 +227,14 @@ export async function GET(req: NextRequest) {
       }),
       prisma.expense.findMany({
         where: {
-          tenantId: { not: user.tenantId! },
+          tenantId: { not: user.tenantId ?? '' },
           archived: false,
         },
         select: { amount: true, currency: true, fxRate: true },
       }),
       prisma.expense.findMany({
         where: {
-          tenantId: { not: user.tenantId! },
+          tenantId: { not: user.tenantId ?? '' },
           archived: false,
           date: { gte: startDate, lte: endDate },
         },
@@ -295,7 +295,7 @@ export async function GET(req: NextRequest) {
     const [activatedTransactions, expiredTransitions, suspendedTransitions] = await Promise.all([
       prisma.subscriptionTransaction.findMany({
         where: {
-          tenantId: { not: user.tenantId! },
+          tenantId: { not: user.tenantId ?? '' },
           status: 'ACTIVE',
           OR: [
             { activatedAt: { gte: startDate, lte: endDate } },
@@ -307,7 +307,7 @@ export async function GET(req: NextRequest) {
       }),
       prisma.subscription.findMany({
         where: {
-          tenantId: { not: user.tenantId! },
+          tenantId: { not: user.tenantId ?? '' },
           status: 'EXPIRED',
           updatedAt: { gte: startDate, lte: endDate },
         },
@@ -315,7 +315,7 @@ export async function GET(req: NextRequest) {
       }),
       prisma.subscription.findMany({
         where: {
-          tenantId: { not: user.tenantId! },
+          tenantId: { not: user.tenantId ?? '' },
           status: 'SUSPENDED',
           updatedAt: { gte: startDate, lte: endDate },
         },
@@ -337,7 +337,7 @@ export async function GET(req: NextRequest) {
     // Company growth trend for date range
     const companiesByDate = await prisma.tenant.findMany({
       where: {
-        id: { not: user.tenantId! },
+        id: { not: user.tenantId ?? '' },
         createdAt: { gte: startDate, lte: endDate },
       },
       select: { createdAt: true },

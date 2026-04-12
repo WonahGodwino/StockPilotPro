@@ -78,6 +78,23 @@ export async function GET(req: NextRequest) {
       },
     })
   } catch (err) {
+    const code = (err as { code?: string })?.code
+    if (code === 'P2021') {
+      return NextResponse.json({
+        data: {
+          summary: {
+            totalRuns: 0,
+            successRate30Days: 0,
+            lastRun: null,
+            lastSuccessfulRun: null,
+            nextRecommendedRunAt: new Date(),
+            recommendedCadenceHours: Number(process.env.BACKUP_DRILL_RECOMMENDED_CADENCE_HOURS || 168),
+            isOverdue: true,
+          },
+          rows: [],
+        },
+      })
+    }
     console.error('[OPS BACKUP DRILLS GET]', err)
     return apiError('Internal server error', 500)
   }

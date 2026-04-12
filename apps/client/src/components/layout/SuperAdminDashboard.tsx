@@ -92,6 +92,7 @@ export default function SuperAdminDashboard() {
   const [backupRows, setBackupRows] = useState<BackupDrillRow[]>([])
   const [runningBackupDrill, setRunningBackupDrill] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [backupWarning, setBackupWarning] = useState<string | null>(null)
   const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly'>('monthly')
 
   const fmt = makeCurrencyFormatter(stats?.baseCurrency || 'USD', { minimumFractionDigits: 0 })
@@ -111,16 +112,29 @@ export default function SuperAdminDashboard() {
 
   const fetchStats = (selectedPeriod: string) => {
     setLoading(true)
-    Promise.all([
+    Promise.allSettled([
       api.get(`/reports/platform-stats?period=${selectedPeriod}`),
       api.get('/ops/backup-drills?limit=10'),
     ])
-      .then(([platformRes, backupRes]) => {
-        setStats(platformRes.data.data)
-        setBackupSummary(backupRes.data?.data?.summary || null)
-        setBackupRows(backupRes.data?.data?.rows || [])
+      .then(([platformResult, backupResult]) => {
+        if (platformResult.status === 'fulfilled') {
+          setStats(platformResult.value.data.data)
+        } else {
+          console.error('Failed to load platform stats', platformResult.reason)
+          setStats(null)
+        }
+
+        if (backupResult.status === 'fulfilled') {
+          setBackupSummary(backupResult.value.data?.data?.summary || null)
+          setBackupRows(backupResult.value.data?.data?.rows || [])
+          setBackupWarning(null)
+        } else {
+          console.error('Failed to load backup drill operations', backupResult.reason)
+          setBackupSummary(null)
+          setBackupRows([])
+          setBackupWarning('Backup drill data unavailable')
+        }
       })
-      .catch(console.error)
       .finally(() => setLoading(false))
   }
 
@@ -263,6 +277,12 @@ export default function SuperAdminDashboard() {
             {runningBackupDrill ? 'Running...' : 'Run Drill'}
           </button>
         </div>
+
+        {backupWarning && (
+          <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            {backupWarning}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-4">
           <div className="rounded-lg bg-white p-3 border border-indigo-100">
