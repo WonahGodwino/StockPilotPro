@@ -437,6 +437,23 @@ export default function Login() {
             </div>
           )}
 
+          {view === 'login' && (
+            <div className="mt-5 rounded-lg border border-indigo-100 bg-indigo-50 p-3">
+              <p className="text-xs font-semibold text-indigo-900">Need help signing in?</p>
+              <p className="mt-1 text-xs text-indigo-700">
+                Contact support at{' '}
+                <a
+                  href="mailto:support@stockpilot.pro"
+                  className="font-semibold underline underline-offset-2"
+                  onClick={() => trackEvent('login_support_path_clicked', { action: 'email_support' })}
+                >
+                  support@stockpilot.pro
+                </a>{' '}
+                or call <span className="font-semibold">+1 (555) 100-2200</span> for admin account assistance.
+              </p>
+            </div>
+          )}
+
             <div className="mt-6 pt-6 border-t border-gray-100">
             <p className="text-xs text-gray-500 text-center font-medium">Test credentials are managed in the seed file.</p>
             <p className="text-xs text-gray-400 text-center mt-1">Use your provisioned account details to sign in.</p>
