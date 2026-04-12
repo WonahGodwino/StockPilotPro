@@ -4,6 +4,27 @@ import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { requirePermission } from '@/lib/rbac'
 
+type CustomerDelegate = {
+  findFirst: (args?: Record<string, unknown>) => Promise<unknown>
+  update: (args: Record<string, unknown>) => Promise<unknown>
+}
+
+type LoyaltyLedgerDelegate = {
+  create: (args: Record<string, unknown>) => Promise<unknown>
+}
+
+const customer = (prisma as unknown as { customer: CustomerDelegate }).customer
+const loyaltyLedger = (prisma as unknown as { loyaltyLedger: LoyaltyLedgerDelegate }).loyaltyLedger
+
+function isAuthError(err: unknown): boolean {
+  const message = (err as Error)?.message || ''
+  return (
+    message.includes('No token provided') ||
+    message.includes('jwt') ||
+    message.includes('token')
+  )
+}
+
 const adjustSchema = z.object({
   type: z.enum(['REDEEM', 'ADJUST']),
   points: z.number().int(),
@@ -23,34 +44,35 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
     const tenantId = user.tenantId
     if (!tenantId) return apiError('No tenant context', 400)
 
-    const customer = await prisma.customer.findFirst({
+    const foundCustomer = await customer.findFirst({
       where: { id: params.id, tenantId, archived: false },
     })
-    if (!customer) return apiError('Customer not found', 404)
+    if (!foundCustomer) return apiError('Customer not found', 404)
 
     const body = await req.json()
     const data = adjustSchema.parse(body)
 
     if (data.type === 'REDEEM' && data.points > 0) {
       // Redeeming means deducting — points argument must be positive (we flip it)
-      if (customer.loyaltyPoints < data.points) {
+      if ((foundCustomer as { loyaltyPoints: number }).loyaltyPoints < data.points) {
         return apiError('Insufficient loyalty points', 422)
       }
     }
 
     const delta = data.type === 'REDEEM' ? -Math.abs(data.points) : data.points
-    const balanceBefore = customer.loyaltyPoints
+    const balanceBefore = (foundCustomer as { loyaltyPoints: number }).loyaltyPoints
     const balanceAfter = balanceBefore + delta
 
     if (balanceAfter < 0) return apiError('Resulting balance would be negative', 422)
 
-    const [updated] = await prisma.$transaction([
-      prisma.customer.update({
+    const updated = await prisma.$transaction(async () => {
+      const updatedCustomer = await customer.update({
         where: { id: params.id },
         data: { loyaltyPoints: balanceAfter },
         select: { id: true, loyaltyPoints: true },
-      }),
-      prisma.loyaltyLedger.create({
+      })
+
+      await loyaltyLedger.create({
         data: {
           tenantId,
           customerId: params.id,
@@ -61,12 +83,15 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
           note: data.note || null,
           createdByUserId: user.userId,
         },
-      }),
-    ])
+      })
+
+      return updatedCustomer
+    })
 
     return NextResponse.json({ data: updated })
   } catch (err) {
     if (err instanceof z.ZodError) return NextResponse.json({ error: err.errors }, { status: 422 })
+    if (isAuthError(err)) return apiError('Unauthorized', 401)
     if ((err as Error).message?.includes('Forbidden')) return apiError((err as Error).message, 403)
     console.error('[LOYALTY POST]', err)
     return apiError('Internal server error', 500)

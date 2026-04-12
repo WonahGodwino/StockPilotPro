@@ -4,6 +4,32 @@ import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { requirePermission } from '@/lib/rbac'
 
+type CustomerDelegate = {
+  findFirst: (args?: Record<string, unknown>) => Promise<unknown>
+  update: (args: Record<string, unknown>) => Promise<unknown>
+}
+
+type SaleDelegate = {
+  findMany: (args?: Record<string, unknown>) => Promise<unknown[]>
+}
+
+type LoyaltyLedgerDelegate = {
+  findMany: (args?: Record<string, unknown>) => Promise<unknown[]>
+}
+
+const customer = (prisma as unknown as { customer: CustomerDelegate }).customer
+const sale = (prisma as unknown as { sale: SaleDelegate }).sale
+const loyaltyLedger = (prisma as unknown as { loyaltyLedger: LoyaltyLedgerDelegate }).loyaltyLedger
+
+function isAuthError(err: unknown): boolean {
+  const message = (err as Error)?.message || ''
+  return (
+    message.includes('No token provided') ||
+    message.includes('jwt') ||
+    message.includes('token')
+  )
+}
+
 const updateCustomerSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   phone: z.string().max(40).optional().or(z.literal('')),
@@ -25,7 +51,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
     const tenantId = user.tenantId
     if (!tenantId) return apiError('No tenant context', 400)
 
-    const customer = await prisma.customer.findFirst({
+    const foundCustomer = await customer.findFirst({
       where: { id: params.id, tenantId, archived: false },
       select: {
         id: true,
@@ -41,10 +67,10 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
         createdAt: true,
       },
     })
-    if (!customer) return apiError('Customer not found', 404)
+    if (!foundCustomer) return apiError('Customer not found', 404)
 
     // Purchase history (last 20 sales)
-    const sales = await prisma.sale.findMany({
+    const sales = await sale.findMany({
       where: { customerId: params.id, tenantId, archived: false },
       orderBy: { createdAt: 'desc' },
       take: 20,
@@ -66,7 +92,7 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
     })
 
     // Loyalty ledger (last 30 entries)
-    const ledger = await prisma.loyaltyLedger.findMany({
+    const ledger = await loyaltyLedger.findMany({
       where: { customerId: params.id },
       orderBy: { createdAt: 'desc' },
       take: 30,
@@ -82,8 +108,9 @@ export async function GET(req: NextRequest, { params }: RouteContext) {
       },
     })
 
-    return NextResponse.json({ data: { ...customer, purchaseHistory: sales, loyaltyLedger: ledger } })
+    return NextResponse.json({ data: { ...foundCustomer, purchaseHistory: sales, loyaltyLedger: ledger } })
   } catch (err) {
+    if (isAuthError(err)) return apiError('Unauthorized', 401)
     if ((err as Error).message?.includes('Forbidden')) return apiError((err as Error).message, 403)
     console.error('[CUSTOMER GET]', err)
     return apiError('Internal server error', 500)
@@ -97,13 +124,13 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
     const tenantId = user.tenantId
     if (!tenantId) return apiError('No tenant context', 400)
 
-    const existing = await prisma.customer.findFirst({ where: { id: params.id, tenantId } })
+    const existing = await customer.findFirst({ where: { id: params.id, tenantId } })
     if (!existing) return apiError('Customer not found', 404)
 
     const body = await req.json()
     const patch = updateCustomerSchema.parse(body)
 
-    const updated = await prisma.customer.update({
+    const updated = await customer.update({
       where: { id: params.id },
       data: {
         ...(patch.name !== undefined ? { name: patch.name } : {}),
@@ -130,6 +157,7 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
     return NextResponse.json({ data: updated })
   } catch (err) {
     if (err instanceof z.ZodError) return NextResponse.json({ error: err.errors }, { status: 422 })
+    if (isAuthError(err)) return apiError('Unauthorized', 401)
     if ((err as Error).message?.includes('Forbidden')) return apiError((err as Error).message, 403)
     console.error('[CUSTOMER PATCH]', err)
     return apiError('Internal server error', 500)
@@ -143,17 +171,18 @@ export async function DELETE(req: NextRequest, { params }: RouteContext) {
     const tenantId = user.tenantId
     if (!tenantId) return apiError('No tenant context', 400)
 
-    const existing = await prisma.customer.findFirst({ where: { id: params.id, tenantId } })
+    const existing = await customer.findFirst({ where: { id: params.id, tenantId } })
     if (!existing) return apiError('Customer not found', 404)
 
     // Soft delete
-    await prisma.customer.update({
+    await customer.update({
       where: { id: params.id },
       data: { archived: true, updatedBy: user.userId },
     })
 
     return NextResponse.json({ success: true })
   } catch (err) {
+    if (isAuthError(err)) return apiError('Unauthorized', 401)
     if ((err as Error).message?.includes('Forbidden')) return apiError((err as Error).message, 403)
     console.error('[CUSTOMER DELETE]', err)
     return apiError('Internal server error', 500)

@@ -4,6 +4,23 @@ import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { requirePermission, isSuperAdmin } from '@/lib/rbac'
 
+type CustomerDelegate = {
+  findMany: (args?: Record<string, unknown>) => Promise<unknown[]>
+  count: (args?: Record<string, unknown>) => Promise<number>
+  create: (args: Record<string, unknown>) => Promise<unknown>
+}
+
+const customer = (prisma as unknown as { customer: CustomerDelegate }).customer
+
+function isAuthError(err: unknown): boolean {
+  const message = (err as Error)?.message || ''
+  return (
+    message.includes('No token provided') ||
+    message.includes('jwt') ||
+    message.includes('token')
+  )
+}
+
 const createCustomerSchema = z.object({
   name: z.string().min(1).max(120),
   phone: z.string().max(40).optional(),
@@ -46,7 +63,7 @@ export async function GET(req: NextRequest) {
     }
 
     const [data, total] = await Promise.all([
-      prisma.customer.findMany({
+      customer.findMany({
         where,
         orderBy: { name: 'asc' },
         skip: (page - 1) * limit,
@@ -64,11 +81,12 @@ export async function GET(req: NextRequest) {
           createdAt: true,
         },
       }),
-      prisma.customer.count({ where }),
+      customer.count({ where }),
     ])
 
     return NextResponse.json({ data, total, page, limit })
   } catch (err) {
+    if (isAuthError(err)) return apiError('Unauthorized', 401)
     if ((err as Error).message?.includes('Forbidden')) return apiError((err as Error).message, 403)
     console.error('[CUSTOMERS GET]', err)
     return apiError('Internal server error', 500)
@@ -85,7 +103,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const data = createCustomerSchema.parse(body)
 
-    const customer = await prisma.customer.create({
+    const createdCustomer = await customer.create({
       data: {
         tenantId,
         name: data.name,
@@ -109,9 +127,10 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    return NextResponse.json({ data: customer }, { status: 201 })
+    return NextResponse.json({ data: createdCustomer }, { status: 201 })
   } catch (err) {
     if (err instanceof z.ZodError) return NextResponse.json({ error: err.errors }, { status: 422 })
+    if (isAuthError(err)) return apiError('Unauthorized', 401)
     if ((err as Error).message?.includes('Forbidden')) return apiError((err as Error).message, 403)
     console.error('[CUSTOMERS POST]', err)
     return apiError('Internal server error', 500)

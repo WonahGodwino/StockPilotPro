@@ -13,6 +13,7 @@
     "test:sso": "ts-node -P tests/tsconfig.json tests/sso.spec.ts",
     "test:subscription": "ts-node -P tests/tsconfig.json tests/subscription.spec.ts",
     "test:tenants": "ts-node -P tests/tsconfig.json tests/tenants.spec.ts",
+    "test:customer-loyalty": "ts-node -r tsconfig-paths/register -P tests/tsconfig.json tests/customer-loyalty.spec.ts",
     "test:currency": "ts-node -P tests/tsconfig.json tests/currency.spec.ts",
     "test:enterprise-ai": "ts-node -P tests/tsconfig.json tests/enterprise-ai.spec.ts",
     "test:enterprise-ai-endpoints": "ts-node -P tests/tsconfig.json tests/enterprise-ai-endpoints.spec.ts",
@@ -46,6 +47,7 @@
     "@types/ws": "^8.5.10",
     "prisma": "^5.10.2",
     "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
     "typescript": "^5.4.2"
   }
 }
