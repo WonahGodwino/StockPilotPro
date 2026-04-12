@@ -80,6 +80,32 @@ Exit criteria:
 - AI recommendations are explainable, auditable, and source-attributed.
 - Practical business impact metrics are visible to product and operations.
 
+## M5 — Advanced Enterprise Assistant Engine
+Target: evolve the internal assistant into a deterministic, enterprise-grade decision engine with measurable business impact.
+
+Scope from issue log:
+- Advanced data and context foundation: #67
+- Scoring and prioritization intelligence: #68
+- Multi-horizon comparative analytics: #69
+- What-if simulation and scenario planning: #70
+- Decision outcome attribution and reranking: #71
+- Robust anomaly precision improvements: #72
+- Execution workflow and action ownership: #73
+- Quality KPI observability and governance: #74
+- Background intelligence refresh jobs: #75
+- Regression and benchmark safety net: #76
+
+Execution model:
+- Deliver backend intelligence engine first (snapshot, scoring, simulation, reranking).
+- Deliver execution UX second (action tracker and KPI dashboard).
+- Enforce deterministic behavior and fixture-based benchmark tests before rollout.
+
+Exit criteria:
+- Assistant responses are period-comparative, actionable, and ranked by quantified opportunity.
+- Simulation outputs are available for pricing, stock transfer, and expense scenarios.
+- Recommendation reranking is driven by realized outcomes (7/14/30 day windows).
+- Quality KPIs and regression tests guard against drift and false-positive inflation.
+
 ## Operating Notes
 - Sensitive content is intentionally excluded from GitHub issue bodies.
 - Demo credentials and secrets must remain outside issues and outside committed env files.

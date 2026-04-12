@@ -19,6 +19,21 @@ interface PlatformStats {
   expiredSubscriptions: number
   suspendedSubscriptions: number
   totalRevenue: number
+  financials: {
+    lifetime: {
+      revenue: number
+      expenses: number
+      profit: number
+    }
+    period: {
+      key: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly'
+      startDate: string
+      endDate: string
+      revenue: number
+      expenses: number
+      profit: number
+    }
+  }
   baseCurrency: string
   planBreakdown: PlanBreakdown[]
   subscriptionTrend: Array<{ date: string; active: number; expired: number; suspended: number }>
@@ -54,6 +69,12 @@ export default function SuperAdminDashboard() {
   const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly'>('monthly')
 
   const fmt = makeCurrencyFormatter(stats?.baseCurrency || 'USD', { minimumFractionDigits: 0 })
+  const formatPeriodWindow = (startIso: string, endIso: string) => {
+    const start = new Date(startIso)
+    const end = new Date(endIso)
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 'Selected period'
+    return `${start.toLocaleDateString(undefined, { month: 'short', day: '2-digit' })} - ${end.toLocaleDateString(undefined, { month: 'short', day: '2-digit' })}`
+  }
   const formatTrendDate = (value: string) => {
     const parsed = new Date(value)
     if (Number.isNaN(parsed.getTime())) return value
@@ -179,6 +200,51 @@ export default function SuperAdminDashboard() {
           color="bg-danger-50 text-danger-600"
           subtext="Total billing"
         />
+      </div>
+
+      {/* Financial KPIs */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="card p-6 border border-primary-200 bg-primary-50/40">
+          <h3 className="text-sm font-semibold text-primary-700 uppercase">All-Time Financials</h3>
+          <p className="text-xs text-primary-600 mt-1">Ever-generated across all tenant businesses</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+            <div className="rounded-lg bg-white p-3 border border-primary-100">
+              <p className="text-xs text-gray-500">Revenue</p>
+              <p className="text-base font-semibold text-gray-900 mt-1">{fmt(stats.financials.lifetime.revenue)}</p>
+            </div>
+            <div className="rounded-lg bg-white p-3 border border-primary-100">
+              <p className="text-xs text-gray-500">Expenses</p>
+              <p className="text-base font-semibold text-gray-900 mt-1">{fmt(stats.financials.lifetime.expenses)}</p>
+            </div>
+            <div className="rounded-lg bg-white p-3 border border-primary-100">
+              <p className="text-xs text-gray-500">Profit</p>
+              <p className={`text-base font-semibold mt-1 ${stats.financials.lifetime.profit >= 0 ? 'text-success-700' : 'text-danger-700'}`}>
+                {fmt(stats.financials.lifetime.profit)}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="card p-6 border border-warning-200 bg-warning-50/40">
+          <h3 className="text-sm font-semibold text-warning-700 uppercase">{period.charAt(0).toUpperCase() + period.slice(1)} Financials</h3>
+          <p className="text-xs text-warning-700 mt-1">{formatPeriodWindow(stats.financials.period.startDate, stats.financials.period.endDate)}</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+            <div className="rounded-lg bg-white p-3 border border-warning-100">
+              <p className="text-xs text-gray-500">Revenue</p>
+              <p className="text-base font-semibold text-gray-900 mt-1">{fmt(stats.financials.period.revenue)}</p>
+            </div>
+            <div className="rounded-lg bg-white p-3 border border-warning-100">
+              <p className="text-xs text-gray-500">Expenses</p>
+              <p className="text-base font-semibold text-gray-900 mt-1">{fmt(stats.financials.period.expenses)}</p>
+            </div>
+            <div className="rounded-lg bg-white p-3 border border-warning-100">
+              <p className={`text-xs ${stats.financials.period.profit >= 0 ? 'text-success-600' : 'text-danger-600'}`}>Profit</p>
+              <p className={`text-base font-semibold mt-1 ${stats.financials.period.profit >= 0 ? 'text-success-700' : 'text-danger-700'}`}>
+                {fmt(stats.financials.period.profit)}
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Subscription Status Summary */}

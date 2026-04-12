@@ -61,23 +61,26 @@ export default function Receipt({ saleId, onNewSale }: Props) {
           </div>
 
           <div className="space-y-1 mb-4">
-            <div className="flex text-xs font-semibold text-gray-500 border-b pb-1">
-              <span className="flex-1">Item</span>
-              <span className="w-12 text-center">Qty</span>
-              <span className="w-16 text-right">Price</span>
-              <span className="w-16 text-right">Total</span>
+            <div className="grid grid-cols-[minmax(0,1fr)_44px_92px_110px] gap-x-2 text-xs font-semibold text-gray-500 border-b pb-1">
+              <span>Item</span>
+              <span className="text-center">Qty</span>
+              <span className="text-right">Price</span>
+              <span className="text-right">Total</span>
             </div>
             {sale.items.map((item) => (
               <div key={item.id} className="text-xs">
-                <div className="flex items-center">
-                  <span className="flex-1 truncate">{item.product?.name}</span>
-                  <span className="w-12 text-center">{item.quantity}</span>
-                  <span className="w-16 text-right">{currencySymbol}{Number(item.unitPrice).toFixed(2)}</span>
-                  <span className="w-16 text-right">{currencySymbol}{Number(item.subtotal).toFixed(2)}</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_44px_92px_110px] gap-x-2 items-center">
+                  <span className="truncate">{item.product?.name}</span>
+                  <span className="text-center tabular-nums whitespace-nowrap">{item.quantity}</span>
+                  <span className="text-right tabular-nums whitespace-nowrap">{currencySymbol}{Number(item.unitPrice).toFixed(2)}</span>
+                  <span className="text-right tabular-nums whitespace-nowrap">{currencySymbol}{Number(item.subtotal).toFixed(2)}</span>
                 </div>
                 {Number(item.discount) > 0 && (
-                  <div className="flex justify-end text-gray-400 italic">
-                    <span className="w-16 text-right">-{currencySymbol}{Number(item.discount).toFixed(2)} disc</span>
+                  <div className="grid grid-cols-[minmax(0,1fr)_44px_92px_110px] gap-x-2 text-gray-400 italic">
+                    <span />
+                    <span />
+                    <span />
+                    <span className="text-right tabular-nums whitespace-nowrap">-{currencySymbol}{Number(item.discount).toFixed(2)} disc</span>
                   </div>
                 )}
               </div>

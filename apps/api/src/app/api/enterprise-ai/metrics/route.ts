@@ -42,6 +42,14 @@ export async function GET(req: NextRequest) {
       return acc
     }, {})
 
+    const outcomeRows = metricsRows.filter((row) => row.metricKey === 'recommendation_outcome_score')
+    const outcomeCount = outcomeRows.length
+    const netOutcomeScore = outcomeRows.reduce((sum, row) => sum + Number(row.metricValue), 0)
+    const avgOutcomeScore = outcomeCount > 0 ? netOutcomeScore / outcomeCount : 0
+    const positiveOutcomeRate = outcomeCount > 0
+      ? outcomeRows.filter((row) => Number(row.metricValue) > 0).length / outcomeCount
+      : 0
+
     const alerts: Array<{ key: string; severity: 'LOW' | 'MEDIUM' | 'HIGH'; message: string }> = []
     if (totalRecommendations >= 20 && adoptionRate < 0.2) {
       alerts.push({
@@ -65,6 +73,12 @@ export async function GET(req: NextRequest) {
           totalRecommendations,
           acceptedRecommendations,
           adoptionRate,
+        },
+        outcomes: {
+          outcomeCount,
+          netOutcomeScore,
+          avgOutcomeScore,
+          positiveOutcomeRate,
         },
         byType,
         alerts,

@@ -7,6 +7,7 @@ import { logAudit } from '@/lib/audit'
 
 const updateSchema = z.object({
   name: z.string().min(1).optional(),
+  category: z.string().trim().min(1).optional(),
   description: z.string().optional(),
   type: z.enum(['GOODS', 'SERVICE']).optional(),
   unit: z.string().optional(),
@@ -71,6 +72,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       entityId: updated.id,
       oldValues: {
         name: product.name,
+        category: product.category,
         quantity: product.quantity,
         costPrice: product.costPrice,
         sellingPrice: product.sellingPrice,
@@ -78,6 +80,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       },
       newValues: {
         name: updated.name,
+        category: updated.category,
         quantity: updated.quantity,
         costPrice: updated.costPrice,
         sellingPrice: updated.sellingPrice,

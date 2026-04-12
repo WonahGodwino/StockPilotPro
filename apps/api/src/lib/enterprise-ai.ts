@@ -27,6 +27,19 @@ export type EnterpriseAccessContext = {
   features: unknown
 }
 
+function toNumber(value: unknown): number {
+  return Number(value || 0)
+}
+
+function pctDelta(current: number, prior: number): number {
+  if (prior === 0) return current === 0 ? 0 : 100
+  return ((current - prior) / Math.abs(prior)) * 100
+}
+
+function weekdayLabel(date: Date): string {
+  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getDay()]
+}
+
 function normalizeFeatureToken(token: string): string {
   return token.trim().toUpperCase().replace(/\s+/g, '_')
 }
@@ -77,7 +90,29 @@ export async function requireEnterpriseAiAccess(
 }
 
 export async function buildEnterpriseFeatureSnapshot(tenantId: string) {
-  const [salesBySubsidiary, expensesBySubsidiary, productsBySubsidiary, lowStockCount, salesByProduct, productCatalog] = await Promise.all([
+  const now = new Date()
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+  const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+  const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000)
+
+  const [
+    salesBySubsidiary,
+    expensesBySubsidiary,
+    productsBySubsidiary,
+    lowStockCount,
+    salesByProduct,
+    productCatalog,
+    recentSales,
+    sales7,
+    salesPrior7,
+    sales30,
+    salesPrior30,
+    expenses7,
+    expensesPrior7,
+    expenses30,
+    expensesPrior30,
+  ] = await Promise.all([
     prisma.sale.groupBy({
       by: ['subsidiaryId'],
       where: { tenantId, archived: false },
@@ -129,9 +164,142 @@ export async function buildEnterpriseFeatureSnapshot(tenantId: string) {
       },
       take: 300,
     }),
+    prisma.sale.findMany({
+      where: { tenantId, archived: false, createdAt: { gte: thirtyDaysAgo } },
+      select: {
+        subsidiaryId: true,
+        totalAmount: true,
+        discount: true,
+        createdAt: true,
+      },
+      take: 2000,
+      orderBy: { createdAt: 'desc' },
+    }),
+    prisma.sale.aggregate({
+      where: { tenantId, archived: false, createdAt: { gte: sevenDaysAgo } },
+      _sum: { totalAmount: true, discount: true },
+      _count: { _all: true },
+    }),
+    prisma.sale.aggregate({
+      where: { tenantId, archived: false, createdAt: { gte: fourteenDaysAgo, lt: sevenDaysAgo } },
+      _sum: { totalAmount: true, discount: true },
+      _count: { _all: true },
+    }),
+    prisma.sale.aggregate({
+      where: { tenantId, archived: false, createdAt: { gte: thirtyDaysAgo } },
+      _sum: { totalAmount: true, discount: true },
+      _count: { _all: true },
+    }),
+    prisma.sale.aggregate({
+      where: { tenantId, archived: false, createdAt: { gte: sixtyDaysAgo, lt: thirtyDaysAgo } },
+      _sum: { totalAmount: true, discount: true },
+      _count: { _all: true },
+    }),
+    prisma.expense.aggregate({
+      where: { tenantId, archived: false, date: { gte: sevenDaysAgo } },
+      _sum: { amount: true },
+      _count: { _all: true },
+    }),
+    prisma.expense.aggregate({
+      where: { tenantId, archived: false, date: { gte: fourteenDaysAgo, lt: sevenDaysAgo } },
+      _sum: { amount: true },
+      _count: { _all: true },
+    }),
+    prisma.expense.aggregate({
+      where: { tenantId, archived: false, date: { gte: thirtyDaysAgo } },
+      _sum: { amount: true },
+      _count: { _all: true },
+    }),
+    prisma.expense.aggregate({
+      where: { tenantId, archived: false, date: { gte: sixtyDaysAgo, lt: thirtyDaysAgo } },
+      _sum: { amount: true },
+      _count: { _all: true },
+    }),
   ])
 
-  const now = new Date()
+  const seasonality = recentSales.reduce<Record<string, number>>((acc, sale) => {
+    const label = weekdayLabel(sale.createdAt)
+    acc[label] = (acc[label] || 0) + toNumber(sale.totalAmount)
+    return acc
+  }, {})
+
+  const branchDiscountIntensity = recentSales.reduce<Record<string, { discount: number; revenue: number; ratio: number }>>((acc, sale) => {
+    const branch = sale.subsidiaryId || 'unassigned'
+    const revenue = toNumber(sale.totalAmount)
+    const discount = toNumber(sale.discount)
+    const current = acc[branch] || { discount: 0, revenue: 0, ratio: 0 }
+    const next = {
+      discount: current.discount + discount,
+      revenue: current.revenue + revenue,
+      ratio: 0,
+    }
+    next.ratio = next.revenue > 0 ? next.discount / next.revenue : 0
+    acc[branch] = next
+    return acc
+  }, {})
+
+  const categoryMarginBands = productCatalog.reduce<Record<string, { low: number; medium: number; high: number; products: number }>>((acc, product) => {
+    const category = product.type || 'uncategorized'
+    const row = acc[category] || { low: 0, medium: 0, high: 0, products: 0 }
+    const selling = toNumber(product.sellingPrice)
+    const cost = toNumber(product.costPrice)
+    const marginPct = selling > 0 ? ((selling - cost) / selling) * 100 : 0
+    if (marginPct < 15) row.low += 1
+    else if (marginPct < 30) row.medium += 1
+    else row.high += 1
+    row.products += 1
+    acc[category] = row
+    return acc
+  }, {})
+
+  const horizon = {
+    last7: {
+      revenue: toNumber(sales7._sum.totalAmount),
+      expense: toNumber(expenses7._sum.amount),
+      net: toNumber(sales7._sum.totalAmount) - toNumber(expenses7._sum.amount),
+      txCount: sales7._count._all,
+      expenseCount: expenses7._count._all,
+      discountIntensity: toNumber(sales7._sum.totalAmount) > 0 ? toNumber(sales7._sum.discount) / toNumber(sales7._sum.totalAmount) : 0,
+    },
+    prior7: {
+      revenue: toNumber(salesPrior7._sum.totalAmount),
+      expense: toNumber(expensesPrior7._sum.amount),
+      net: toNumber(salesPrior7._sum.totalAmount) - toNumber(expensesPrior7._sum.amount),
+      txCount: salesPrior7._count._all,
+      expenseCount: expensesPrior7._count._all,
+      discountIntensity: toNumber(salesPrior7._sum.totalAmount) > 0 ? toNumber(salesPrior7._sum.discount) / toNumber(salesPrior7._sum.totalAmount) : 0,
+    },
+    last30: {
+      revenue: toNumber(sales30._sum.totalAmount),
+      expense: toNumber(expenses30._sum.amount),
+      net: toNumber(sales30._sum.totalAmount) - toNumber(expenses30._sum.amount),
+      txCount: sales30._count._all,
+      expenseCount: expenses30._count._all,
+      discountIntensity: toNumber(sales30._sum.totalAmount) > 0 ? toNumber(sales30._sum.discount) / toNumber(sales30._sum.totalAmount) : 0,
+    },
+    prior30: {
+      revenue: toNumber(salesPrior30._sum.totalAmount),
+      expense: toNumber(expensesPrior30._sum.amount),
+      net: toNumber(salesPrior30._sum.totalAmount) - toNumber(expensesPrior30._sum.amount),
+      txCount: salesPrior30._count._all,
+      expenseCount: expensesPrior30._count._all,
+      discountIntensity: toNumber(salesPrior30._sum.totalAmount) > 0 ? toNumber(salesPrior30._sum.discount) / toNumber(salesPrior30._sum.totalAmount) : 0,
+    },
+  }
+
+  const horizonDeltas = {
+    h7: {
+      revenuePct: pctDelta(horizon.last7.revenue, horizon.prior7.revenue),
+      expensePct: pctDelta(horizon.last7.expense, horizon.prior7.expense),
+      netPct: pctDelta(horizon.last7.net, horizon.prior7.net),
+    },
+    h30: {
+      revenuePct: pctDelta(horizon.last30.revenue, horizon.prior30.revenue),
+      expensePct: pctDelta(horizon.last30.expense, horizon.prior30.expense),
+      netPct: pctDelta(horizon.last30.net, horizon.prior30.net),
+    },
+  }
+
   const snapshot = {
     generatedAt: now.toISOString(),
     branchMetrics: salesBySubsidiary.map((row) => {
@@ -148,11 +316,26 @@ export async function buildEnterpriseFeatureSnapshot(tenantId: string) {
       }
     }),
     lowStockCount,
+    lowStockExposureProducts: productCatalog
+      .filter((product) => toNumber(product.quantity) <= toNumber(product.lowStockThreshold))
+      .map((product) => ({
+        productId: product.id,
+        productName: product.name,
+        category: product.type,
+        stockOnHand: toNumber(product.quantity),
+        lowStockThreshold: toNumber(product.lowStockThreshold),
+      })),
+    horizon,
+    horizonDeltas,
+    weekdaySeasonalityRevenue: seasonality,
+    branchDiscountIntensity,
+    categoryMarginBands,
     productMetrics: productCatalog.map((product) => {
       const sales = salesByProduct.find((x) => x.productId === product.id)
       return {
         productId: product.id,
         productName: product.name,
+        category: product.type,
         subsidiaryId: product.subsidiaryId,
         productType: product.type,
         soldUnits: Number(sales?._sum.quantity || 0),

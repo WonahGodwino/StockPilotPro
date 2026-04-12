@@ -218,15 +218,20 @@ async function main() {
   // Subscription for demo tenant
   await prisma.subscription.upsert({
     where: { id: 'sub_demo' },
-    update: {},
+    update: {
+      planId: enterprisePlan.id,
+      status: SubscriptionStatus.ACTIVE,
+      amount: enterprisePlan.price,
+      expiryDate: nextYear,
+    },
     create: {
       id: 'sub_demo',
       tenantId: demoTenant.id,
-      planId: growthPlan.id,
+      planId: enterprisePlan.id,
       status: SubscriptionStatus.ACTIVE,
       startDate: now,
       expiryDate: nextYear,
-      amount: growthPlan.price,
+      amount: enterprisePlan.price,
     },
   })
 

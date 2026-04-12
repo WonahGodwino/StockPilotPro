@@ -18,7 +18,14 @@ export default function CurrencySettings() {
 
   const currentCurrency = user?.tenant?.baseCurrency || 'USD'
   const [selected, setSelected] = useState(currentCurrency)
+  const [search, setSearch] = useState('')
   const [saving, setSaving] = useState(false)
+
+  const filteredCurrencies = SUPPORTED_CURRENCIES.filter((c) => {
+    const q = search.trim().toLowerCase()
+    if (!q) return true
+    return c.code.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)
+  })
 
   if (!user || user.role === 'SALESPERSON') return null
 
@@ -83,16 +90,28 @@ export default function CurrencySettings() {
       <div className="flex gap-3 items-end">
         <div className="flex-1">
           <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+          <input
+            className="input mb-2"
+            placeholder="Search currency by code or name"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onBlur={() => setSearch('')}
+          />
           <select
             className="input"
             value={selected}
             onChange={(e) => setSelected(e.target.value)}
           >
-            {SUPPORTED_CURRENCIES.map((c) => (
+            {filteredCurrencies.map((c) => (
               <option key={c.code} value={c.code}>
                 {c.symbol} {c.code} — {c.name}
               </option>
             ))}
+            {filteredCurrencies.length === 0 && (
+              <option value="" disabled>
+                No currency matches search
+              </option>
+            )}
           </select>
         </div>
         <button

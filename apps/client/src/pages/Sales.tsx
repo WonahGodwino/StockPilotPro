@@ -62,6 +62,7 @@ export default function SalesPage() {
   const [discount, setDiscount] = useState(0)
   const [amountPaid, setAmountPaid] = useState(0)
   const [saleCurrency, setSaleCurrency] = useState(baseCurrency)
+  const [currencySearch, setCurrencySearch] = useState('')
   const [saleFxRate, setSaleFxRate] = useState(1)
   const [rateLoading, setRateLoading] = useState(false)
   const [rateError, setRateError] = useState<string | null>(null)
@@ -80,6 +81,12 @@ export default function SalesPage() {
   const [historyTotal, setHistoryTotal] = useState(0)
   const [historySubsidiaries, setHistorySubsidiaries] = useState<Subsidiary[]>([])
   const [historySubsidiaryId, setHistorySubsidiaryId] = useState<string>('all')
+
+  const filteredCurrencies = SUPPORTED_CURRENCIES.filter((currency) => {
+    const q = currencySearch.trim().toLowerCase()
+    if (!q) return true
+    return currency.code.toLowerCase().includes(q) || currency.name.toLowerCase().includes(q)
+  })
 
   const canFilterHistoryBySubsidiary = user?.role !== 'SALESPERSON'
 
@@ -698,15 +705,27 @@ export default function SalesPage() {
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <select
-                className="input text-sm"
-                value={saleCurrency}
-                onChange={(e) => setSaleCurrency(e.target.value)}
-              >
-                {SUPPORTED_CURRENCIES.map((currency) => (
-                  <option key={currency.code} value={currency.code}>{currency.code} — {currency.name}</option>
-                ))}
-              </select>
+              <div>
+                <input
+                  className="input text-sm mb-2"
+                  placeholder="Search currency"
+                  value={currencySearch}
+                  onChange={(e) => setCurrencySearch(e.target.value)}
+                  onBlur={() => setCurrencySearch('')}
+                />
+                <select
+                  className="input text-sm"
+                  value={saleCurrency}
+                  onChange={(e) => setSaleCurrency(e.target.value)}
+                >
+                  {filteredCurrencies.map((currency) => (
+                    <option key={currency.code} value={currency.code}>{currency.code} — {currency.name}</option>
+                  ))}
+                  {filteredCurrencies.length === 0 && (
+                    <option value="" disabled>No currency matches search</option>
+                  )}
+                </select>
+              </div>
               <div className="input flex items-center text-sm text-gray-600 bg-gray-50">
                 {saleCurrency === baseCurrency ? 'Base currency sale' : rateLoading ? 'Loading saved rate...' : `Saved rate: ${saleFxRate.toFixed(4)}`}
               </div>

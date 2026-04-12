@@ -430,6 +430,7 @@ model Product {
   tenantId            String
   subsidiaryId        String
   name                String
+  category            String        @default("Uncategorized")
   description         String?
   type                ProductType   @default(GOODS)
   unit                String        @default("pcs")
@@ -759,4 +760,95 @@ model EnterpriseAiMetric {
 
   @@index([tenantId, metricKey, measuredAt])
   @@index([metricKey, measuredAt])
+}
+
+// ============================================================
+// COGNITIVE LEARNING & AUTONOMOUS ACTIONS
+// ============================================================
+
+model AnonymousLearning {
+  id              String   @id @default(cuid())
+  insightType     String
+  businessType    String
+  region          String?
+  metricKey       String
+  metricValue     Json
+  sampleCount     Int      @default(1)
+  confidenceScore Float    @default(0.5)
+  validFrom       DateTime @default(now())
+  validTo         DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([insightType, businessType, metricKey])
+  @@index([businessType, insightType])
+  @@index([validFrom, validTo])
+}
+
+model RecommendationOutcome {
+  id                String   @id @default(cuid())
+  recommendationId  String
+  tenantId          String
+  recommendationType String
+  predictedImpact   Float
+  actualImpact      Float
+  deviation         Float
+  successScore      Float
+  userFeedback      Int?
+  appliedAt         DateTime
+  measuredAt        DateTime
+  createdAt         DateTime @default(now())
+
+  @@index([recommendationType, successScore])
+  @@index([tenantId, createdAt])
+}
+
+model BusinessTypeMapping {
+  id              String   @id @default(cuid())
+  tenantId        String   @unique
+  primaryType     String
+  secondaryTypes  Json?    @default("[]")
+  confidence      Float    @default(0.7)
+  detectedAt      DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  verifiedBy      String?
+
+  @@index([primaryType])
+}
+
+model AutonomousRule {
+  id              String   @id @default(cuid())
+  name            String
+  trigger         String
+  condition       Json
+  action          String
+  parameters      Json
+  priority        Int      @default(0)
+  isActive        Boolean  @default(true)
+  requiresApproval Boolean @default(true)
+  maxAutoAmount   Float    @default(0)
+  executionCount  Int      @default(0)
+  successCount    Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdBy       String
+}
+
+model AutonomousExecution {
+  id              String   @id @default(cuid())
+  ruleId          String
+  tenantId        String
+  triggerData     Json
+  actionTaken     Json
+  status          String
+  approvalStatus  String
+  approvedBy      String?
+  approvedAt      DateTime?
+  executedAt      DateTime?
+  result          Json?
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+
+  @@index([tenantId, status])
+  @@index([ruleId, executedAt])
 }

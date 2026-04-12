@@ -84,7 +84,7 @@ const packages: PackageCard[] = [
       'Unlimited salesperson seats',
       'AI demand forecasting and reorder advisory',
       'AI cash-flow and anomaly intelligence',
-      'AI branch performance copilot and assistant',
+      'AI branch performance insights and Enterprise Assistant',
       'Offline-first operations with automatic sync recovery',
       'Priority onboarding and support',
     ],
@@ -237,7 +237,7 @@ const packageComparisonRows = [
     feature: 'AI intelligence level',
     starter: 'Operational guidance',
     growth: 'Broader performance visibility',
-    enterprise: 'Forecasting, anomalies, branch copilot',
+    enterprise: 'Forecasting, anomalies, Enterprise Assistant insights',
   },
   {
     feature: 'Support and onboarding',
@@ -537,7 +537,7 @@ export default function Home() {
               <ul className="mt-4 space-y-3 text-sm text-slate-200">
                 <li className="flex items-start gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 text-cyan-300" /> Unlimited branches for large operations</li>
                 <li className="flex items-start gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 text-cyan-300" /> Unlimited salesperson seats across teams</li>
-                <li className="flex items-start gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 text-cyan-300" /> Forecasting, anomaly detection, and branch copilot</li>
+                <li className="flex items-start gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 text-cyan-300" /> Forecasting, anomaly detection, and Enterprise Assistant insights</li>
               </ul>
               <a
                 href="#contact"

@@ -14,10 +14,18 @@ export default function PlansPage() {
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState<{ open: boolean; plan: Plan | null }>({ open: false, plan: null })
   const [form, setForm] = useState<PlanForm>(emptyForm)
+  const [currencySearch, setCurrencySearch] = useState('')
   const [saving, setSaving] = useState(false)
   const [isOnline, setIsOnline] = useState(isOnlineNow())
 
   const cacheKey = useMemo(() => getSuperadminCacheKey('plans'), [])
+  const filteredCurrencies = useMemo(() => {
+    const q = currencySearch.trim().toLowerCase()
+    if (!q) return SUPPORTED_CURRENCIES
+    return SUPPORTED_CURRENCIES.filter(
+      (currency) => currency.code.toLowerCase().includes(q) || currency.name.toLowerCase().includes(q)
+    )
+  }, [currencySearch])
 
   const load = async () => {
     setLoading(true)
@@ -51,7 +59,7 @@ export default function PlansPage() {
     }
   }, [])
 
-  const openCreate = () => { setForm(emptyForm); setModal({ open: true, plan: null }) }
+  const openCreate = () => { setForm(emptyForm); setCurrencySearch(''); setModal({ open: true, plan: null }) }
   const openEdit = (p: Plan) => {
     const featureList = Array.isArray(p.features)
       ? p.features.map(String)
@@ -67,6 +75,7 @@ export default function PlansPage() {
       benefits: featuresText,
       billingCycle: p.billingCycle,
     })
+    setCurrencySearch('')
     setModal({ open: true, plan: p })
   }
 
@@ -154,10 +163,20 @@ export default function PlansPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Price Currency *</label>
+                  <input
+                    className="input mb-2"
+                    placeholder="Search by code or name"
+                    value={currencySearch}
+                    onChange={(e) => setCurrencySearch(e.target.value)}
+                    onBlur={() => setCurrencySearch('')}
+                  />
                   <select className="input" value={form.priceCurrency} onChange={(e) => setForm({ ...form, priceCurrency: e.target.value })}>
-                    {SUPPORTED_CURRENCIES.map((currency) => (
+                    {filteredCurrencies.map((currency) => (
                       <option key={currency.code} value={currency.code}>{currency.code} — {currency.name}</option>
                     ))}
+                    {filteredCurrencies.length === 0 && (
+                      <option value="" disabled>No currency matches search</option>
+                    )}
                   </select>
                 </div>
                 <div>

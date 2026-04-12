@@ -10,6 +10,8 @@ export type RecommendationType =
   | 'BRANCH_PERFORMANCE'
   | 'NL_ASSISTANT'
 
+export type SimulationType = 'PRICE_ADJUSTMENT' | 'STOCK_TRANSFER' | 'EXPENSE_CAP'
+
 export function isRecommendationTypeAllowedForRole(role: EnterpriseRole, recommendationType: RecommendationType): boolean {
   if (recommendationType === 'ANOMALY_DETECTION') return role === 'SUPER_ADMIN'
   return role === 'SUPER_ADMIN' || role === 'BUSINESS_ADMIN'
@@ -41,4 +43,16 @@ export function resolveSignalTenantScope(input: {
   }
 
   return tenantId
+}
+
+export function isSimulationTypeAllowedForRole(role: EnterpriseRole, _simulationType: SimulationType): boolean {
+  return role === 'SUPER_ADMIN' || role === 'BUSINESS_ADMIN'
+}
+
+export function isActionTrackerAllowedForRole(role: EnterpriseRole): boolean {
+  return role === 'SUPER_ADMIN' || role === 'BUSINESS_ADMIN'
+}
+
+export function isAlertPolicyAllowedForRole(role: EnterpriseRole): boolean {
+  return role === 'SUPER_ADMIN' || role === 'BUSINESS_ADMIN'
 }

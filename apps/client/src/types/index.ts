@@ -323,6 +323,21 @@ export interface DashboardData {
   activeSubsidiaries: number
   unreadNotifications: number
   salesTrend: { date: string; total: number }[]
+  financials?: {
+    lifetime: {
+      revenue: number
+      expenses: number
+      profit: number
+    }
+    period: {
+      key: string
+      startDate: string
+      endDate: string
+      revenue: number
+      expenses: number
+      profit: number
+    }
+  }
 }
 
 // ── Pagination ────────────────────────────────────────────────────────────────

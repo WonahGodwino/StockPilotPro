@@ -15,6 +15,7 @@ export default function ExchangeRateSettings() {
   const [fetchingLive, setFetchingLive] = useState(false)
   const [saving, setSaving] = useState(false)
   const [selectedCurrency, setSelectedCurrency] = useState('EUR')
+  const [currencySearch, setCurrencySearch] = useState('')
   const [rateValue, setRateValue] = useState('1')
   const [rateSource, setRateSource] = useState<'live' | 'snapshot' | 'manual' | null>(null)
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
@@ -23,6 +24,14 @@ export default function ExchangeRateSettings() {
     () => SUPPORTED_CURRENCIES.filter((currency) => currency.code !== baseCurrency),
     [baseCurrency]
   )
+
+  const filteredQuoteCurrencies = useMemo(() => {
+    const q = currencySearch.trim().toLowerCase()
+    if (!q) return quoteCurrencies
+    return quoteCurrencies.filter(
+      (currency) => currency.code.toLowerCase().includes(q) || currency.name.toLowerCase().includes(q)
+    )
+  }, [currencySearch, quoteCurrencies])
 
   const loadRates = useCallback(async () => {
     setLoading(true)
@@ -153,12 +162,22 @@ export default function ExchangeRateSettings() {
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Transaction Currency</label>
+          <input
+            className="input mb-2"
+            placeholder="Search by code or name"
+            value={currencySearch}
+            onChange={(e) => setCurrencySearch(e.target.value)}
+            onBlur={() => setCurrencySearch('')}
+          />
           <select className="input" value={selectedCurrency} onChange={(e) => setSelectedCurrency(e.target.value)}>
-            {quoteCurrencies.map((currency) => (
+            {filteredQuoteCurrencies.map((currency) => (
               <option key={currency.code} value={currency.code}>
                 {currency.code} — {currency.name}
               </option>
             ))}
+            {filteredQuoteCurrencies.length === 0 && (
+              <option value="" disabled>No currency matches search</option>
+            )}
           </select>
         </div>
         <div>

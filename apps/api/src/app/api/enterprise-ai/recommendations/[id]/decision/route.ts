@@ -19,6 +19,14 @@ const ACTION_STATUS_MAP = {
   resolve: 'RESOLVED',
 } as const
 
+const ACTION_OUTCOME_SCORE = {
+  accept: 1,
+  resolve: 0.7,
+  snooze: 0,
+  reject: -0.7,
+  not_relevant: -0.5,
+} as const
+
 export async function OPTIONS() {
   return handleOptions()
 }
@@ -72,6 +80,19 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
           dimensions: {
             action: payload.action,
             recommendationType: recommendation.recommendationType,
+          },
+        },
+      })
+
+      await tx.enterpriseAiMetric.create({
+        data: {
+          tenantId: access.tenantId,
+          metricKey: 'recommendation_outcome_score',
+          metricValue: ACTION_OUTCOME_SCORE[payload.action],
+          dimensions: {
+            action: payload.action,
+            recommendationType: recommendation.recommendationType,
+            recommendationId: recommendation.id,
           },
         },
       })

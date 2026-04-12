@@ -7,6 +7,7 @@ import { logAudit } from '@/lib/audit'
 
 const createSchema = z.object({
   name: z.string().min(1),
+  category: z.string().trim().min(1).default('Uncategorized'),
   description: z.string().optional(),
   type: z.enum(['GOODS', 'SERVICE']).default('GOODS'),
   unit: z.string().default('pcs'),
@@ -31,6 +32,7 @@ export async function GET(req: NextRequest) {
     const subsidiaryId = searchParams.get('subsidiaryId')
     const status = searchParams.get('status')
     const type = searchParams.get('type')
+    const category = searchParams.get('category')
     const search = searchParams.get('search')
     const barcode = searchParams.get('barcode')
     const page = parseInt(searchParams.get('page') || '1')
@@ -47,6 +49,7 @@ export async function GET(req: NextRequest) {
       ...(subsidiaryId ? { subsidiaryId } : user.subsidiaryId ? { subsidiaryId: user.subsidiaryId } : {}),
       ...(allowedStatuses ? { status: { in: allowedStatuses as ('ACTIVE' | 'DRAFT' | 'ARCHIVED')[] } } : {}),
       ...(type ? { type: type as 'GOODS' | 'SERVICE' } : {}),
+      ...(category ? { category: { equals: category, mode: 'insensitive' as const } } : {}),
       ...(barcode ? { barcode } : {}),
       ...(search ? { name: { contains: search, mode: 'insensitive' as const } } : {}),
     }
@@ -105,6 +108,7 @@ export async function POST(req: NextRequest) {
       entityId: product.id,
       newValues: {
         name: product.name,
+        category: product.category,
         type: product.type,
         quantity: product.quantity,
         sellingPrice: product.sellingPrice,

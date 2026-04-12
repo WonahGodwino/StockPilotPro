@@ -3,6 +3,41 @@ import { prisma } from '@/lib/prisma'
 import { authenticate, apiError } from '@/lib/auth'
 import { isSuperAdmin } from '@/lib/rbac'
 
+function toNumber(value: unknown): number {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : 0
+}
+
+async function getTransactionToBaseRate(baseTenantId: string, baseCurrency: string, transactionCurrency: string): Promise<number> {
+  if (transactionCurrency === baseCurrency) return 1
+
+  const direct = await prisma.currencyRate.findFirst({
+    where: { tenantId: baseTenantId, fromCurrency: baseCurrency, toCurrency: transactionCurrency },
+    orderBy: { date: 'desc' },
+    select: { rate: true },
+  })
+  if (direct?.rate) return Number(direct.rate)
+
+  const inverse = await prisma.currencyRate.findFirst({
+    where: { tenantId: baseTenantId, fromCurrency: transactionCurrency, toCurrency: baseCurrency },
+    orderBy: { date: 'desc' },
+    select: { rate: true },
+  })
+  if (inverse?.rate) return 1 / Number(inverse.rate)
+
+  return 1
+}
+
+function toBaseExpenseAmount(amountRaw: unknown, fxRateRaw: unknown, currency: string, baseCurrency: string): number {
+  const amount = toNumber(amountRaw)
+  if (!Number.isFinite(amount)) return 0
+  if (currency === baseCurrency) return amount
+
+  const fxRate = Number(fxRateRaw)
+  if (!Number.isFinite(fxRate) || fxRate <= 0) return amount
+  return amount / fxRate
+}
+
 function getDateRange(period: string): { startDate: Date; endDate: Date } {
   const endDate = new Date()
   const startDate = new Date()
@@ -116,7 +151,7 @@ export async function GET(req: NextRequest) {
     const expiredSubscriptions = allSubscriptions.filter((s) => s.status === 'EXPIRED').length
     const suspendedSubscriptions = allSubscriptions.filter((s) => s.status === 'SUSPENDED').length
 
-    // Calculate total revenue and build per-plan breakdown
+    // Calculate current active-subscription billing and build per-plan breakdown
     const activeSubscriptions_list = allSubscriptions.filter((s) => s.status === 'ACTIVE')
     const billingCurrencies = Array.from(
       new Set(
@@ -170,6 +205,67 @@ export async function GET(req: NextRequest) {
       })
     )
     const totalRevenue = convertedRevenueMap.reduce((sum, { baseAmount }) => sum + baseAmount, 0)
+
+    // Lifetime and selected-period financial KPIs across tenant businesses (excluding platform owner)
+    const [lifetimeSubscriptionTransactions, periodSubscriptionTransactions, allExpenses, periodExpenses] = await Promise.all([
+      prisma.subscriptionTransaction.findMany({
+        where: {
+          tenantId: { not: user.tenantId! },
+          status: { in: ['ACTIVE', 'VERIFIED'] },
+        },
+        select: { amount: true, currency: true },
+      }),
+      prisma.subscriptionTransaction.findMany({
+        where: {
+          tenantId: { not: user.tenantId! },
+          status: { in: ['ACTIVE', 'VERIFIED'] },
+          createdAt: { gte: startDate, lte: endDate },
+        },
+        select: { amount: true, currency: true },
+      }),
+      prisma.expense.findMany({
+        where: {
+          tenantId: { not: user.tenantId! },
+          archived: false,
+        },
+        select: { amount: true, currency: true, fxRate: true },
+      }),
+      prisma.expense.findMany({
+        where: {
+          tenantId: { not: user.tenantId! },
+          archived: false,
+          date: { gte: startDate, lte: endDate },
+        },
+        select: { amount: true, currency: true, fxRate: true },
+      }),
+    ])
+
+    const convertTransactionRows = async (rows: Array<{ amount: unknown; currency: string }>): Promise<number> => {
+      const converted = await Promise.all(rows.map(async (row) => {
+        const amount = toNumber(row.amount)
+        if (row.currency === baseCurrency) return amount
+        const rate = await getTransactionToBaseRate(user.tenantId!, baseCurrency, row.currency)
+        return amount / rate
+      }))
+      return converted.reduce((sum, val) => sum + val, 0)
+    }
+
+    const [lifetimeRevenue, periodRevenue] = await Promise.all([
+      convertTransactionRows(lifetimeSubscriptionTransactions),
+      convertTransactionRows(periodSubscriptionTransactions),
+    ])
+
+    const lifetimeExpenses = allExpenses.reduce(
+      (sum, row) => sum + toBaseExpenseAmount(row.amount, row.fxRate, row.currency, baseCurrency),
+      0,
+    )
+    const periodExpensesValue = periodExpenses.reduce(
+      (sum, row) => sum + toBaseExpenseAmount(row.amount, row.fxRate, row.currency, baseCurrency),
+      0,
+    )
+
+    const lifetimeProfit = lifetimeRevenue - lifetimeExpenses
+    const periodProfit = periodRevenue - periodExpensesValue
 
     // Group active subscriptions by plan
     const planMap = new Map<string, { planId: string; planName: string; priceCurrency: string; count: number; revenue: number }>()
@@ -264,6 +360,21 @@ export async function GET(req: NextRequest) {
         expiredSubscriptions,
         suspendedSubscriptions,
         totalRevenue,
+        financials: {
+          lifetime: {
+            revenue: Number(lifetimeRevenue.toFixed(2)),
+            expenses: Number(lifetimeExpenses.toFixed(2)),
+            profit: Number(lifetimeProfit.toFixed(2)),
+          },
+          period: {
+            key: period,
+            startDate: startDate.toISOString(),
+            endDate: endDate.toISOString(),
+            revenue: Number(periodRevenue.toFixed(2)),
+            expenses: Number(periodExpensesValue.toFixed(2)),
+            profit: Number(periodProfit.toFixed(2)),
+          },
+        },
         baseCurrency,
         planBreakdown,
         subscriptionTrend,

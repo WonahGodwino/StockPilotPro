@@ -18,7 +18,15 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ data: { ok: true } })
   } catch (err) {
-    if ((err as Error).message === 'Unauthorized') return apiError('Unauthorized', 401)
+    const message = (err as Error).message || ''
+    if (
+      message === 'Unauthorized'
+      || message === 'No token provided'
+      || message.toLowerCase().includes('token')
+      || message.toLowerCase().includes('jwt')
+    ) {
+      return apiError('Unauthorized', 401)
+    }
     console.error('[USER PRESENCE POST]', err)
     return apiError('Internal server error', 500)
   }

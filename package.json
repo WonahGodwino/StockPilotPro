@@ -9,6 +9,10 @@
     "dev": "concurrently \"npm run dev -w stockpilot-api\" \"npm run dev -w stockpilot-client\"",
     "build": "npm run build -w stockpilot-api && npm run build -w stockpilot-client",
     "lint": "npm run lint -w stockpilot-api && npm run lint -w stockpilot-client",
+    "test:enterprise-ai": "npm run test:enterprise-ai -w stockpilot-api",
+    "test:enterprise-ai-endpoints": "npm run test:enterprise-ai-endpoints -w stockpilot-api",
+    "test:enterprise-ai-http": "npm run test:enterprise-ai-http -w stockpilot-api",
+    "test:enterprise-ai-all": "npm run test:enterprise-ai-all -w stockpilot-api",
     "db:migrate": "npm run db:migrate -w stockpilot-api",
     "db:seed": "npm run db:seed -w stockpilot-api",
     "db:studio": "npm run db:studio -w stockpilot-api"

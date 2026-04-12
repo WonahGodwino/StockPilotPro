@@ -51,7 +51,7 @@ async function waitForServerReady(child: ChildProcess): Promise<void> {
   throw new Error('Timed out waiting for Next API server to become ready')
 }
 
-async function postJson(path: string, body: unknown, token?: string) {
+async function postJson(path: string, body: unknown, token?: string, extraHeaders?: Record<string, string>) {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   try {
@@ -60,6 +60,7 @@ async function postJson(path: string, body: unknown, token?: string) {
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(extraHeaders || {}),
     },
     body: JSON.stringify(body),
     signal: controller.signal,
@@ -75,6 +76,24 @@ async function getJson(path: string, token: string) {
   try {
     return await fetch(`${BASE_URL}${path}`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    })
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function patchJson(path: string, body: unknown, token?: string) {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  try {
+    return await fetch(`${BASE_URL}${path}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
       signal: controller.signal,
     })
   } finally {
@@ -221,6 +240,7 @@ async function ensureEnterpriseFixtures() {
 async function run() {
   const nextBin = require.resolve('next/dist/bin/next')
   let childError: Error | null = null
+  process.env.ENTERPRISE_AI_JOB_SECRET = process.env.ENTERPRISE_AI_JOB_SECRET || 'integration-enterprise-job-secret'
   console.log('enterprise-ai-http.spec: building Next app for black-box test')
   execSync('npm run build', { cwd: process.cwd(), stdio: 'ignore' })
 
@@ -307,6 +327,12 @@ async function run() {
     const salesBlocked = await getJson('/api/enterprise-ai/context', salesUserToken)
     assert.equal(salesBlocked.status, 403, 'Salesperson should be blocked from enterprise-ai context')
 
+    const simulationBlocked = await postJson('/api/enterprise-ai/simulations', {
+      simulationType: 'EXPENSE_CAP',
+      expenseCap: { capPercent: 10 },
+    }, salesUserToken)
+    assert.equal(simulationBlocked.status, 403, 'Salesperson should be blocked from enterprise-ai simulations')
+
     // Cross-tenant isolation: BUSINESS_ADMIN token scoped to enterprise tenant must ignore tenantId query override
     const forgedEnterpriseBusinessAdminToken = makeToken({
       userId: 'integration-enterprise-ba',
@@ -320,6 +346,104 @@ async function run() {
     assert.equal(scopedMetrics.status, 200, 'Enterprise business admin token should access metrics')
     const scopedMetricsBody = await scopedMetrics.json() as { data: { tenantId: string } }
     assert.equal(scopedMetricsBody.data.tenantId, fixture.enterpriseTenantId, 'Metrics tenant scope must remain caller tenant for non-superadmin')
+
+    const simulationAllowed = await postJson('/api/enterprise-ai/simulations', {
+      simulationType: 'EXPENSE_CAP',
+      horizonDays: 30,
+      expenseCap: { capPercent: 12 },
+    }, forgedEnterpriseBusinessAdminToken)
+    assert.equal(simulationAllowed.status, 200, 'Enterprise business admin should run deterministic simulations')
+
+    const actionRecommendation = await postJson('/api/enterprise-ai/recommendations', {
+      recommendationType: 'BRANCH_PERFORMANCE',
+      horizonDays: 30,
+    }, forgedEnterpriseBusinessAdminToken)
+    assert.equal(actionRecommendation.status, 201, 'Enterprise business admin should generate recommendation for action tracking')
+    const actionRecommendationBody = await actionRecommendation.json() as { data: { id: string } }
+    const trackedRecommendationId = actionRecommendationBody.data.id
+
+    const actionCreateBlocked = await postJson('/api/enterprise-ai/actions', {
+      recommendationId: trackedRecommendationId,
+      expectedImpactScore: 32,
+    }, salesUserToken)
+    assert.equal(actionCreateBlocked.status, 403, 'Salesperson should be blocked from action tracker creation')
+
+    const actionCreateAllowed = await postJson('/api/enterprise-ai/actions', {
+      recommendationId: trackedRecommendationId,
+      ownerUserId: 'integration-enterprise-ba',
+      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      expectedImpactScore: 32,
+      impactNotes: 'Protect branch margin over next week',
+    }, forgedEnterpriseBusinessAdminToken)
+    assert.equal(actionCreateAllowed.status, 201, 'Enterprise business admin should create action tracker')
+
+    const actionUpdateAllowed = await patchJson(`/api/enterprise-ai/actions/${trackedRecommendationId}`, {
+      status: 'IN_PROGRESS',
+      progressNote: 'Manager started execution',
+      realizedImpactScore: 11,
+    }, forgedEnterpriseBusinessAdminToken)
+    assert.equal(actionUpdateAllowed.status, 200, 'Enterprise business admin should update action tracker lifecycle')
+
+    const actionListAllowed = await getJson('/api/enterprise-ai/actions?status=IN_PROGRESS&limit=20', forgedEnterpriseBusinessAdminToken)
+    assert.equal(actionListAllowed.status, 200, 'Enterprise business admin should list action tracker items')
+    const actionListBody = await actionListAllowed.json() as { data: { total: number; items: Array<{ recommendationId: string }> } }
+    assert.ok(actionListBody.data.total >= 1, 'Action tracker list should return at least one item')
+    assert.ok(actionListBody.data.items.some((item) => item.recommendationId === trackedRecommendationId), 'Tracked recommendation should appear in action list')
+
+    const alertPolicyBlocked = await getJson('/api/enterprise-ai/alerts/policy', salesUserToken)
+    assert.equal(alertPolicyBlocked.status, 403, 'Salesperson should be blocked from alert policy endpoint')
+
+    const alertPolicyRead = await getJson('/api/enterprise-ai/alerts/policy', forgedEnterpriseBusinessAdminToken)
+    assert.equal(alertPolicyRead.status, 200, 'Enterprise business admin should read alert policy')
+
+    const alertPolicyUpdate = await patchJson('/api/enterprise-ai/alerts/policy', {
+      minPriorityToNotify: 'P2',
+      quietHoursStartUtc: 22,
+      quietHoursEndUtc: 6,
+      suppressAfterAckHours: 12,
+      dedupeHoursByPriority: {
+        P1: 1,
+        P2: 4,
+        P3: 12,
+      },
+    }, forgedEnterpriseBusinessAdminToken)
+    assert.equal(alertPolicyUpdate.status, 200, 'Enterprise business admin should update alert policy')
+    const alertPolicyUpdateBody = await alertPolicyUpdate.json() as { data: { policy: { minPriorityToNotify: string }; signalId: string | null; revisions: Array<{ id: string }> } }
+    assert.equal(alertPolicyUpdateBody.data.policy.minPriorityToNotify, 'P2', 'Updated policy should be persisted')
+    assert.ok((alertPolicyUpdateBody.data.revisions || []).length >= 1, 'Policy revisions should be returned')
+
+    const alertPolicySecondUpdate = await patchJson('/api/enterprise-ai/alerts/policy', {
+      minPriorityToNotify: 'P1',
+      dedupeHoursByPriority: {
+        P1: 2,
+        P2: 6,
+        P3: 16,
+      },
+    }, forgedEnterpriseBusinessAdminToken)
+    assert.equal(alertPolicySecondUpdate.status, 200, 'Enterprise business admin should perform second policy update')
+    const alertPolicySecondUpdateBody = await alertPolicySecondUpdate.json() as { data: { policy: { minPriorityToNotify: string }; revisions: Array<{ id: string }> } }
+    assert.equal(alertPolicySecondUpdateBody.data.policy.minPriorityToNotify, 'P1', 'Second update should be active')
+
+    const rollbackTarget = alertPolicySecondUpdateBody.data.revisions[1]?.id || alertPolicyUpdateBody.data.signalId
+    assert.ok(Boolean(rollbackTarget), 'Rollback target should be available')
+
+    const alertPolicyRollback = await patchJson('/api/enterprise-ai/alerts/policy', {
+      restoreSignalId: rollbackTarget,
+    }, forgedEnterpriseBusinessAdminToken)
+    assert.equal(alertPolicyRollback.status, 200, 'Enterprise business admin should restore policy from history')
+    const alertPolicyRollbackBody = await alertPolicyRollback.json() as { data: { policy: { minPriorityToNotify: string } } }
+    assert.equal(alertPolicyRollbackBody.data.policy.minPriorityToNotify, 'P2', 'Rollback should restore previously selected revision')
+
+    const schedulerUnauthorized = await postJson('/api/enterprise-ai/jobs/refresh', { dryRun: true }, undefined)
+    assert.equal(schedulerUnauthorized.status, 401, 'Scheduler endpoint should require internal secret')
+
+    const schedulerAuthorized = await postJson(
+      '/api/enterprise-ai/jobs/refresh',
+      { tenantLimit: 2, dryRun: true },
+      undefined,
+      { 'x-enterprise-job-secret': String(process.env.ENTERPRISE_AI_JOB_SECRET) },
+    )
+    assert.equal(schedulerAuthorized.status, 200, 'Scheduler endpoint should accept valid internal secret')
 
     // Sensitive anomaly visibility boundary
     const anomalyBlocked = await postJson('/api/enterprise-ai/recommendations', {

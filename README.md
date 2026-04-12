@@ -173,6 +173,12 @@ StockPilotPro (root)
 │
 ├─ docs/
 │  ├─ GITHUB_ISSUES.md                   (All tracked issues with descriptions)
+│  ├─ ENTERPRISE_AI_BRANCH_ONBOARDING.md (10-minute branch team onboarding)
+│  ├─ ENTERPRISE_AI_QUICKSTART.md        (1-page business quickstart)
+│  ├─ ENTERPRISE_AI_TRAINING_DECK.md     (Facilitator-ready training deck script)
+│  ├─ ENTERPRISE_AI_USER_GUIDE.md        (User guide for maximizing Enterprise AI value)
+│  ├─ ENTERPRISE_AI_MODEL_INTEGRATION.md (Production model integration guide)
+│  ├─ ENTERPRISE_AI_SCHEDULER.md         (Scheduler runbook)
 │  └─ MILESTONE_BOARD.md                 (Milestone/epic roadmap)
 │
 ├─ scripts/

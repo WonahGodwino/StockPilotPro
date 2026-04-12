@@ -24,6 +24,7 @@ export default function ExpenseModal({ expense, pendingLocalId = null, onClose, 
   const [rateLoading, setRateLoading] = useState(false)
   const [rateSource, setRateSource] = useState<'live' | 'snapshot' | 'manual' | 'same-currency' | null>(null)
   const [fxRateEditedManually, setFxRateEditedManually] = useState(false)
+  const [currencySearch, setCurrencySearch] = useState('')
   const [form, setForm] = useState({
     title: expense?.title || '',
     amount: Number(expense?.amount ?? 0),
@@ -42,6 +43,11 @@ export default function ExpenseModal({ expense, pendingLocalId = null, onClose, 
   }, [isSalesperson, user?.subsidiaryId, form.subsidiaryId])
 
   const showFxRate = form.currency !== baseCurrency
+  const filteredCurrencies = SUPPORTED_CURRENCIES.filter((currency) => {
+    const q = currencySearch.trim().toLowerCase()
+    if (!q) return true
+    return currency.code.toLowerCase().includes(q) || currency.name.toLowerCase().includes(q)
+  })
 
   const loadLiveRate = async (currency: string) => {
     if (currency === baseCurrency) {
@@ -174,14 +180,24 @@ export default function ExpenseModal({ expense, pendingLocalId = null, onClose, 
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+              <input
+                className="input mb-2"
+                placeholder="Search by code or name"
+                value={currencySearch}
+                onChange={(e) => setCurrencySearch(e.target.value)}
+                onBlur={() => setCurrencySearch('')}
+              />
               <select
                 className="input"
                 value={form.currency}
                 onChange={(e) => setForm({ ...form, currency: e.target.value, fxRate: e.target.value === baseCurrency ? 1 : form.fxRate })}
               >
-                {SUPPORTED_CURRENCIES.map((c) => (
+                {filteredCurrencies.map((c) => (
                   <option key={c.code} value={c.code}>{c.code} — {c.name}</option>
                 ))}
+                {filteredCurrencies.length === 0 && (
+                  <option value="" disabled>No currency matches search</option>
+                )}
               </select>
             </div>
             {showFxRate && (

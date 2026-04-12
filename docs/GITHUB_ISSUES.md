@@ -885,5 +885,137 @@ Create automated tests validating Enterprise entitlement gating, tenant isolatio
 
 ---
 
-*Total Issues: 66*
+## EPIC 5 — Advanced Enterprise Assistant Engine (Milestone 5)
+
+### Issue #67 — Advanced snapshot feature engineering and freshness strategy
+**Labels:** `enhancement` `backend` `testing`
+**Priority:** P1
+
+Extend tenant snapshot generation with richer operational features: weekday seasonality, discount intensity, stockout days, category margin bands, and branch-level expense quality checks. Add event-triggered refresh strategy for high-impact transactions.
+
+**Acceptance Criteria:**
+- [ ] Snapshot includes branch, category, and product derived features required for advanced assistant reasoning
+- [ ] Snapshot refresh can be triggered by major sales, stock updates, and expense spikes
+- [ ] Snapshot freshness policy is configurable and documented
+
+---
+
+### Issue #68 — Weighted opportunity and risk scoring engine
+**Labels:** `feature` `backend` `testing`
+**Priority:** P1
+
+Implement deterministic scoring for recommendations using impact, confidence, urgency, and execution feasibility. Produce ranked actions with explicit score breakdown for transparency.
+
+**Acceptance Criteria:**
+- [ ] Recommendations include `opportunityScore` and `riskScore` with component breakdown
+- [ ] Ranking is deterministic and reproducible for the same input snapshot
+- [ ] Scoring behavior is covered by unit tests
+
+---
+
+### Issue #69 — Multi-horizon comparative analytics (7d/30d/rolling)
+**Labels:** `feature` `backend` `frontend`
+**Priority:** P1
+
+Add comparative analysis windows (last 7d vs prior 7d, last 30d vs prior 30d, rolling trend) across branches and products with explicit change decomposition (volume/price/mix where possible).
+
+**Acceptance Criteria:**
+- [ ] API exposes selectable comparison windows and returns normalized deltas
+- [ ] Branch and product comparisons are available in a single assistant grounding payload
+- [ ] UI can display selected horizon and key comparative deltas
+
+---
+
+### Issue #70 — Deterministic what-if simulation engine
+**Labels:** `feature` `backend`
+**Priority:** P1
+
+Implement scenario simulation endpoints for pricing, stock transfer, and expense cap strategies. Return projected effects on margin, stockout risk, and net position.
+
+**Acceptance Criteria:**
+- [ ] Supports at least three simulation types: price adjustment, stock transfer, expense cap
+- [ ] Returns projected delta outputs with assumptions listed
+- [ ] Simulation engine is tenant-scoped and role-gated
+
+---
+
+### Issue #71 — Decision outcome attribution and reranking feedback loop
+**Labels:** `enhancement` `backend` `testing`
+**Priority:** P1
+
+Link recommendation decisions to realized outcomes after 7/14/30 days. Use outcome performance to rerank future recommendations and suppress low-value patterns.
+
+**Acceptance Criteria:**
+- [ ] Outcomes are attributed to recommendation IDs and time windows
+- [ ] Reranking influences recommendation order based on historical realized impact
+- [ ] Failing/low-impact recommendation patterns are automatically down-weighted
+
+---
+
+### Issue #72 — Robust anomaly detection baseline and false-positive control
+**Labels:** `enhancement` `backend` `security` `testing`
+**Priority:** P1
+
+Upgrade anomaly detection to branch-aware robust baselines (median/MAD, z-score guards) with duplicate-expense similarity rules and confidence bands.
+
+**Acceptance Criteria:**
+- [ ] Anomaly detection uses branch-specific baselines
+- [ ] Duplicate expense detector uses title/amount/time similarity criteria
+- [ ] False-positive rate metric is tracked and reported
+
+---
+
+### Issue #73 — Action plan tracker with ownership and due dates
+**Labels:** `feature` `frontend` `backend`
+**Priority:** P2
+
+Convert assistant actions into executable tasks with owner, due date, status, and expected impact. Add weekly review views for branch managers and admins.
+
+**Acceptance Criteria:**
+- [ ] Assistant outputs can be converted to tracked actions in one click
+- [ ] Actions support owner assignment and lifecycle states
+- [ ] Weekly review board shows overdue and high-impact items first
+
+---
+
+### Issue #74 — Enterprise Assistant quality KPI dashboard
+**Labels:** `enhancement` `backend` `frontend` `infra`
+**Priority:** P2
+
+Build quality dashboard for assistant effectiveness: adoption rate, completion rate, realized impact, time-to-decision, and anomaly precision.
+
+**Acceptance Criteria:**
+- [ ] KPI endpoints return tenant-level and aggregate metrics
+- [ ] Dashboard supports period filter and trend lines
+- [ ] Alerts can be configured for quality regressions
+
+---
+
+### Issue #75 — Scheduled refresh and background intelligence jobs
+**Labels:** `enhancement` `backend` `infra`
+**Priority:** P2
+
+Add background jobs for periodic snapshot recomputation, recommendation precomputation, and stale-context invalidation for high-volume tenants.
+
+**Acceptance Criteria:**
+- [ ] Scheduler supports tenant-safe batched execution
+- [ ] Jobs are observable with status and duration metrics
+- [ ] Retry and dead-letter behavior is documented
+
+---
+
+### Issue #76 — Advanced engine regression and benchmark suite
+**Labels:** `testing` `backend` `frontend`
+**Priority:** P1
+
+Create regression suite for advanced assistant engine covering score stability, comparative analytics correctness, simulation output sanity, and reranking behavior under fixture datasets.
+
+**Acceptance Criteria:**
+- [ ] Deterministic tests validate stable recommendation ordering for fixed fixtures
+- [ ] Simulation outputs are validated against expected bounds
+- [ ] CI suite blocks regressions in advanced assistant KPI baselines
+
+---
+
+*Total Issues: 76*
 *Last updated: Auto-generated by GitHub Copilot*

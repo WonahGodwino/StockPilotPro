@@ -12,6 +12,8 @@ import { makeCurrencyFormatter } from '@/lib/currency'
 import SuperAdminDashboard from '@/components/layout/SuperAdminDashboard'
 import AgentDashboard from '@/components/layout/AgentDashboard'
 
+type DashboardPeriod = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'custom'
+
 interface ExpiringProductsData {
   expiring: Product[]
   expired: Product[]
@@ -127,16 +129,30 @@ export default function Dashboard() {
   const [report, setReport] = useState<ReportSummary | null>(null)
   const [expiringProducts, setExpiringProducts] = useState<ExpiringProductsData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [period, setPeriod] = useState<DashboardPeriod>('monthly')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
+  const [appliedCustomFrom, setAppliedCustomFrom] = useState('')
+  const [appliedCustomTo, setAppliedCustomTo] = useState('')
 
   const dashboardCacheKey = `stockpilot:dashboard-snapshot:${user?.tenantId || 'none'}:${user?.role || 'none'}`
 
   useEffect(() => {
     const load = async () => {
+      if (period === 'custom' && (!appliedCustomFrom || !appliedCustomTo)) return
       setLoading(true)
       try {
+        const params = new URLSearchParams()
+        params.set('period', period)
+        if (period === 'custom') {
+          params.set('from', appliedCustomFrom)
+          params.set('to', appliedCustomTo)
+        }
+        const reportsQuery = params.toString()
+
         const [d, r, e] = await Promise.all([
-          api.get('/reports/dashboard'),
-          api.get('/reports?period=monthly'),
+          api.get(`/reports/dashboard?${reportsQuery}`),
+          api.get(`/reports?${reportsQuery}`),
           api.get('/products/expiring?daysAhead=30'),
         ])
 
@@ -176,7 +192,7 @@ export default function Dashboard() {
     }
 
     void load()
-  }, [dashboardCacheKey])
+  }, [dashboardCacheKey, period, appliedCustomFrom, appliedCustomTo])
 
   if (loading) {
     return <DashboardSkeleton />
@@ -198,11 +214,55 @@ export default function Dashboard() {
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
         <div className="mt-1 flex items-center gap-2">
-          <p className="text-sm text-gray-500">Overview for this month</p>
+          <p className="text-sm text-gray-500">Overview with lifetime and selected-period financials</p>
           <span className="inline-flex items-center rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700 border border-primary-100">
             Base Currency: {baseCurrency}
           </span>
         </div>
+        {canViewPL && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {(['daily', 'weekly', 'monthly', 'quarterly', 'yearly', 'custom'] as DashboardPeriod[]).map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setPeriod(p)}
+                className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                  period === p ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {p.charAt(0).toUpperCase() + p.slice(1)}
+              </button>
+            ))}
+            {period === 'custom' && (
+              <>
+                <input
+                  type="date"
+                  value={customFrom}
+                  onChange={(e) => setCustomFrom(e.target.value)}
+                  className="px-2 py-1 text-xs border rounded-lg"
+                />
+                <input
+                  type="date"
+                  value={customTo}
+                  onChange={(e) => setCustomTo(e.target.value)}
+                  className="px-2 py-1 text-xs border rounded-lg"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (customFrom && customTo) {
+                      setAppliedCustomFrom(customFrom)
+                      setAppliedCustomTo(customTo)
+                    }
+                  }}
+                  className="px-3 py-1 text-xs rounded-lg bg-primary-600 text-white hover:bg-primary-700"
+                >
+                  Apply
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Stats Grid */}
@@ -320,6 +380,54 @@ export default function Dashboard() {
         </div>
       )}
 
+      {canViewPL && dashboard?.financials && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="card p-6 border border-primary-200 bg-primary-50/40">
+            <h3 className="text-sm font-semibold text-primary-700 uppercase">Ever-Generated Financials</h3>
+            <p className="text-xs text-primary-600 mt-1">All-time totals since records began</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+              <div className="rounded-lg bg-white p-3 border border-primary-100">
+                <p className="text-xs text-gray-500">Revenue</p>
+                <p className="text-base font-semibold text-gray-900 mt-1">{fmt(dashboard.financials.lifetime.revenue)}</p>
+              </div>
+              <div className="rounded-lg bg-white p-3 border border-primary-100">
+                <p className="text-xs text-gray-500">Expenses</p>
+                <p className="text-base font-semibold text-gray-900 mt-1">{fmt(dashboard.financials.lifetime.expenses)}</p>
+              </div>
+              <div className="rounded-lg bg-white p-3 border border-primary-100">
+                <p className="text-xs text-gray-500">Profit</p>
+                <p className={`text-base font-semibold mt-1 ${dashboard.financials.lifetime.profit >= 0 ? 'text-success-700' : 'text-danger-700'}`}>
+                  {fmt(dashboard.financials.lifetime.profit)}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="card p-6 border border-warning-200 bg-warning-50/40">
+            <h3 className="text-sm font-semibold text-warning-700 uppercase">Period-Filtered Financials</h3>
+            <p className="text-xs text-warning-700 mt-1">
+              {new Date(dashboard.financials.period.startDate).toLocaleDateString()} - {new Date(dashboard.financials.period.endDate).toLocaleDateString()}
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
+              <div className="rounded-lg bg-white p-3 border border-warning-100">
+                <p className="text-xs text-gray-500">Revenue</p>
+                <p className="text-base font-semibold text-gray-900 mt-1">{fmt(dashboard.financials.period.revenue)}</p>
+              </div>
+              <div className="rounded-lg bg-white p-3 border border-warning-100">
+                <p className="text-xs text-gray-500">Expenses</p>
+                <p className="text-base font-semibold text-gray-900 mt-1">{fmt(dashboard.financials.period.expenses)}</p>
+              </div>
+              <div className="rounded-lg bg-white p-3 border border-warning-100">
+                <p className="text-xs text-gray-500">Profit</p>
+                <p className={`text-base font-semibold mt-1 ${dashboard.financials.period.profit >= 0 ? 'text-success-700' : 'text-danger-700'}`}>
+                  {fmt(dashboard.financials.period.profit)}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Sales Trend */}
@@ -345,9 +453,9 @@ export default function Dashboard() {
         {/* Monthly Revenue vs Expenses */}
         {canViewPL && report && (
           <div className="card p-6">
-            <h3 className="font-semibold text-gray-900 mb-4">Monthly Revenue vs Expenses</h3>
+            <h3 className="font-semibold text-gray-900 mb-4">Revenue vs Expenses ({period === 'custom' ? 'Custom' : period.charAt(0).toUpperCase() + period.slice(1)})</h3>
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={[{ name: 'This Month', Revenue: report.totalSales, Expenses: report.totalExpenses }]}>
+              <BarChart data={[{ name: period === 'custom' ? 'Selected Range' : period, Revenue: report.totalSales, Expenses: report.totalExpenses }]}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => fmt(v)} />

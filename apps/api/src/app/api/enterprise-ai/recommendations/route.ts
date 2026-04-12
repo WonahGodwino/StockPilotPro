@@ -10,6 +10,7 @@ import {
 } from '@/lib/enterprise-ai'
 import { isUnsafeAssistantPrompt } from '@/lib/enterprise-ai-policy'
 import { isRecommendationTypeAllowedForRole } from '@/lib/enterprise-ai-route-policy'
+import { generateEnterpriseAssistantResponse } from '@/lib/enterprise-ai-assistant'
 
 const recommendationTypeSchema = z.enum([
   'DEMAND_FORECAST',
@@ -26,7 +27,8 @@ const postSchema = z.object({
   recommendationType: recommendationTypeSchema,
   subsidiaryId: z.string().optional(),
   productId: z.string().optional(),
-  prompt: z.string().max(1000).optional(),
+  prompt: z.string().max(2000).optional(),
+  conversationId: z.string().max(120).optional(),
   horizonDays: z.number().int().min(1).max(180).optional(),
 })
 
@@ -40,6 +42,88 @@ function confidenceFromVolume(volume: number): number {
   return Math.min(0.92, 0.35 + volume / 350)
 }
 
+function mean(values: number[]): number {
+  if (!values.length) return 0
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
+function stdDev(values: number[]): number {
+  if (values.length <= 1) return 0
+  const m = mean(values)
+  const variance = values.reduce((sum, value) => sum + ((value - m) ** 2), 0) / values.length
+  return Math.sqrt(variance)
+}
+
+function dayKeyUtc(date: Date): string {
+  return date.toISOString().slice(0, 10)
+}
+
+function buildDailyDemandSeries(args: {
+  since: Date
+  windowDays: number
+  rows: Array<{ quantity: unknown; createdAt: Date }>
+}): number[] {
+  const bucket = new Map<string, number>()
+  for (const row of args.rows) {
+    const key = dayKeyUtc(row.createdAt)
+    bucket.set(key, (bucket.get(key) || 0) + toNumber(row.quantity))
+  }
+
+  const series: number[] = []
+  for (let idx = 0; idx < args.windowDays; idx += 1) {
+    const day = new Date(args.since.getTime() + idx * 24 * 60 * 60 * 1000)
+    const key = dayKeyUtc(day)
+    series.push(bucket.get(key) || 0)
+  }
+  return series
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value))
+}
+
+function toRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  return { value }
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((x): x is string => typeof x === 'string').map((x) => x.trim()).filter(Boolean)
+}
+
+function signalExpensePressureScore(signals: Array<{ signalKey: string; signalValue: unknown; tags: unknown }>): number {
+  let score = 0
+  for (const signal of signals) {
+    const text = [
+      signal.signalKey,
+      ...toStringArray(signal.tags),
+      JSON.stringify(toRecord(signal.signalValue)),
+    ].join(' ').toLowerCase()
+
+    if (/inflation|fuel|fx|currency|supply|freight|import|shortage/.test(text)) score += 1
+    if (/tax|regulatory|duty|compliance/.test(text)) score += 0.6
+  }
+  return clamp(score / 6, 0, 1)
+}
+
+function outcomeMultiplierFromStatuses(statuses: Array<{ status: string }>): number {
+  if (statuses.length === 0) return 1
+  const positive = statuses.filter((x) => x.status === 'ACCEPTED' || x.status === 'RESOLVED').length
+  const negative = statuses.filter((x) => x.status === 'REJECTED' || x.status === 'NOT_RELEVANT').length
+  const score = (positive - negative) / statuses.length
+  return clamp(1 + score * 0.2, 0.8, 1.2)
+}
+
+function computePriorityScore(confidence: number, riskScore: number, outcomeMultiplier: number): number {
+  const confidenceN = clamp(confidence, 0, 1)
+  const riskN = clamp(riskScore, 0, 1)
+  const base = (confidenceN * 0.6 + (1 - riskN) * 0.4) * 100
+  return Math.round(clamp(base * outcomeMultiplier, 1, 100))
+}
+
 async function createRecommendationFromType(args: {
   tenantId: string
   userId: string
@@ -47,10 +131,11 @@ async function createRecommendationFromType(args: {
   subsidiaryId?: string
   productId?: string
   prompt?: string
+  conversationId?: string
   horizonDays?: number
   snapshot: Awaited<ReturnType<typeof getFreshFeatureSnapshot>>
 }) {
-  const { tenantId, recommendationType, subsidiaryId, productId, prompt, snapshot } = args
+  const { tenantId, recommendationType, subsidiaryId, productId, prompt, conversationId, snapshot } = args
   const horizonDays = args.horizonDays || 30
 
   const modelVersion = 'enterprise-heuristic-v1'
@@ -84,27 +169,42 @@ async function createRecommendationFromType(args: {
           createdAt: { gte: since },
         },
       },
-      select: { quantity: true },
+      select: {
+        quantity: true,
+        sale: { select: { createdAt: true } },
+      },
     })
 
     const soldUnits30 = soldRows.reduce((sum, row) => sum + toNumber(row.quantity), 0)
-    const avgDailyDemand = soldUnits30 / 30
+    const dailySeries = buildDailyDemandSeries({
+      since,
+      windowDays: 30,
+      rows: soldRows.map((row) => ({ quantity: row.quantity, createdAt: row.sale.createdAt })),
+    })
+    const avgDailyDemand = mean(dailySeries)
+    const dailyStdDev = stdDev(dailySeries)
+    const demandCv = avgDailyDemand > 0 ? dailyStdDev / avgDailyDemand : 1
+    const stabilityFactor = clamp(1 - Math.min(1, demandCv / 1.5), 0.35, 1)
     const reorderPoint = Math.max(1, Math.ceil(avgDailyDemand * 7))
     const suggestedQty = Math.max(0, Math.ceil(avgDailyDemand * 14 - toNumber(product.quantity)))
-    const confidence = confidenceFromVolume(soldUnits30)
+    const confidence = clamp(confidenceFromVolume(soldUnits30) * (0.75 + stabilityFactor * 0.25), 0.3, 0.95)
+    const expectedDemandUnits = avgDailyDemand * horizonDays
+    const intervalHalfWidth80 = 1.2816 * dailyStdDev * Math.sqrt(Math.max(1, horizonDays))
+    const p10DemandUnits = Math.max(0, expectedDemandUnits - intervalHalfWidth80)
+    const p90DemandUnits = Math.max(0, expectedDemandUnits + intervalHalfWidth80)
 
     return {
       title: recommendationType === 'DEMAND_FORECAST'
         ? `Demand forecast for ${product.name}`
         : `Reorder recommendation for ${product.name}`,
       summary: recommendationType === 'DEMAND_FORECAST'
-        ? `Expected demand is ${avgDailyDemand.toFixed(2)} units/day over the next ${horizonDays} days.`
+        ? `Expected demand is ${avgDailyDemand.toFixed(2)} units/day over the next ${horizonDays} days (80% interval ${p10DemandUnits.toFixed(1)} to ${p90DemandUnits.toFixed(1)} units).`
         : suggestedQty > 0
         ? `Reorder ${suggestedQty} units to avoid stockout risk.`
         : `Current stock is healthy relative to observed demand.`,
       confidence,
       riskScore: suggestedQty > 0 ? Math.min(0.95, 0.4 + suggestedQty / 200) : 0.2,
-      reasonCodes: ['SALES_VELOCITY', 'CURRENT_STOCK', 'LOW_STOCK_THRESHOLD'],
+      reasonCodes: ['SALES_VELOCITY', 'CURRENT_STOCK', 'LOW_STOCK_THRESHOLD', 'DEMAND_VARIABILITY'],
       sourceProvenance: ['tenant:sales', 'tenant:inventory'],
       outputPayload: {
         productId: product.id,
@@ -112,6 +212,13 @@ async function createRecommendationFromType(args: {
         forecastHorizonDays: horizonDays,
         soldUnits30,
         avgDailyDemand,
+        demandStdDevDaily: Number(dailyStdDev.toFixed(4)),
+        demandCv: Number(demandCv.toFixed(4)),
+        expectedDemandUnits: Number(expectedDemandUnits.toFixed(2)),
+        forecastInterval80: {
+          p10: Number(p10DemandUnits.toFixed(2)),
+          p90: Number(p90DemandUnits.toFixed(2)),
+        },
         reorderPoint,
         suggestedReorderQuantity: suggestedQty,
         currentStock: toNumber(product.quantity),
@@ -166,10 +273,23 @@ async function createRecommendationFromType(args: {
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
     const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000)
 
-    const [salesRecent, expenseRecent, expensePrior] = await Promise.all([
+    const [salesRecent, expenseRecent, expensePrior, recentSignals] = await Promise.all([
       prisma.sale.aggregate({ where: { tenantId, archived: false, createdAt: { gte: thirtyDaysAgo } }, _sum: { totalAmount: true } }),
       prisma.expense.aggregate({ where: { tenantId, archived: false, date: { gte: thirtyDaysAgo } }, _sum: { amount: true } }),
       prisma.expense.aggregate({ where: { tenantId, archived: false, date: { gte: sixtyDaysAgo, lt: thirtyDaysAgo } }, _sum: { amount: true } }),
+      prisma.enterpriseAiSignal.findMany({
+        where: {
+          OR: [
+            { signalClass: 'PUBLIC' },
+            { signalClass: 'PLATFORM' },
+            { signalClass: 'TENANT', tenantId },
+          ],
+          effectiveDate: { gte: new Date(now.getTime() - 21 * 24 * 60 * 60 * 1000) },
+        },
+        orderBy: { effectiveDate: 'desc' },
+        take: 50,
+        select: { signalKey: true, signalValue: true, tags: true, source: true },
+      }),
     ])
 
     const inflow = toNumber(salesRecent._sum.totalAmount)
@@ -177,27 +297,42 @@ async function createRecommendationFromType(args: {
     const priorOutflow = toNumber(expensePrior._sum.amount)
     const net = inflow - outflow
     const spikePct = priorOutflow > 0 ? ((outflow - priorOutflow) / priorOutflow) * 100 : 0
+    const pressure = signalExpensePressureScore(recentSignals)
+
+    const adaptiveSpikeThreshold = 14 - pressure * 6
+    const expenseRiskTriggered = spikePct > adaptiveSpikeThreshold || net < 0
+    const riskScore = clamp(
+      (expenseRiskTriggered ? 0.45 : 0.18) +
+      (pressure * 0.35) +
+      (net < 0 ? 0.18 : 0),
+      0.12,
+      0.98,
+    )
+    const confidence = clamp(0.56 + Math.min(1, (inflow + outflow) / 300000) * 0.28 + pressure * 0.08, 0.42, 0.94)
 
     return {
       title: recommendationType === 'CASHFLOW_FORECAST' ? 'Cash-flow forecast outlook' : 'Expense risk alert summary',
       summary: recommendationType === 'CASHFLOW_FORECAST'
-        ? `Projected net position for next ${horizonDays} days is ${net.toFixed(2)} based on current run-rate.`
-        : spikePct > 20
-        ? `Expense run-rate increased by ${spikePct.toFixed(1)}% versus prior period.`
+        ? `Projected net position for next ${horizonDays} days is ${net.toFixed(2)} based on current run-rate with external pressure score ${pressure.toFixed(2)}.`
+        : spikePct > adaptiveSpikeThreshold
+        ? `Expense run-rate increased by ${spikePct.toFixed(1)}% versus prior period (adaptive threshold ${adaptiveSpikeThreshold.toFixed(1)}%).`
         : 'No significant expense spike detected in the current period.',
-      confidence: 0.64,
-      riskScore: net < 0 || spikePct > 20 ? 0.82 : 0.28,
+      confidence,
+      riskScore,
       reasonCodes: recommendationType === 'CASHFLOW_FORECAST'
-        ? ['INFLOW_OUTFLOW_TREND', 'NET_POSITION']
-        : ['EXPENSE_SPIKE_ANALYSIS', 'CATEGORY_VARIANCE'],
-      sourceProvenance: ['tenant:sales', 'tenant:expenses'],
+        ? ['INFLOW_OUTFLOW_TREND', 'NET_POSITION', 'EXTERNAL_PRESSURE_ADJUSTMENT']
+        : ['EXPENSE_SPIKE_ANALYSIS', 'CATEGORY_VARIANCE', 'TENANT_ADAPTIVE_THRESHOLD'],
+      sourceProvenance: ['tenant:sales', 'tenant:expenses', ...(recentSignals.length ? ['public/platform:signals'] : [])],
       outputPayload: {
         horizonDays,
         inflow,
         outflow,
         projectedNetPosition: net,
         expenseSpikePercent: spikePct,
-        severity: net < 0 || spikePct > 20 ? 'HIGH' : 'LOW',
+        adaptiveSpikeThreshold,
+        externalPressureScore: pressure,
+        externalSignalSources: [...new Set(recentSignals.map((x) => x.source).filter(Boolean))].slice(0, 6),
+        severity: riskScore >= 0.75 ? 'HIGH' : riskScore >= 0.45 ? 'MEDIUM' : 'LOW',
       },
       modelVersion,
       inputSnapshot: snapshotInput,
@@ -286,7 +421,7 @@ async function createRecommendationFromType(args: {
     }).sort((a, b) => b.score - a.score)
 
     return {
-      title: 'Branch performance copilot',
+      title: 'Branch performance insights',
       summary: ranking.length
         ? `${ranking[0].branchName} leads branch performance over the last 30 days.`
         : 'No branch performance data available yet.',
@@ -320,6 +455,7 @@ async function createRecommendationFromType(args: {
         sourceProvenance: ['tenant:safety-policy'],
         outputPayload: {
           prompt: safePrompt,
+          conversationId: conversationId || null,
           response: 'Request rejected due to unsafe content. Ask for inventory, sales, branch, pricing, or expense guidance.',
         },
         modelVersion,
@@ -327,21 +463,53 @@ async function createRecommendationFromType(args: {
       }
     }
 
-    const branchMetrics = ((snapshot.featureSnapshot as { branchMetrics?: Array<{ branchName?: string; revenue: number }> }).branchMetrics || [])
-      .slice(0, 3)
+    const assistant = await generateEnterpriseAssistantResponse({
+      tenantId,
+      prompt: safePrompt,
+      conversationId,
+    })
+
+    const confidence = clamp(
+      (assistant.provider === 'external-llm' ? 0.72 : 0.62) * (0.7 + assistant.reliability.groundingQualityScore * 0.45),
+      0.35,
+      0.95,
+    )
+    const riskScore = clamp(
+      0.12 + (1 - assistant.reliability.groundingQualityScore) * 0.55 + (assistant.reliability.usedFallback ? 0.14 : 0),
+      0.08,
+      0.92,
+    )
+
+    const topBranches = assistant.grounding.branchComparisons.slice(0, 5)
+    const topProducts = assistant.grounding.productComparisons.slice(0, 5)
 
     return {
       title: 'Enterprise assistant response',
-      summary: 'Assistant generated a scoped recommendation summary with source provenance.',
-      confidence: 0.72,
-      riskScore: 0.2,
-      reasonCodes: ['TENANT_SCOPED_ANALYTICS_QUERY'],
-      sourceProvenance: ['tenant:sales', 'tenant:expenses', 'platform:benchmarks', 'public:seasonality'],
+      summary: `Assistant generated a grounded response (${assistant.provider}) with comparative branch and product insights.`,
+      confidence,
+      riskScore,
+      reasonCodes: ['TENANT_SCOPED_ANALYTICS_QUERY', 'PERIOD_COMPARISON', 'BRANCH_PRODUCT_ANALYSIS', 'ADAPTIVE_CONFIDENCE_CALIBRATION', 'GROUNDING_QUALITY_SCORING'],
+      sourceProvenance: ['tenant:sales', 'tenant:expenses', 'tenant:products', 'tenant:assistant-history'],
       outputPayload: {
         prompt: safePrompt,
-        response: `Based on your latest tenant snapshot, prioritize margin protection and branch-level stock discipline. Top branch indicators considered: ${JSON.stringify(branchMetrics)}.`,
+        conversationId: conversationId || null,
+        provider: assistant.provider,
+        currencyCode: assistant.grounding.tenantInfo.baseCurrency,
+        incomeBreakdown: assistant.grounding.incomeBreakdown,
+        reliability: assistant.reliability,
+        periodLabel: assistant.grounding.periodLabel,
+        response: assistant.response,
+        brief: assistant.brief,
+        comparativeOverview: {
+          current: assistant.grounding.current,
+          prior: assistant.grounding.prior,
+          deltas: assistant.grounding.deltas,
+        },
+        topBranches,
+        topProducts,
+        followUpContextTurns: assistant.grounding.history.length,
       },
-      modelVersion,
+      modelVersion: assistant.modelVersion,
       inputSnapshot: snapshotInput,
     }
   }
@@ -362,6 +530,7 @@ export async function GET(req: NextRequest) {
     const recommendationType = searchParams.get('recommendationType')
     const status = searchParams.get('status')
     const subsidiaryId = searchParams.get('subsidiaryId')
+    const sort = searchParams.get('sort')
     const limit = Math.min(100, Math.max(1, Number(searchParams.get('limit') || 30)))
 
     if (recommendationType && !isRecommendationTypeAllowedForRole(user.role, recommendationType as never)) {
@@ -377,10 +546,20 @@ export async function GET(req: NextRequest) {
         ...(user.role !== 'SUPER_ADMIN' ? { recommendationType: { not: 'ANOMALY_DETECTION' } } : {}),
       },
       orderBy: { createdAt: 'desc' },
-      take: limit,
+      take: sort === 'priority' ? Math.max(limit, 150) : limit,
     })
 
-    return NextResponse.json({ data: rows })
+    const sortedRows = sort === 'priority'
+      ? [...rows]
+        .sort((a, b) => {
+          const pa = Number(((a.outputPayload as { ranking?: { priorityScore?: number } })?.ranking?.priorityScore) || 0)
+          const pb = Number(((b.outputPayload as { ranking?: { priorityScore?: number } })?.ranking?.priorityScore) || 0)
+          return pb - pa
+        })
+        .slice(0, limit)
+      : rows
+
+    return NextResponse.json({ data: sortedRows })
   } catch (err) {
     if (err instanceof EnterpriseAccessError) {
       return NextResponse.json({ error: err.message, metadata: err.metadata }, { status: err.status })
@@ -414,6 +593,18 @@ export async function POST(req: NextRequest) {
     const access = await requireEnterpriseAiAccess(user, requiredFeatureMap[payload.recommendationType])
     const snapshot = await getFreshFeatureSnapshot(access.tenantId)
 
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+    const historicalStatuses = await prisma.enterpriseAiRecommendation.findMany({
+      where: {
+        tenantId: access.tenantId,
+        recommendationType: payload.recommendationType,
+        createdAt: { gte: ninetyDaysAgo },
+      },
+      select: { status: true },
+      take: 400,
+    })
+    const outcomeMultiplier = outcomeMultiplierFromStatuses(historicalStatuses)
+
     const generated = await createRecommendationFromType({
       tenantId: access.tenantId,
       userId: access.userId,
@@ -421,6 +612,7 @@ export async function POST(req: NextRequest) {
       subsidiaryId: payload.subsidiaryId,
       productId: payload.productId,
       prompt: payload.prompt,
+      conversationId: payload.conversationId,
       horizonDays: payload.horizonDays,
       snapshot,
     })
@@ -443,6 +635,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const priorityScore = computePriorityScore(generated.confidence, generated.riskScore, outcomeMultiplier)
+    const mergedPayload = {
+      ...toRecord(generated.outputPayload),
+      ranking: {
+        priorityScore,
+        outcomeMultiplier,
+        historicalSampleSize: historicalStatuses.length,
+      },
+    }
+
     const created = await prisma.enterpriseAiRecommendation.create({
       data: {
         tenantId: access.tenantId,
@@ -456,7 +658,7 @@ export async function POST(req: NextRequest) {
         sourceProvenance: generated.sourceProvenance,
         modelVersion: generated.modelVersion,
         inputSnapshot: generated.inputSnapshot,
-        outputPayload: generated.outputPayload,
+        outputPayload: mergedPayload,
       },
     })
 
@@ -471,6 +673,45 @@ export async function POST(req: NextRequest) {
         },
       },
     })
+
+    if (payload.recommendationType === 'DEMAND_FORECAST' || payload.recommendationType === 'REORDER_ADVISOR') {
+      const forecastPayload = created.outputPayload as {
+        expectedDemandUnits?: number
+        demandCv?: number
+        forecastHorizonDays?: number
+      } | null
+
+      await prisma.enterpriseAiMetric.create({
+        data: {
+          tenantId: access.tenantId,
+          metricKey: 'forecast_precision_profile',
+          metricValue: Number(created.confidenceScore || 0),
+          dimensions: {
+            recommendationType: payload.recommendationType,
+            horizonDays: forecastPayload?.forecastHorizonDays || payload.horizonDays || 30,
+            expectedDemandUnits: Number(forecastPayload?.expectedDemandUnits || 0),
+            demandCv: Number(forecastPayload?.demandCv || 0),
+            modelVersion: created.modelVersion,
+          },
+        },
+      })
+    }
+
+    if (payload.recommendationType === 'NL_ASSISTANT') {
+      const assistantPayload = created.outputPayload as { provider?: string } | null
+      await prisma.enterpriseAiMetric.create({
+        data: {
+          tenantId: access.tenantId,
+          metricKey: 'assistant_response_generated',
+          metricValue: 1,
+          dimensions: {
+            provider: assistantPayload?.provider || 'unknown',
+            outputSchemaVersion: 'brief-v1',
+            modelVersion: created.modelVersion,
+          },
+        },
+      })
+    }
 
     await logAudit({
       tenantId: access.tenantId,
