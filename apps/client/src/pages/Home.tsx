@@ -274,12 +274,12 @@ export default function Home() {
   const [trustedCustomersPaused, setTrustedCustomersPaused] = useState(false)
 
   useSeo({
-    title: 'AI-Powered Inventory, Sales and Financial Control',
+    title: 'Inventory Management Software for Retail, Distribution & Multi-Branch Businesses',
     description:
-      'StockPilot Pro helps established and growing businesses manage inventory, sales, expenses, and multi-branch operations with practical AI insights.',
+      'StockPilot Pro is the AI-powered inventory management and stock control platform for retail chains, pharmacies, and distributors. Reduce stockouts, track sales, and manage multi-branch operations in real time.',
     path: '/home',
     keywords:
-      'inventory management software, stock and sales tracking, business financial control, AI business operations, multi-branch management platform',
+      'inventory management software, stock control system, retail inventory tracking, pharmacy stock management, distribution inventory platform, multi-branch inventory management, AI demand forecasting, reorder alert system, stockout prevention, sales tracking software, business expense management',
     image: '/favicon.svg',
   })
 
@@ -480,16 +480,16 @@ export default function Home() {
         <section className="mx-auto grid w-full max-w-7xl gap-10 px-6 pb-16 pt-8 lg:grid-cols-[1.2fr_1fr] lg:items-center lg:px-10 lg:pb-24 lg:pt-12">
           <div>
             <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-cyan-300/40 bg-cyan-400/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-cyan-200">
-              Built for serious operators
+              Built for retail, distribution &amp; multi-branch teams
             </div>
             <p className="mb-3 text-lg font-black uppercase tracking-[0.12em] text-cyan-200 sm:text-xl">
-              StockPilot Pro • AI-Powered Operations Platform
+              StockPilot Pro • AI-Powered Inventory &amp; Operations Platform
             </p>
             <h1 className="text-4xl font-extrabold leading-tight text-white md:text-5xl lg:text-6xl">
-              Run inventory, sales, expenses, and growth from one intelligent platform.
+              Stock control, sales tracking, and multi-branch operations — powered by AI.
             </h1>
             <p className="mt-5 max-w-2xl text-base leading-relaxed text-slate-200 md:text-lg">
-              StockPilot Pro helps businesses of every size manage daily operations while using AI to improve forecasting, pricing, branch performance, and financial control.
+              StockPilot Pro gives retail chains, pharmacies, distributors, and growing multi-location businesses real-time inventory management, automated reorder alerts, and AI-powered financial insights — all from one cloud platform.
             </p>
 
             <div className="mt-8 flex flex-wrap gap-3">
@@ -513,19 +513,19 @@ export default function Home() {
             <div className="mt-10 grid grid-cols-2 gap-3 sm:grid-cols-4">
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
                 <p className="text-xl font-extrabold text-cyan-300">24/7</p>
-                <p className="text-xs text-slate-300">Operational visibility</p>
+                <p className="text-xs text-slate-300">Real-time stock visibility</p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
                 <p className="text-xl font-extrabold text-cyan-300">AI</p>
-                <p className="text-xs text-slate-300">Decision intelligence</p>
+                <p className="text-xs text-slate-300">Demand forecasting &amp; reorder</p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <p className="text-xl font-extrabold text-cyan-300">Multi-role</p>
-                <p className="text-xs text-slate-300">Admin and sales controls</p>
+                <p className="text-xl font-extrabold text-cyan-300">Multi-site</p>
+                <p className="text-xs text-slate-300">Branch &amp; location management</p>
               </div>
               <div className="rounded-xl border border-white/10 bg-white/5 p-3">
                 <p className="text-xl font-extrabold text-cyan-300">Cloud</p>
-                <p className="text-xs text-slate-300">Secure and scalable</p>
+                <p className="text-xs text-slate-300">Secure, scalable inventory</p>
               </div>
             </div>
           </div>
@@ -649,7 +649,7 @@ export default function Home() {
         <div className="mb-6 flex items-end justify-between gap-4">
           <div>
             <p className="text-xs uppercase tracking-widest text-cyan-300">Why StockPilot Pro</p>
-            <h3 className="text-3xl font-bold text-white">Practical AI that improves daily decisions</h3>
+            <h3 className="text-3xl font-bold text-white">AI demand forecasting and stock control for retail and distribution</h3>
           </div>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
@@ -668,8 +668,8 @@ export default function Home() {
       <section className="mx-auto w-full max-w-7xl px-6 py-8 lg:px-10">
         <div className="mb-6 text-center">
           <p className="text-xs uppercase tracking-widest text-cyan-300">Network Reliability</p>
-          <h3 className="mt-1 text-3xl font-bold text-white">Built for low-connectivity environments</h3>
-          <p className="mt-2 text-sm text-slate-300">Work offline with confidence and let the platform handle sync automatically when internet is restored.</p>
+          <h3 className="mt-1 text-3xl font-bold text-white">Offline-ready inventory and sales tracking for retail and distribution</h3>
+          <p className="mt-2 text-sm text-slate-300">Record stock movements and sales offline with confidence — the platform syncs all data automatically when internet is restored.</p>
         </div>
         <div className="grid gap-4 md:grid-cols-3">
           {reliabilityBenefits.map((item) => (
