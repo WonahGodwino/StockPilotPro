@@ -26,6 +26,7 @@ const PlansPage = lazy(() => import('@/pages/superadmin/Plans'))
 const TrustedCustomersPage = lazy(() => import('@/pages/superadmin/TrustedCustomers'))
 const SubscriptionRemindersPage = lazy(() => import('@/pages/superadmin/SubscriptionReminders'))
 const SubscriptionTransactionsPage = lazy(() => import('@/pages/superadmin/SubscriptionTransactions'))
+const SystemMaintenancePage = lazy(() => import('@/pages/superadmin/SystemMaintenance'))
 const SettingsPage = lazy(() => import('@/pages/Settings'))
 const EnterpriseAIPage = lazy(() => import('@/pages/EnterpriseAI'))
 
@@ -214,6 +215,14 @@ export default function App() {
                 </RequireSuperAdminOrAgent>
               }
             />
+            <Route
+              path="admin/system-maintenance"
+              element={
+                <RequireSuperAdmin>
+                  <SystemMaintenancePage />
+                </RequireSuperAdmin>
+              }
+            />
           </Route>
           <Route
             path="/app"
@@ -274,6 +283,14 @@ export default function App() {
                 <RequireSuperAdminOrAgent>
                   <SubscriptionTransactionsPage />
                 </RequireSuperAdminOrAgent>
+              }
+            />
+            <Route
+              path="admin/system-maintenance"
+              element={
+                <RequireSuperAdmin>
+                  <SystemMaintenancePage />
+                </RequireSuperAdmin>
               }
             />
           </Route>

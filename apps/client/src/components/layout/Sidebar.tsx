@@ -64,6 +64,7 @@ const navSections: NavSection[] = [
       { label: 'Trusted Customers', href: '/admin/trusted-customers', icon: BadgeCheck, roles: ['SUPER_ADMIN'] },
       { label: 'Subscription Reminders', href: '/admin/subscription-reminders', icon: Bell, roles: ['SUPER_ADMIN'] },
       { label: 'Subscription Ledger', href: '/admin/subscription-transactions', icon: ClipboardList, roles: ['SUPER_ADMIN'] },
+      { label: 'System Maintenance', href: '/admin/system-maintenance', icon: Settings, roles: ['SUPER_ADMIN'] },
     ],
   },
   {

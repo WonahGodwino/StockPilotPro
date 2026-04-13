@@ -40,29 +40,6 @@ interface PlatformStats {
   companyGrowth: Array<{ date: string; count: number }>
 }
 
-interface BackupDrillRow {
-  id: string
-  status: 'SUCCESS' | 'FAILED' | string
-  triggerType: string
-  dbConnectivityOk: boolean
-  backupVerificationOk: boolean
-  restoreDrillOk: boolean
-  backupArtifactAgeHours: number | null
-  startedAt: string
-  completedAt: string | null
-  errorMessage: string | null
-}
-
-interface BackupDrillSummary {
-  totalRuns: number
-  successRate30Days: number
-  lastRun: BackupDrillRow | null
-  lastSuccessfulRun: BackupDrillRow | null
-  nextRecommendedRunAt: string
-  recommendedCadenceHours: number
-  isOverdue: boolean
-}
-
 function StatCard({
   label, value, icon: Icon, color, subtext,
 }: {
@@ -88,11 +65,7 @@ const PLAN_COLORS = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#e11d48', '#08
 
 export default function SuperAdminDashboard() {
   const [stats, setStats] = useState<PlatformStats | null>(null)
-  const [backupSummary, setBackupSummary] = useState<BackupDrillSummary | null>(null)
-  const [backupRows, setBackupRows] = useState<BackupDrillRow[]>([])
-  const [runningBackupDrill, setRunningBackupDrill] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [backupWarning, setBackupWarning] = useState<string | null>(null)
   const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly'>('monthly')
 
   const fmt = makeCurrencyFormatter(stats?.baseCurrency || 'USD', { minimumFractionDigits: 0 })
@@ -112,42 +85,15 @@ export default function SuperAdminDashboard() {
 
   const fetchStats = (selectedPeriod: string) => {
     setLoading(true)
-    Promise.allSettled([
-      api.get(`/reports/platform-stats?period=${selectedPeriod}`),
-      api.get('/ops/backup-drills?limit=10'),
-    ])
-      .then(([platformResult, backupResult]) => {
-        if (platformResult.status === 'fulfilled') {
-          setStats(platformResult.value.data.data)
-        } else {
-          console.error('Failed to load platform stats', platformResult.reason)
-          setStats(null)
-        }
-
-        if (backupResult.status === 'fulfilled') {
-          setBackupSummary(backupResult.value.data?.data?.summary || null)
-          setBackupRows(backupResult.value.data?.data?.rows || [])
-          setBackupWarning(null)
-        } else {
-          console.error('Failed to load backup drill operations', backupResult.reason)
-          setBackupSummary(null)
-          setBackupRows([])
-          setBackupWarning('Backup drill data unavailable')
-        }
+    api.get(`/reports/platform-stats?period=${selectedPeriod}`)
+      .then((response) => {
+        setStats(response.data.data)
+      })
+      .catch((reason) => {
+        console.error('Failed to load platform stats', reason)
+        setStats(null)
       })
       .finally(() => setLoading(false))
-  }
-
-  const runBackupDrill = async () => {
-    setRunningBackupDrill(true)
-    try {
-      await api.post('/ops/backup-drills/run')
-      fetchStats(period)
-    } catch (err) {
-      console.error('Failed to run backup drill', err)
-    } finally {
-      setRunningBackupDrill(false)
-    }
   }
 
   useEffect(() => {
@@ -259,80 +205,6 @@ export default function SuperAdminDashboard() {
           color="bg-danger-50 text-danger-600"
           subtext="Total billing"
         />
-      </div>
-
-      {/* Backup & Restore Drill Operations */}
-      <div className="card p-6 border border-indigo-200 bg-indigo-50/40">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-sm font-semibold text-indigo-700 uppercase">Backup & Restore Drills</h3>
-            <p className="text-xs text-indigo-700 mt-1">Automated verification health for backup freshness and restore readiness</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => { void runBackupDrill() }}
-            disabled={runningBackupDrill}
-            className={`px-3 py-1 rounded-lg text-sm font-medium ${runningBackupDrill ? 'bg-indigo-300 text-white cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
-          >
-            {runningBackupDrill ? 'Running...' : 'Run Drill'}
-          </button>
-        </div>
-
-        {backupWarning && (
-          <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-            {backupWarning}
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-4">
-          <div className="rounded-lg bg-white p-3 border border-indigo-100">
-            <p className="text-xs text-gray-500">Runs Tracked</p>
-            <p className="text-lg font-semibold text-gray-900 mt-1">{backupSummary?.totalRuns ?? 0}</p>
-          </div>
-          <div className="rounded-lg bg-white p-3 border border-indigo-100">
-            <p className="text-xs text-gray-500">30-Day Success Rate</p>
-            <p className="text-lg font-semibold text-gray-900 mt-1">{backupSummary?.successRate30Days ?? 0}%</p>
-          </div>
-          <div className="rounded-lg bg-white p-3 border border-indigo-100">
-            <p className="text-xs text-gray-500">Last Run</p>
-            <p className="text-sm font-semibold text-gray-900 mt-1">{backupSummary?.lastRun ? new Date(backupSummary.lastRun.startedAt).toLocaleString() : 'No run yet'}</p>
-          </div>
-          <div className="rounded-lg bg-white p-3 border border-indigo-100">
-            <p className="text-xs text-gray-500">Next Recommended</p>
-            <p className={`text-sm font-semibold mt-1 ${backupSummary?.isOverdue ? 'text-danger-700' : 'text-gray-900'}`}>
-              {backupSummary?.nextRecommendedRunAt ? new Date(backupSummary.nextRecommendedRunAt).toLocaleString() : 'Run now'}
-            </p>
-          </div>
-        </div>
-
-        {backupRows.length > 0 && (
-          <div className="mt-4 overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-indigo-100">
-                  <th className="text-left py-2 pr-3 font-medium text-gray-500">Started</th>
-                  <th className="text-left py-2 pr-3 font-medium text-gray-500">Status</th>
-                  <th className="text-left py-2 pr-3 font-medium text-gray-500">DB</th>
-                  <th className="text-left py-2 pr-3 font-medium text-gray-500">Backup</th>
-                  <th className="text-left py-2 pr-3 font-medium text-gray-500">Restore</th>
-                  <th className="text-left py-2 font-medium text-gray-500">Backup Age (h)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {backupRows.slice(0, 5).map((row) => (
-                  <tr key={row.id} className="border-b border-indigo-50">
-                    <td className="py-2 pr-3 text-gray-700">{new Date(row.startedAt).toLocaleString()}</td>
-                    <td className={`py-2 pr-3 font-semibold ${row.status === 'SUCCESS' ? 'text-success-700' : 'text-danger-700'}`}>{row.status}</td>
-                    <td className={`py-2 pr-3 ${row.dbConnectivityOk ? 'text-success-700' : 'text-danger-700'}`}>{row.dbConnectivityOk ? 'OK' : 'Fail'}</td>
-                    <td className={`py-2 pr-3 ${row.backupVerificationOk ? 'text-success-700' : 'text-danger-700'}`}>{row.backupVerificationOk ? 'OK' : 'Fail'}</td>
-                    <td className={`py-2 pr-3 ${row.restoreDrillOk ? 'text-success-700' : 'text-danger-700'}`}>{row.restoreDrillOk ? 'OK' : 'Fail'}</td>
-                    <td className="py-2 text-gray-700">{row.backupArtifactAgeHours ?? 'n/a'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
 
       {/* Financial KPIs */}

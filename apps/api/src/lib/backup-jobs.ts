@@ -17,9 +17,17 @@ export type BackupJobResult = {
   filePath: string
   durationMs: number
   sizeBytes: number | null
+  artifactMtime: string | null
+  artifactAgeHours: number | null
+  startedAt: string
+  completedAt: string
   backupSuccess: boolean
   restore: RestoreSummary
   error?: string
+}
+
+function toHours(deltaMs: number): number {
+  return Number((deltaMs / (1000 * 60 * 60)).toFixed(2))
 }
 
 type ParsedDbUrl = {
@@ -127,6 +135,7 @@ async function runPgRestore(target: ParsedDbUrl, filePath: string): Promise<void
  */
 export async function runDatabaseBackup(): Promise<BackupJobResult> {
   const startedAt = Date.now()
+  const startedAtIso = new Date(startedAt).toISOString()
   const restoreEnabled = (process.env.BACKUP_AUTO_RESTORE_ENABLED ?? 'false').toLowerCase() === 'true'
   const targetDbUrl = process.env.BACKUP_RESTORE_TARGET_DATABASE_URL
   const restoreConfigured = restoreEnabled && Boolean(targetDbUrl)
@@ -147,6 +156,10 @@ export async function runDatabaseBackup(): Promise<BackupJobResult> {
       filePath: '',
       durationMs: 0,
       sizeBytes: null,
+      artifactMtime: null,
+      artifactAgeHours: null,
+      startedAt: startedAtIso,
+      completedAt: new Date().toISOString(),
       backupSuccess: false,
       restore: baseRestore,
       error: 'BACKUP_ARTIFACT_PATH is not configured',
@@ -160,6 +173,10 @@ export async function runDatabaseBackup(): Promise<BackupJobResult> {
       filePath,
       durationMs: 0,
       sizeBytes: null,
+      artifactMtime: null,
+      artifactAgeHours: null,
+      startedAt: startedAtIso,
+      completedAt: new Date().toISOString(),
       backupSuccess: false,
       restore: baseRestore,
       error: 'DATABASE_URL is not configured',
@@ -206,12 +223,18 @@ export async function runDatabaseBackup(): Promise<BackupJobResult> {
 
     const backupDuration = Date.now() - startedAt
     const overallSuccess = restoreConfigured ? restore.success : true
+    const artifactMtime = meta.mtime.toISOString()
+    const artifactAgeHours = toHours(Date.now() - meta.mtime.getTime())
 
     return {
       success: overallSuccess,
       filePath,
       durationMs: backupDuration,
       sizeBytes: meta.size,
+      artifactMtime,
+      artifactAgeHours,
+      startedAt: startedAtIso,
+      completedAt: new Date().toISOString(),
       backupSuccess: true,
       restore,
       error: overallSuccess ? undefined : restore.error,
@@ -222,6 +245,10 @@ export async function runDatabaseBackup(): Promise<BackupJobResult> {
       filePath,
       durationMs: Date.now() - startedAt,
       sizeBytes: null,
+      artifactMtime: null,
+      artifactAgeHours: null,
+      startedAt: startedAtIso,
+      completedAt: new Date().toISOString(),
       backupSuccess: false,
       restore: baseRestore,
       error: (err as Error).message,
