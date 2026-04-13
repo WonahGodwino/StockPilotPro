@@ -1,4 +1,3 @@
-#Requires -RunAsAdministrator
 <#
 .SYNOPSIS
     Registers a Windows Scheduled Task that triggers the StockPilot Pro
@@ -22,15 +21,23 @@
 .PARAMETER RunTime
     Daily run time in HH:mm format. Default: 02:00
 
+.PARAMETER RunAsSystem
+    Register task under SYSTEM account (requires administrator privileges).
+    If omitted, task is registered for current user and works without elevation.
+
 .EXAMPLE
     .\setup-backup-task.ps1
     .\setup-backup-task.ps1 -RunTime "03:30" -Secret "my-secret"
+    .\setup-backup-task.ps1 -RunAsSystem
 #>
 param (
     [string]$ApiUrl  = 'http://localhost:3000/api/ops/backup/run',
     [string]$Secret  = $env:BACKUP_JOB_SECRET,
-    [string]$RunTime = '02:00'
+    [string]$RunTime = '02:00',
+    [switch]$RunAsSystem
 )
+
+$ErrorActionPreference = 'Stop'
 
 $TaskName    = 'StockPilotPro - Nightly Database Backup'
 $ScriptsDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -88,12 +95,20 @@ $settings  = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit (New-TimeSpan -Hours 1) `
     -RestartCount       3 `
     -RestartInterval    (New-TimeSpan -Minutes 10) `
-    -StartWhenAvailable $true
+    -StartWhenAvailable
 
-$principal = New-ScheduledTaskPrincipal `
-    -UserId    'SYSTEM' `
-    -LogonType ServiceAccount `
-    -RunLevel  Highest
+if ($RunAsSystem) {
+    $principal = New-ScheduledTaskPrincipal `
+        -UserId    'SYSTEM' `
+        -LogonType ServiceAccount `
+        -RunLevel  Highest
+} else {
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $principal = New-ScheduledTaskPrincipal `
+        -UserId    $currentUser `
+        -LogonType Interactive `
+        -RunLevel  Limited
+}
 
 # Remove previous registration if any
 Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
@@ -108,6 +123,7 @@ Register-ScheduledTask `
 Write-Host ""
 Write-Host "Scheduled task registered: '$TaskName'"
 Write-Host "  Schedule : Daily at $RunTime"
+Write-Host "  Principal: $($principal.UserId)"
 Write-Host "  Runner   : $RunnerPath"
 Write-Host ""
 Write-Host "Useful commands:"
