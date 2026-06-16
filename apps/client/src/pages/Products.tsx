@@ -185,21 +185,18 @@ export default function Products() {
     .reduce((s, p) => s + p.quantity * Number(p.costPrice), 0)
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Products</h1>
           <p className="text-sm text-gray-500 mt-1">
-            {total} items &nbsp;·&nbsp; Inventory worth:{' '}
-            <span className="font-semibold text-gray-700">
-              {fmt(totalWorth)}
-            </span>
+            Manage inventory, pricing, and stock levels across all branches
           </p>
         </div>
         {canManage && (
           <div className="flex items-center gap-2">
             <button
-              className="btn-primary"
+              className="btn-secondary"
               onClick={() => {
                 setDamagingProduct(null)
                 setDamageModalOpen(true)
@@ -212,6 +209,42 @@ export default function Products() {
             </button>
           </div>
         )}
+      </div>
+
+      {/* Stats Summary Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <div className="flex items-center gap-2">
+            <Package className="w-4 h-4 text-indigo-500" />
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Total Products</p>
+          </div>
+          <p className="text-2xl font-bold text-gray-900 mt-2 tabular-nums">{total}</p>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded-full bg-emerald-500" />
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Active</p>
+          </div>
+          <p className="text-2xl font-bold text-emerald-700 mt-2 tabular-nums">
+            {products.filter((p) => p.status === 'ACTIVE').length}
+          </p>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-500" />
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Low Stock</p>
+          </div>
+          <p className="text-2xl font-bold text-rose-700 mt-2 tabular-nums">
+            {products.filter((p) => p.type === 'GOODS' && p.quantity <= p.lowStockThreshold).length}
+          </p>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded-full bg-cyan-500" />
+            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Inv. Worth</p>
+          </div>
+          <p className="text-xl font-bold text-gray-900 mt-2 tabular-nums">{fmt(totalWorth)}</p>
+        </div>
       </div>
 
       {/* Filters */}
