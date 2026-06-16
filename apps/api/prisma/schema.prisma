@@ -192,6 +192,8 @@ model Tenant {
   subscriptionTransactions SubscriptionTransaction[]
   customers        Customer[]
   productReceipts  ProductReceipt[]
+  productCategories ProductCategory[]
+  productBrands    ProductBrand[]
   externalDataConnections EnterpriseAiExternalDataConnection[]
 
   @@index([acquisitionAgentId])
@@ -434,6 +436,34 @@ model Subsidiary {
 // ──────────────────────────────────────────────
 // PRODUCTS / SERVICES
 // ──────────────────────────────────────────────
+
+model ProductCategory {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+model ProductBrand {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
 
 model Product {
   id                  String        @id @default(cuid())
