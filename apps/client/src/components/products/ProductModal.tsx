@@ -6,7 +6,7 @@ import { useAuthStore } from '@/store/auth.store'
 import { useAppStore } from '@/store/app.store'
 import { getApiErrorMessage } from '@/lib/apiError'
 import { makeCurrencyFormatter, SUPPORTED_CURRENCIES } from '@/lib/currency'
-import { X, Loader2, Plus, Trash2 } from 'lucide-react'
+import { X, Loader2, Plus, Trash2, Tag, Package, Check } from 'lucide-react'
 
 interface Props {
   product: Product | null
@@ -257,8 +257,19 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
   )
 
   const [salesUnits, setSalesUnits] = useState<ProductSalesUnit[]>(product?.salesUnits || [])
+  const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([])
+  const [brand, setBrand] = useState('')
 
   const isConverting = priceCurrency !== baseCurrency
+
+  // Load tenant categories on mount
+  useEffect(() => {
+    let cancelled = false
+    api.get('/product-setup').then(({ data }) => {
+      if (!cancelled) setCategories(data.data || [])
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   // Fetch saved FX rate whenever priceCurrency changes
   useEffect(() => {
@@ -407,7 +418,20 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-              <input className="input" value={form.category} placeholder="Uncategorized" onChange={(e) => setForm({ ...form, category: e.target.value })} />
+              <select
+                className="input"
+                value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
+              >
+                <option value="Uncategorized">Uncategorized</option>
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.name}>{cat.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
+              <input className="input" value={brand} placeholder="e.g. Coca-Cola" onChange={(e) => setBrand(e.target.value)} />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
