@@ -5,7 +5,7 @@ import type { Product } from '@/types'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/auth.store'
 import { makeCurrencyFormatter } from '@/lib/currency'
-import { X, Loader2, AlertTriangle } from 'lucide-react'
+import { X, Loader2, AlertTriangle, Package, Search } from 'lucide-react'
 
 interface Props {
   product?: Product | null
@@ -123,34 +123,44 @@ export default function DamageModal({ product, products = [], onClose, onSaved }
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 text-warning-600" />
-            <h2 className="text-lg font-semibold text-gray-900">Register Damage/Expired</h2>
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[95vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-5 border-b bg-gradient-to-r from-rose-50 to-orange-50">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-orange-600 flex items-center justify-center shadow-md shadow-rose-200">
+              <AlertTriangle className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-gray-900 tracking-tight">Register Damage/Expired</h2>
+              <p className="text-xs text-gray-500 mt-0.5">Record damaged, expired, or lost inventory</p>
+            </div>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-white/80 text-gray-400 hover:text-gray-600 transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {/* Product Search/Select */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Search Product</label>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name or barcode"
-              className="input w-full"
-            />
-            {loadingProducts && <p className="text-xs text-gray-500 mt-1">Searching products...</p>}
-          </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+          {/* Product Selection Section */}
+          <div className="rounded-xl border border-gray-200/80 bg-gray-50/50 p-4 space-y-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Package className="w-4 h-4 text-rose-500" />
+              <h3 className="text-sm font-semibold text-gray-900">Select Product</h3>
+            </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Select Product</label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by name or barcode..."
+                className="input pl-9 w-full"
+              />
+              {loadingProducts && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-gray-400" />}
+            </div>
+
             <select
               className="input w-full"
               value={selectedProduct?.id || ''}
@@ -164,119 +174,144 @@ export default function DamageModal({ product, products = [], onClose, onSaved }
             >
               {filteredProducts.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name} ({Number(p.quantity)} {p.unit})
+                  {p.name} ({Number(p.quantity)} {p.unit} available)
                 </option>
               ))}
             </select>
             {!loadingProducts && filteredProducts.length === 0 && (
-              <p className="text-xs text-gray-500 mt-1">No registered product matched your search.</p>
+              <p className="text-xs text-gray-400 italic">No registered product matched your search.</p>
             )}
           </div>
 
-          {/* Product Info */}
-          <div className="bg-gray-50 p-3 rounded-lg border border-gray-200">
-            <p className="text-sm font-medium text-gray-600">Product</p>
-            <p className="text-gray-900 font-semibold">{selectedProduct?.name || 'No product selected'}</p>
-            <p className="text-sm text-gray-500">Available: {availableQuantity} {selectedProduct?.unit || form.unit}</p>
+          {/* Selected Product Info Card */}
+          {selectedProduct && (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-rose-700 mb-1">Selected Product</p>
+                  <p className="text-base font-bold text-gray-900">{selectedProduct.name}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-rose-600 font-medium">Available Stock</p>
+                  <p className="text-lg font-bold text-rose-700 tabular-nums">
+                    {availableQuantity} {selectedProduct.unit || form.unit}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Damage Details Section */}
+          <div className="rounded-xl border border-gray-200/80 p-4 space-y-4">
+            <h3 className="text-sm font-semibold text-gray-900">Damage Details</h3>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Quantity Lost</label>
+                <input
+                  type="number"
+                  step="1"
+                  min="0"
+                  max={availableQuantity}
+                  value={form.quantity || ''}
+                  onChange={(e) => setForm({ ...form, quantity: parseFloat(e.target.value) || 0 })}
+                  className="input w-full text-center text-lg font-bold"
+                  placeholder="0"
+                />
+                {form.quantity > 0 && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Remaining after: <strong className="text-rose-600">{Math.max(0, availableQuantity - form.quantity)}</strong> {selectedProduct?.unit || form.unit}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Unit</label>
+                <select
+                  value={form.unit}
+                  onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                  className="input w-full"
+                >
+                  {UNIT_OPTIONS.map((u) => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Damage Stage</label>
+                <select
+                  value={form.damageStage}
+                  onChange={(e) => setForm({ ...form, damageStage: e.target.value as 'FINISHED_GOODS' | 'RAW_MATERIAL' })}
+                  className="input w-full"
+                >
+                  <option value="FINISHED_GOODS">Finished goods</option>
+                  <option value="RAW_MATERIAL">Raw material</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Reason</label>
+                <select
+                  value={form.reason}
+                  onChange={(e) => setForm({ ...form, reason: e.target.value as any })}
+                  className="input w-full"
+                >
+                  <option value="DAMAGED">Damaged</option>
+                  <option value="EXPIRED">Expired</option>
+                  <option value="LOST">Lost</option>
+                  <option value="RAW_MATERIAL_DAMAGE">Raw Material Damage</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">Description (Optional)</label>
+              <textarea
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                className="input w-full resize-none"
+                placeholder="Add notes about the damage/expiration..."
+                rows={2}
+              />
+            </div>
           </div>
 
-          {/* Quantity */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Quantity to Register
-            </label>
-            <input
-              type="number"
-              step="0.001"
-              min="0"
-              max={availableQuantity}
-              value={form.quantity || ''}
-              onChange={(e) => setForm({ ...form, quantity: parseFloat(e.target.value) || 0 })}
-              className="input w-full"
-              placeholder="Enter quantity"
-            />
-          </div>
-
-          {/* Unit */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
-            <select
-              value={form.unit}
-              onChange={(e) => setForm({ ...form, unit: e.target.value })}
-              className="input w-full"
-            >
-              {UNIT_OPTIONS.map((u) => (
-                <option key={u} value={u}>
-                  {u}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Damage Stage */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Damage Stage</label>
-            <select
-              value={form.damageStage}
-              onChange={(e) => setForm({ ...form, damageStage: e.target.value as 'FINISHED_GOODS' | 'RAW_MATERIAL' })}
-              className="input w-full"
-            >
-              <option value="FINISHED_GOODS">Finished goods (use selling price)</option>
-              <option value="RAW_MATERIAL">Raw material (use purchase price)</option>
-            </select>
-            <p className="text-xs text-gray-500 mt-1">
-              Unit price used: {fmt(baseUnitPrice)} • Estimated damage cost: {fmt(estimatedCost)}
-            </p>
-          </div>
-
-          {/* Reason */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Reason
-            </label>
-            <select
-              value={form.reason}
-              onChange={(e) => setForm({ ...form, reason: e.target.value as any })}
-              className="input w-full"
-            >
-              <option value="DAMAGED">Damaged</option>
-              <option value="EXPIRED">Expired</option>
-              <option value="LOST">Lost</option>
-              <option value="RAW_MATERIAL_DAMAGE">Raw Material Damage</option>
-              <option value="OTHER">Other</option>
-            </select>
-          </div>
-
-          {/* Description */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Description (Optional)
-            </label>
-            <textarea
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              className="input w-full"
-              placeholder="Add notes about the damage/expiration..."
-              rows={3}
-            />
-          </div>
+          {/* Cost Estimate Card */}
+          {form.quantity > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-amber-700 mb-1">Estimated Loss</p>
+                  <p className="text-xl font-bold text-amber-800">{fmt(estimatedCost)}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-amber-600 font-medium">Unit Price</p>
+                  <p className="text-sm font-semibold text-amber-700">
+                    {fmt(baseUnitPrice)} × {form.quantity} {form.unit}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Actions */}
-          <div className="flex gap-3 pt-4">
+          <div className="flex gap-3 pt-2">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 font-medium transition"
+              className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 hover:border-gray-300 transition-all duration-200 shadow-sm"
             >
               Cancel
             </button>
             <button
               type="submit"
-              disabled={loading}
-              className="flex-1 px-4 py-2 bg-warning-600 text-white rounded-lg hover:bg-warning-700 font-medium transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              disabled={loading || form.quantity <= 0 || !selectedProduct}
+              className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-rose-600 to-orange-600 rounded-xl hover:from-rose-700 hover:to-orange-700 transition-all duration-200 shadow-md shadow-rose-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-              Register
+              Register Damage
             </button>
           </div>
         </form>
