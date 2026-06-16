@@ -835,7 +835,7 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
               </div>
             </div>
 
-            {/* Inventory Section */}
+            {/* Inventory & Sales Units Section */}
             <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
               <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
                 <div className="w-8 h-8 rounded-lg bg-cyan-100 flex items-center justify-center">
@@ -846,23 +846,11 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Quantity</label>
-                  <NumberInput
-                    value={form.quantity}
-                    onChange={(v) => setForm({ ...form, quantity: v })}
-                    min={0}
-                    step={0.1}
-                    precision={3}
-                  />
+                  <NumberInput value={form.quantity} onChange={(v) => setForm({ ...form, quantity: v })} min={0} step={1} precision={0} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Low Stock Alert</label>
-                  <NumberInput
-                    value={form.lowStockThreshold}
-                    onChange={(v) => setForm({ ...form, lowStockThreshold: v })}
-                    min={0}
-                    step={1}
-                    precision={0}
-                  />
+                  <NumberInput value={form.lowStockThreshold} onChange={(v) => setForm({ ...form, lowStockThreshold: v })} min={0} step={1} precision={0} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Purchase Date</label>
@@ -887,6 +875,18 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
                   </select>
                 </div>
               </div>
+
+              {/* Sales Units (GOODS only) — inside Inventory section */}              {form.type === 'GOODS' && (
+                <div className="mt-6 pt-6 border-t border-gray-100">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center">
+                      <span className="text-lg">📐</span>
+                    </div>
+                    <h3 className="text-base font-semibold text-gray-900">Sales Units (Retail & Wholesale)</h3>
+                  </div>
+                  <SalesUnitsEditor value={salesUnits} baseUnit={form.unit} basePrice={baseSellingPrice} onChange={(units) => setSalesUnits(units)} />
+                </div>
+              )}
             </div>
 
             {/* Organization Section */}
@@ -912,19 +912,6 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
                 </div>
               </div>
             </div>
-
-            {/* Sales Units Section (GOODS only) */}
-            {form.type === 'GOODS' && (
-              <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
-                <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
-                  <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center">
-                    <span className="text-lg">📐</span>
-                  </div>
-                  <h3 className="text-base font-semibold text-gray-900">Sales Units (Retail & Wholesale)</h3>
-                </div>
-                <SalesUnitsEditor value={salesUnits} baseUnit={form.unit} basePrice={baseSellingPrice} onChange={(units) => setSalesUnits(units)} />
-              </div>
-            )}
 
             {/* Hidden submit for the form */}
             <button type="submit" className="hidden" />
