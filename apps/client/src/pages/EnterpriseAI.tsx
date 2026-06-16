@@ -1,10 +1,15 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate } from 'react-router-dom'
-import { Bot, Sparkles, ShieldAlert, RefreshCw, CalendarDays, ClipboardCheck, TrendingUp, SlidersHorizontal, Gauge, Save, Printer, Trash2, Search, Download, FileText, CheckCircle2, XCircle, RotateCcw } from 'lucide-react'
+import { Bot, Sparkles, ShieldAlert, RefreshCw, CalendarDays, ClipboardCheck, TrendingUp, SlidersHorizontal, Gauge, Save, Printer, Trash2, Search, Download, FileText, CheckCircle2, XCircle, RotateCcw, ChevronDown, ChevronUp } from 'lucide-react'
 import api from '@/lib/api'
 import { useAuthStore } from '@/store/auth.store'
 import { useAppStore } from '@/store/app.store'
 import toast from 'react-hot-toast'
+import {
+  PieChart, Pie, Cell, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
+  LineChart, Line, Area, AreaChart,
+} from 'recharts'
 
 type Recommendation = {
   id: string
@@ -4145,6 +4150,141 @@ export default function EnterpriseAIPage() {
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Response</p>
                   {reply.brief ? (
                     <div className="mt-2 space-y-3">
+                      {/* Financial charts section — collapsible */}
+                      {(() => {
+                        const hasCharts = (reply.incomeBreakdown && shouldShowIncomeBreakdownForPrompt(reply.prompt, reply.incomeBreakdown))
+                          || reply.brief?.financialMetrics
+                        if (!hasCharts) return null
+
+                        const chartData = (() => {
+                          const breakdown = reply.incomeBreakdown
+                          if (!breakdown) return null
+
+                          const items: Array<{ name: string; value: number; color: string }> = []
+                          const salesVal = Number(breakdown.salesIncome) || 0
+                          items.push({ name: 'Sales', value: salesVal, color: '#6366f1' })
+
+                          if (shouldShowSubscriptionIncomeRow(breakdown)) {
+                            const subVal = Number(breakdown.subscriptionIncome) || 0
+                            items.push({ name: 'Subscription', value: subVal, color: '#06b6d4' })
+                          }
+
+                          // If total > sum, add "Other" segment
+                          const total = Number(breakdown.totalIncome) || 0
+                          const sum = items.reduce((s, i) => s + i.value, 0)
+                          if (total > sum) {
+                            items.push({ name: 'Other', value: total - sum, color: '#94a3b8' })
+                          }
+                          return items.length > 0 ? items : null
+                        })()
+
+                        const metrics = reply.brief?.financialMetrics
+                        const pnlData = metrics
+                          ? [
+                              { name: 'Revenue', value: Number(metrics.revenue) || 0, color: '#10b981' },
+                              { name: 'Profit', value: Number(metrics.profit) || 0, color: '#6366f1' },
+                              { name: 'Expenses', value: Math.max(0, (Number(metrics.revenue) || 0) - (Number(metrics.profit) || 0)), color: '#f43f5e' },
+                            ].filter((item) => item.value > 0 || item.name === 'Profit')
+                          : null
+
+                        const currency = reply.currencyCode || baseCurrency
+                        const liquidityPct = metrics?.cashRunway != null && metrics.cashRunway > 0
+                          ? Math.min(100, (metrics.cashRunway / 12) * 100)
+                          : null
+
+                        return (
+                          <div className="rounded-md border border-gray-200 bg-white p-3">
+                            <p className="text-xs font-semibold text-gray-600">Financial Charts</p>
+                            <div className="mt-2 grid gap-3 xl:grid-cols-2">
+                              {chartData && chartData.length > 0 && (
+                                <div className="rounded-md border border-gray-100 bg-gray-50 p-2">
+                                  <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">Income Breakdown</p>
+                                  <ResponsiveContainer width="100%" height={160}>
+                                    <PieChart>
+                                      <Pie
+                                        data={chartData}
+                                        cx="50%"
+                                        cy="50%"
+                                        innerRadius={40}
+                                        outerRadius={65}
+                                        paddingAngle={2}
+                                        dataKey="value"
+                                      >
+                                        {chartData.map((entry, idx) => (
+                                          <Cell key={`income-pie-${idx}`} fill={entry.color} stroke="white" strokeWidth={2} />
+                                        ))}
+                                      </Pie>
+                                      <Tooltip
+                                        formatter={(value: number) => `${currency} ${value.toLocaleString()}`}
+                                        contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
+                                      />
+                                    </PieChart>
+                                  </ResponsiveContainer>
+                                  <div className="flex flex-wrap justify-center gap-3 mt-1 text-[10px]">
+                                    {chartData.map((item) => (
+                                      <span key={item.name} className="inline-flex items-center gap-1 font-medium text-gray-600">
+                                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                                        {item.name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {pnlData && (
+                                <div className="rounded-md border border-gray-100 bg-gray-50 p-2">
+                                  <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2">
+                                    Revenue vs Profit vs Expenses
+                                  </p>
+                                  <ResponsiveContainer width="100%" height={160}>
+                                    <BarChart data={pnlData} barGap={6}>
+                                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                                      <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                                      <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                                      <Tooltip
+                                        formatter={(value: number) => `${currency} ${value.toLocaleString()}`}
+                                        cursor={{ fill: '#f1f5f9' }}
+                                        contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
+                                      />
+                                      {pnlData.map((entry) => (
+                                        <Bar key={entry.name} dataKey="value" fill={entry.color} radius={[4, 4, 0, 0]} maxBarSize={64} />
+                                      ))}
+                                    </BarChart>
+                                  </ResponsiveContainer>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Liquidity indicator */}
+                            {liquidityPct !== null && metrics && (
+                              <div className="mt-3 rounded-md border border-sky-100 bg-sky-50 p-2">
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-sky-700 mb-1">
+                                  Cash Runway ({metrics.cashRunway?.toFixed(1) ?? 'N/A'} months)
+                                </p>
+                                <div className="flex items-center gap-3">
+                                  <div className="flex-1 h-2.5 bg-sky-200 rounded-full overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full transition-all duration-500 ${
+                                        liquidityPct > 50 ? 'bg-emerald-500' : liquidityPct > 25 ? 'bg-amber-400' : 'bg-rose-500'
+                                      }`}
+                                      style={{ width: `${liquidityPct}%` }}
+                                    />
+                                  </div>
+                                  <span className={`text-xs font-bold tabular-nums ${
+                                    liquidityPct > 50 ? 'text-emerald-700' : liquidityPct > 25 ? 'text-amber-700' : 'text-rose-700'
+                                  }`}>
+                                    {liquidityPct.toFixed(0)}% of 12mo
+                                  </span>
+                                  <span className="text-[10px] text-sky-600 font-medium">
+                                    {metrics.cashRunway != null && metrics.cashRunway > 6 ? '✅ Healthy' : metrics.cashRunway != null && metrics.cashRunway > 2 ? '⚠️ Monitor' : metrics.cashRunway != null ? '🔴 Critical' : ''}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
+
                       {reply.incomeBreakdown && shouldShowIncomeBreakdownForPrompt(reply.prompt, reply.incomeBreakdown) && (
                         <div className="rounded-md border border-cyan-100 bg-cyan-50 p-3">
                           <p className="text-xs font-semibold text-cyan-700">Income Streams (30d)</p>
