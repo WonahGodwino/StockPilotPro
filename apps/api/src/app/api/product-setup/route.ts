@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+paimport { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'

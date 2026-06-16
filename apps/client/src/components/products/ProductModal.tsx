@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import api from '@/lib/api'
 import type { Product, ProductSalesUnit, SalesUnitLabel } from '@/types'
 import toast from 'react-hot-toast'
@@ -6,7 +6,7 @@ import { useAuthStore } from '@/store/auth.store'
 import { useAppStore } from '@/store/app.store'
 import { getApiErrorMessage } from '@/lib/apiError'
 import { makeCurrencyFormatter, SUPPORTED_CURRENCIES } from '@/lib/currency'
-import { X, Loader2, Plus, Trash2, Tag, Package, Check } from 'lucide-react'
+import { X, Loader2, Plus, Trash2, Tag, Package, Check, ChevronDown } from 'lucide-react'
 
 interface Props {
   product: Product | null
@@ -230,6 +230,109 @@ function toDateInputValue(value?: string | Date): string {
   const date = value instanceof Date ? value : new Date(value)
   if (Number.isNaN(date.getTime())) return ''
   return date.toISOString().slice(0, 10)
+}
+
+function SearchableSelect({
+  value,
+  onChange,
+  options,
+  placeholder,
+  defaultOption,
+  defaultLabel,
+}: {
+  value: string
+  onChange: (val: string) => void
+  options: Array<{ id: string; name: string }>
+  placeholder?: string
+  defaultOption?: string
+  defaultLabel?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState(value)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    setSearch(value)
+  }, [value])
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const filtered = options.filter((opt) =>
+    opt.name.toLowerCase().includes(search.toLowerCase())
+  )
+
+  const selectOption = (name: string) => {
+    onChange(name)
+    setSearch(name)
+    setOpen(false)
+  }
+
+  return (
+    <div ref={containerRef} className="relative">
+      <div className="relative">
+        <input
+          className="input pr-8"
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value)
+            setOpen(true)
+            if (e.target.value === '') {
+              onChange(defaultOption ?? '')
+            }
+          }}
+          onFocus={() => setOpen(true)}
+          placeholder={placeholder || 'Type to search...'}
+        />
+        {value && value !== defaultOption && (
+          <button
+            type="button"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            onClick={() => { onChange(defaultOption ?? ''); setSearch(defaultOption ?? '') }}
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+        {open && !search && (
+          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        )}
+      </div>
+      {open && (
+        <div className="absolute z-10 mt-1 w-full bg-white rounded-lg border border-gray-200 shadow-lg max-h-52 overflow-y-auto">
+          {defaultLabel && (
+            <button
+              type="button"
+              className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 transition-colors ${value === defaultOption ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600'}`}
+              onClick={() => selectOption(defaultOption ?? '')}
+            >
+              {defaultLabel}
+            </button>
+          )}
+          {filtered.length === 0 && (!defaultLabel || search) ? (
+            <p className="px-3 py-2 text-sm text-gray-400 italic">No matches found</p>
+          ) : (
+            filtered.map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 transition-colors ${value === opt.name ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-700'}`}
+                onClick={() => selectOption(opt.name)}
+              >
+                {opt.name}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function ProductModal({ product, onClose, onSaved }: Props) {
