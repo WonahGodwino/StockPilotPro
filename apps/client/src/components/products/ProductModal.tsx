@@ -148,8 +148,8 @@ function SalesUnitsEditor({
               <input
                 className="input mt-0.5 text-xs"
                 type="number"
-                step="0.001"
-                min="0.001"
+                step="1"
+                min="1"
                 value={unit.unitsPerBase}
                 onChange={(e) => {
                   const qty = parseFloat(e.target.value) || 1
@@ -162,7 +162,7 @@ function SalesUnitsEditor({
               <input
                 className="input mt-0.5 text-xs"
                 type="number"
-                step="0.01"
+                step="1"
                 min="0"
                 value={unit.sellingPrice}
                 onChange={(e) => updateUnit(unit.id, { sellingPrice: parseFloat(e.target.value) || 0 })}
@@ -797,7 +797,7 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Cost Price *</label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">{priceCurrency === baseCurrency ? baseCurrency : priceCurrency}</span>
-                      <input className="input pl-16" type="number" step="0.01" min="0" value={rawCostPrice}
+                      <input className="input pl-16" type="number" step="1" min="0" value={rawCostPrice}
                         onChange={(e) => { const v = parseFloat(e.target.value) || 0; setRawCostPrice(v); if (!isConverting) setForm({ ...form, costPrice: v }) }} required />
                     </div>
                     {isConverting && !fxError && rawCostPrice > 0 && <p className="mt-1.5 text-xs text-gray-500">≈ {fmt(baseCostPrice)}</p>}
@@ -806,7 +806,7 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">Selling Price *</label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">{priceCurrency === baseCurrency ? baseCurrency : priceCurrency}</span>
-                      <input className="input pl-16" type="number" step="0.01" min="0" value={rawSellingPrice}
+                      <input className="input pl-16" type="number" step="1" min="0" value={rawSellingPrice}
                         onChange={(e) => { const v = parseFloat(e.target.value) || 0; setRawSellingPrice(v); if (!isConverting) setForm({ ...form, sellingPrice: v }) }} required />
                     </div>
                     {isConverting && !fxError && rawSellingPrice > 0 && <p className="mt-1.5 text-xs text-gray-500">≈ {fmt(baseSellingPrice)}</p>}
