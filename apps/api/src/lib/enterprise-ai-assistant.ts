@@ -2,6 +2,13 @@ import { prisma } from '@/lib/prisma'
 import { cognitiveEngine, detectAndStoreBusinessType } from './enterprise-ai-cognitive'
 import { generateAutonomousReport as generateAutonomousReportModule } from './enterprise-ai-autonomous'
 import { generateHybridResponse } from './enterprise-ai-hybrid'
+import { generateStrategicSimulationReport } from './enterprise-ai-simulator'
+import { identifyLikelyRootCausesFromPrompt } from './enterprise-ai-causal'
+import { buildRecommendationExplanation } from './enterprise-ai-explainability'
+import { generateStrategicInsights } from './enterprise-ai-strategic-advisor'
+import { getMarketIntelligence } from './enterprise-ai-market-intel'
+import { buildExecutionPlan, deriveExecutableActionsFromBrief } from './enterprise-ai-autonomous-executor'
+import { loadExternalGroundingSnapshot, type ExternalGroundingSnapshot } from './enterprise-ai-external-data'
 import { logAudit } from '@/lib/audit'
 import { AsyncLocalStorage } from 'node:async_hooks'
 
@@ -92,6 +99,9 @@ type InventoryRiskItem = {
   stockValue: number
   turnoverRate: number
   costPrice?: number
+  originalUnitCost?: number | null
+  originalPurchaseDate?: string | null
+  provenanceEstimated?: boolean
   daysOfInventory: number
   reorderPoint: number
   economicOrderQty: number
@@ -130,7 +140,16 @@ type SalesInsight = {
   avgOrderValue: number
   topSellingProducts: Array<{ name: string; category: string | null; revenue: number; units: number; contributionPct: number }>
   topSellingCategories: Array<{ category: string; revenue: number; percentage: number }>
-  slowMovingProducts: Array<{ name: string; category: string | null; unitsSold: number; daysOnShelf: number; stockValue: number }>
+  slowMovingProducts: Array<{
+    name: string
+    category: string | null
+    unitsSold: number
+    daysOnShelf: number
+    stockValue: number
+    originalUnitCost?: number | null
+    originalPurchaseDate?: string | null
+    provenanceEstimated?: boolean
+  }>
   salesTrend: 'increasing' | 'stable' | 'decreasing'
   trendStrength: number
   peakHours: string[]
@@ -229,6 +248,7 @@ type BusinessIntelligence = {
 
 type AssistantGrounding = {
   tenantId: string
+  groundingSource: 'internal' | 'external'
   tenantInfo: TenantInfo
   incomeBreakdown: IncomeBreakdown
   periodLabel: string
@@ -302,6 +322,24 @@ type AssistantReliability = {
 
 type PromptIntent = 'RESTOCK' | 'PROFITABILITY' | 'SALES' | 'EXPENSES' | 'BRANCH' | 'CASHFLOW' | 'FORECAST' | 'GENERAL'
 
+type AssistantTaskType = 'status' | 'diagnosis' | 'prioritize' | 'decision' | 'forecast' | 'follow_up'
+
+type ResponseDetailLevel = 'brief' | 'deep'
+
+type AssistantResponsePolicy = {
+  responseMode: 'clarify' | 'brief' | 'deep'
+  taskType: AssistantTaskType
+  detailLevel: ResponseDetailLevel
+  allowScenario: boolean
+  allowCausal: boolean
+  allowStrategic: boolean
+  allowExecution: boolean
+  lowSignal: boolean
+  singleBranchComparisonsNotMeaningful: boolean
+  needsClarification: boolean
+  audience: string
+}
+
 type CurrencyFormattingContext = {
   baseCurrency: string
   previousCurrency: string | null
@@ -352,6 +390,19 @@ export type AssistantBrief = {
   actions: string[]
   risks: string[]
   followUpQuestions: string[]
+  responseMode?: 'clarify' | 'brief' | 'deep'
+  clarificationPrompt?: string
+  businessGuidance?: {
+    operatingMode: 'clarification_needed' | 'insufficient_evidence' | 'monitor_only' | 'manual_intervention' | 'decision_ready'
+    confidenceLabel: string
+    why: string
+    primaryRecommendation: string
+    expectedImpact: string
+    nextReview: string
+    audience: string
+  }
+  groundingNotes?: string[]
+  factBasis?: string[]
   financialMetrics?: {
     revenue: number
     profit: number
@@ -373,6 +424,61 @@ export type AssistantBrief = {
     message: string
     actionRequired: string
   }>
+  scenarioAnalysis?: {
+    bestScenario: string | null
+    worstScenario: string | null
+    profitSpread: number
+    roiSpread: number
+    calibrationSampleSize?: number
+    averageSuccessScore?: number
+    calibrationScore?: number
+    historicalAccuracy?: number
+    profitConfidenceInterval?: {
+      low: number
+      high: number
+    }
+  }
+  causalAnalysis?: {
+    problem: string
+    topCauses: Array<{ cause: string; contribution: number }>
+    interventions: string[]
+    methods?: Array<{
+      method: 'granger' | 'difference_in_differences' | 'synthetic_control'
+      title: string
+      confidence: number
+      pValue?: number
+      effectSize?: number
+    }>
+    confidenceScore?: number
+  }
+  strategicInsights?: Array<{
+    level: 'tactical' | 'operational' | 'strategic' | 'visionary'
+    insight: string
+    estimatedROI: number
+    timeHorizon: 'immediate' | 'quarter' | 'year' | '3_years'
+  }>
+  explanation?: {
+    summary: string
+    confidence: number
+    keyFactors: Array<{ factor: string; contribution: number; direction: 'positive' | 'negative' }>
+    limitations: string[]
+  }
+  executionPlan?: {
+    autoExecutableCount: number
+    approvalRequiredCount: number
+    highPriorityHumanActions?: string[]
+    workflowCoverageScore?: number
+    workflowStages?: Array<{
+      actionType: string
+      stageCount: number
+      matchedRules: number
+      requiresHumanDecision: boolean
+      executionId?: string
+      approvalStatus?: string
+      rollbackReady?: boolean
+    }>
+    topActionDecision?: 'auto_execute' | 'pending_approval'
+  }
   requiresApproval?: boolean
   estimatedCost?: number
 }
@@ -564,6 +670,10 @@ async function getSubscriptionIncomeForPeriod(
   baseCurrency: string,
   opts: { crossTenantScope: boolean },
 ): Promise<number> {
+  if (!opts.crossTenantScope) {
+    return 0
+  }
+
   const subscriptionWhere = opts.crossTenantScope
     ? { status: 'ACTIVE' as const, tenantId: { not: tenantId }, startDate: { lt: endDate }, expiryDate: { gt: startDate } }
     : { status: 'ACTIVE' as const, tenantId, startDate: { lt: endDate }, expiryDate: { gt: startDate } }
@@ -621,23 +731,23 @@ async function computeIncomeBreakdown(
   const subscriptionIncome = await getSubscriptionIncomeForPeriod(tenantId, startDate, endDate, baseCurrency, opts)
   const totalIncome = salesIncome + subscriptionIncome
 
-  const [activeSubscription, verifiedSubscriptionTxn] = await Promise.all([
-    prisma.subscription.findFirst({
-      where: opts.crossTenantScope
-        ? { tenantId: { not: tenantId }, status: 'ACTIVE' }
-        : { tenantId, status: 'ACTIVE' },
-      select: { id: true },
-    }),
-    prisma.subscriptionTransaction.findFirst({
-      where: {
-        status: { in: ['ACTIVE', 'VERIFIED'] },
-        ...(opts.crossTenantScope ? { tenantId: { not: tenantId } } : { tenantId }),
-      },
-      select: { id: true },
-    }),
-  ])
+  const [activeSubscription, verifiedSubscriptionTxn] = opts.crossTenantScope
+    ? await Promise.all([
+        prisma.subscription.findFirst({
+          where: { tenantId: { not: tenantId }, status: 'ACTIVE' },
+          select: { id: true },
+        }),
+        prisma.subscriptionTransaction.findFirst({
+          where: {
+            status: { in: ['ACTIVE', 'VERIFIED'] },
+            tenantId: { not: tenantId },
+          },
+          select: { id: true },
+        }),
+      ])
+    : [null, null]
 
-  const hasSubscriptionIncomeSource = Boolean(activeSubscription || verifiedSubscriptionTxn || subscriptionIncome > 0)
+  const hasSubscriptionIncomeSource = opts.crossTenantScope && Boolean(activeSubscription || verifiedSubscriptionTxn || subscriptionIncome > 0)
 
   return {
     totalIncome: round2(totalIncome),
@@ -652,7 +762,7 @@ async function computeIncomeBreakdown(
 }
 
 function shouldShowSubscriptionStream(incomeBreakdown: IncomeBreakdown): boolean {
-  return incomeBreakdown.hasSubscriptionIncomeSource || incomeBreakdown.subscriptionIncome > 0
+  return incomeBreakdown.subscriptionIncome > 0
 }
 
 function normalizeCurrencyCode(value: unknown): string | null {
@@ -761,6 +871,68 @@ function formatCurrency(value: number): string {
 
 function formatPercent(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`
+}
+
+function formatIsoDate(value: Date | string | null | undefined): string | null {
+  if (!value) return null
+  const parsed = value instanceof Date ? value : new Date(value)
+  const time = parsed.getTime()
+  if (!Number.isFinite(time)) return null
+  return parsed.toISOString().slice(0, 10)
+}
+
+function calculateDaysOnShelf(value: Date | string | null | undefined, fallbackDays = 30): number {
+  if (!value) return fallbackDays
+  const parsed = value instanceof Date ? value : new Date(value)
+  const time = parsed.getTime()
+  if (!Number.isFinite(time)) return fallbackDays
+  return Math.max(1, Math.floor((Date.now() - time) / (24 * 60 * 60 * 1000)))
+}
+
+function resolveProductProvenance(args: {
+  earliestReceipt?: {
+    purchaseDate: Date | string
+    unitCost?: number | string | null
+    isEstimated?: boolean
+  } | null
+  purchaseDate?: Date | string | null
+  createdAt?: Date | string | null
+  costPrice?: number | string | null
+}): {
+  originalPurchaseDate: string | null
+  originalUnitCost: number | null
+  provenanceEstimated: boolean
+} {
+  const receipt = args.earliestReceipt
+  if (receipt?.purchaseDate) {
+    return {
+      originalPurchaseDate: formatIsoDate(receipt.purchaseDate),
+      originalUnitCost: toNumber(receipt.unitCost),
+      provenanceEstimated: Boolean(receipt.isEstimated),
+    }
+  }
+
+  if (args.purchaseDate) {
+    return {
+      originalPurchaseDate: formatIsoDate(args.purchaseDate),
+      originalUnitCost: toNumber(args.costPrice),
+      provenanceEstimated: false,
+    }
+  }
+
+  if (args.createdAt) {
+    return {
+      originalPurchaseDate: formatIsoDate(args.createdAt),
+      originalUnitCost: toNumber(args.costPrice),
+      provenanceEstimated: true,
+    }
+  }
+
+  return {
+    originalPurchaseDate: null,
+    originalUnitCost: Number.isFinite(toNumber(args.costPrice)) ? toNumber(args.costPrice) : null,
+    provenanceEstimated: false,
+  }
 }
 
 function formatCompactNumber(value: number): string {
@@ -1040,6 +1212,425 @@ export function detectPromptIntent(prompt: string): PromptIntent {
   }
   
   return 'GENERAL'
+}
+
+export function detectAssistantTaskType(prompt: string): AssistantTaskType {
+  const lower = prompt.toLowerCase().trim()
+
+  if (/(recheck|follow up|follow-up|what changed|since last|still unresolved|did we|progress on)/i.test(lower)) {
+    return 'follow_up'
+  }
+  if (/(forecast|predict|projection|outlook|next month|next quarter|what will|upcoming)/i.test(lower)) {
+    return 'forecast'
+  }
+  if (/(why|root cause|diagnos|explain|what is driving|what caused|reason for)/i.test(lower)) {
+    return 'diagnosis'
+  }
+  if (/(which should|which branch|which product|priority|priorities|what should we do|what do i do|next 7 days|this week|immediate support|action plan)/i.test(lower)) {
+    return 'prioritize'
+  }
+  if (/(what if|scenario|simulate|decision|should we|should i|approve|invest|expand|raise price|cut price)/i.test(lower)) {
+    return 'decision'
+  }
+  return 'status'
+}
+
+export function detectResponseDetailLevel(prompt: string): ResponseDetailLevel {
+  const lower = prompt.toLowerCase()
+  if (/(deep dive|detailed|detail|breakdown|full analysis|show all|explain fully|step by step|with evidence)/i.test(lower)) {
+    return 'deep'
+  }
+  return 'brief'
+}
+
+export function shouldRequestClarification(prompt: string, intent: PromptIntent): boolean {
+  const lower = prompt.toLowerCase().trim()
+  const wordCount = lower.split(/\s+/).filter(Boolean).length
+  if (wordCount <= 3) return true
+  if (intent !== 'GENERAL') return false
+
+  return /(help|improve|advice|insight|business status|performance|what matters|what should i know)/i.test(lower)
+    && !/(sales|revenue|profit|margin|expense|branch|inventory|stock|cash|forecast)/i.test(lower)
+}
+
+export function shouldIncludeAdvancedInsights(args: {
+  intent: PromptIntent
+  taskType: AssistantTaskType
+  detailLevel: ResponseDetailLevel
+  coverageScore: number
+  hasEnoughData: boolean
+  activeBranchCount: number
+}): Pick<AssistantResponsePolicy, 'allowScenario' | 'allowCausal' | 'allowStrategic' | 'allowExecution'> {
+  const lowSignal = args.coverageScore < 0.55 || !args.hasEnoughData
+  const branchComparisonLimited = args.intent === 'BRANCH' && args.activeBranchCount <= 1
+  const deep = args.detailLevel === 'deep'
+
+  return {
+    allowScenario: deep && !lowSignal && !branchComparisonLimited && (args.taskType === 'decision' || args.taskType === 'forecast'),
+    allowCausal: deep && !lowSignal && !branchComparisonLimited && (args.taskType === 'diagnosis' || args.taskType === 'decision'),
+    allowStrategic: deep && !lowSignal && (args.intent === 'GENERAL' || args.intent === 'PROFITABILITY' || args.intent === 'SALES' || args.intent === 'EXPENSES') && args.taskType !== 'status',
+    allowExecution: args.intent === 'RESTOCK' || args.taskType === 'decision' || args.taskType === 'follow_up',
+  }
+}
+
+function buildAssistantAudience(userRole?: string): string {
+  if (userRole === 'SUPER_ADMIN') return 'Executive / platform owner'
+  if (userRole === 'BUSINESS_ADMIN') return 'Business admin / decision owner'
+  if (userRole === 'SALESPERSON') return 'Sales and frontline operator'
+  if (userRole === 'AGENT') return 'Operations agent'
+  return 'Business operator'
+}
+
+function buildResponsePolicy(args: {
+  prompt: string
+  intent: PromptIntent
+  grounding: AssistantGrounding
+  userRole?: string
+}): AssistantResponsePolicy {
+  const taskType = detectAssistantTaskType(args.prompt)
+  const detailLevel = detectResponseDetailLevel(args.prompt)
+  const needsClarification = shouldRequestClarification(args.prompt, args.intent)
+  const lowSignal = args.grounding.coverageScore < 0.55 || !args.grounding.dataQuality.hasEnoughData
+  const singleBranchComparisonsNotMeaningful = args.intent === 'BRANCH' && args.grounding.tenantInfo.activeBranchCount <= 1
+  const advanced = shouldIncludeAdvancedInsights({
+    intent: args.intent,
+    taskType,
+    detailLevel,
+    coverageScore: args.grounding.coverageScore,
+    hasEnoughData: args.grounding.dataQuality.hasEnoughData,
+    activeBranchCount: args.grounding.tenantInfo.activeBranchCount,
+  })
+
+  return {
+    responseMode: needsClarification ? 'clarify' : detailLevel,
+    taskType,
+    detailLevel,
+    allowScenario: advanced.allowScenario,
+    allowCausal: advanced.allowCausal,
+    allowStrategic: advanced.allowStrategic,
+    allowExecution: advanced.allowExecution,
+    lowSignal,
+    singleBranchComparisonsNotMeaningful,
+    needsClarification,
+    audience: buildAssistantAudience(args.userRole),
+  }
+}
+
+function buildClarificationBrief(args: {
+  prompt: string
+  intent: PromptIntent
+  grounding: AssistantGrounding
+  policy: AssistantResponsePolicy
+}): AssistantBrief {
+  const baseFact = args.intent === 'GENERAL'
+    ? `Current coverage is ${Math.round(args.grounding.coverageScore * 100)}% with ${args.grounding.dataQuality.recency} data.`
+    : `Grounded on ${args.grounding.periodLabel.toLowerCase()} tenant data with ${Math.round(args.grounding.coverageScore * 100)}% coverage.`
+
+  const suggestions = args.intent === 'GENERAL'
+    ? [
+        'Summarize this week\'s sales priorities',
+        'Show branch risks for this week',
+        'Explain what is driving margin pressure',
+      ]
+    : args.intent === 'BRANCH'
+      ? [
+          'Give me a single-branch weekly KPI summary',
+          'Show the top branch risks with financial impact',
+          'Create a 7-day branch action plan',
+        ]
+      : [
+          'Summarize current status only',
+          'Explain the root causes',
+          'Recommend actions for the next 7 days',
+        ]
+
+  return {
+    summary: 'I can answer this better if you narrow the business task first.',
+    comparativeInsights: [baseFact, `Audience: ${args.policy.audience}`],
+    actions: ['Choose one of the follow-up prompts below so I can return a focused operator-grade answer.'],
+    risks: ['A broad prompt increases the chance of mixing status, diagnosis, and recommendations in one reply.'],
+    followUpQuestions: suggestions,
+    responseMode: 'clarify',
+    clarificationPrompt: args.prompt,
+    businessGuidance: {
+      operatingMode: 'clarification_needed',
+      confidenceLabel: 'Clarification needed',
+      why: 'The prompt is too broad to determine whether you want status, diagnosis, or action guidance.',
+      primaryRecommendation: 'Select a narrower prompt path before acting on the output.',
+      expectedImpact: 'Higher relevance and less filler in the next response.',
+      nextReview: 'Ask one focused follow-up now.',
+      audience: args.policy.audience,
+    },
+    groundingNotes: ['The assistant is pausing to avoid a broad, mixed-quality response.'],
+    factBasis: [baseFact],
+  }
+}
+
+function limitList(values: string[], maxItems: number): string[] {
+  return values.filter((value) => typeof value === 'string' && value.trim()).slice(0, maxItems)
+}
+
+function sanitizeFactLines(values: string[]): string[] {
+  return values.filter((value) => typeof value === 'string' && value.trim()).map((value) => value.trim())
+}
+
+function removeMatchingLines(values: string[], pattern: RegExp): string[] {
+  return values.filter((value) => !pattern.test(value))
+}
+
+function applySingleBranchOperationalRewrite(brief: AssistantBrief, grounding: AssistantGrounding): AssistantBrief {
+  const branchSnapshot = getBranchAttributedSnapshot(grounding.branchComparisons)
+  const onlyBranchName = grounding.branchComparisons[0]?.branchName || 'Head Office'
+  const hasSignal = branchSnapshot.revenueCurrent > 0 || branchSnapshot.expenseCurrent > 0
+
+  return {
+    ...brief,
+    summary: hasSignal
+      ? `🏢 ${grounding.tenantInfo.name} Weekly Branch Status: only one active branch is configured, so comparative ranking is not applicable. ${onlyBranchName} generated ${formatCurrency(branchSnapshot.revenueCurrent)} in branch-attributed revenue this period with ${branchSnapshot.marginPctCurrent.toFixed(1)}% margin.`
+      : `🏢 ${grounding.tenantInfo.name} Weekly Branch Status: only one active branch is configured, so comparative branch ranking is not applicable yet.`,
+    comparativeInsights: sanitizeFactLines([
+      `Only ${grounding.tenantInfo.activeBranchCount} active branch is configured.`,
+      `Branch in scope: ${onlyBranchName}.`,
+      `Branch-attributed revenue: ${formatCurrency(branchSnapshot.revenueCurrent)}.`,
+      `Branch-attributed margin: ${formatCurrency(branchSnapshot.marginCurrent)} (${branchSnapshot.marginPctCurrent.toFixed(1)}%).`,
+      `Coverage score: ${Math.round(grounding.coverageScore * 100)}% with ${grounding.dataQuality.recency} data.`,
+    ]),
+    actions: sanitizeFactLines([
+      `P3 - Maintain weekly revenue and margin checkpoint for ${onlyBranchName}.`,
+      'P3 - Keep branch tagging discipline consistent so future comparisons remain reliable.',
+      'P2 - Ask for a single-branch 7-day action plan if you want branch-specific operational tasks.',
+    ]),
+    risks: sanitizeFactLines([
+      'Comparative branch ranking is unavailable with a single active branch.',
+      `Coverage score: ${Math.round(grounding.coverageScore * 100)}%.`,
+      `Recency: ${grounding.dataQuality.recency}.`,
+    ]),
+    followUpQuestions: [
+      `Do you want a 7-day action plan for ${onlyBranchName}?`,
+      `Do you want anomaly-only monitoring for ${onlyBranchName}?`,
+      'Should I switch to a company-wide summary instead of branch comparison?',
+    ],
+    scenarioAnalysis: undefined,
+    causalAnalysis: undefined,
+    strategicInsights: undefined,
+    executionPlan: undefined,
+  }
+}
+
+function buildFactBasis(args: {
+  intent: PromptIntent
+  grounding: AssistantGrounding
+  responseGrounding: AssistantGrounding
+}): string[] {
+  const facts: string[] = []
+  facts.push(`Grounding source: ${args.responseGrounding.groundingSource}.`)
+  facts.push(`Coverage score: ${Math.round(args.grounding.coverageScore * 100)}% with ${args.grounding.dataQuality.recency} data.`)
+
+  if (args.intent === 'BRANCH') {
+    facts.push(`Active branches configured: ${args.grounding.tenantInfo.activeBranchCount}.`)
+    facts.push(`Branch-attributed revenue in scope: ${formatCurrency(args.responseGrounding.current.revenue)}.`)
+    facts.push(`Branch-attributed margin in scope: ${formatCurrency(args.responseGrounding.current.profit)} (${args.responseGrounding.current.margin.toFixed(1)}%).`)
+  } else if (args.intent === 'SALES' || args.intent === 'GENERAL') {
+    facts.push(`Current revenue: ${formatCurrency(args.responseGrounding.current.revenue)} (${formatPercent(args.responseGrounding.deltas.revenuePct)} vs prior).`)
+    facts.push(`Transactions observed: ${args.grounding.salesInsights.transactionCount}.`)
+  } else if (args.intent === 'PROFITABILITY') {
+    facts.push(`Net profit: ${formatCurrency(args.grounding.profitability.netProfit)} (${args.grounding.profitability.netMarginPct.toFixed(1)}% margin).`)
+    facts.push(`Loss-making products: ${args.grounding.profitability.lossMakingProductCount}.`)
+  } else if (args.intent === 'EXPENSES') {
+    facts.push(`Expense growth: ${formatPercent(args.grounding.expenseInsights.expenseGrowthRate)} vs prior.`)
+    facts.push(`Cost-to-revenue ratio: ${args.grounding.expenseInsights.costToRevenueRatio.toFixed(1)}%.`)
+  } else if (args.intent === 'RESTOCK') {
+    facts.push(`P1 stockout risks: ${args.grounding.inventoryRiskItems.filter((item) => item.urgency === 'P1').length}.`)
+    facts.push(`Inventory turnover: ${(args.grounding.businessIntelligence?.inventoryHealth?.inventoryTurnover || 0).toFixed(1)}x.`)
+  }
+
+  if (args.grounding.history.length > 0) {
+    facts.push(`Conversation context includes ${args.grounding.history.length} prior assistant turn(s).`)
+  }
+
+  return sanitizeFactLines(facts)
+}
+
+function buildGroundingNotes(args: {
+  grounding: AssistantGrounding
+  policy: AssistantResponsePolicy
+}): string[] {
+  const notes = [
+    args.grounding.groundingSource === 'external'
+      ? 'Response is grounded on the validated external connector snapshot for this tenant.'
+      : 'Response is grounded on internal tenant analytics data.',
+    args.policy.lowSignal
+      ? 'Low-signal safeguards are active, so speculative sections are suppressed.'
+      : 'Sufficient signal is available for focused business guidance.',
+  ]
+
+  if (args.grounding.history.length > 0) {
+    notes.push('Prior conversation context was considered when shaping the follow-up path.')
+  }
+
+  return sanitizeFactLines(notes)
+}
+
+function buildBusinessGuidance(args: {
+  brief: AssistantBrief
+  grounding: AssistantGrounding
+  policy: AssistantResponsePolicy
+  reliability: AssistantReliability
+}): NonNullable<AssistantBrief['businessGuidance']> {
+  const operatingMode: NonNullable<AssistantBrief['businessGuidance']>['operatingMode'] = args.policy.needsClarification
+    ? 'clarification_needed'
+    : args.policy.lowSignal
+      ? 'insufficient_evidence'
+      : args.reliability.confidenceLevel === 'high' && (args.policy.taskType === 'decision' || args.policy.taskType === 'prioritize')
+        ? 'decision_ready'
+        : args.reliability.confidenceLevel === 'low'
+          ? 'monitor_only'
+          : 'manual_intervention'
+
+  const confidenceLabel = operatingMode === 'clarification_needed'
+    ? 'Clarification needed'
+    : operatingMode === 'insufficient_evidence'
+      ? 'Use for monitoring only'
+      : operatingMode === 'decision_ready'
+        ? 'Decision-ready for manual action'
+        : operatingMode === 'manual_intervention'
+          ? 'Good for manual review'
+          : 'Monitoring only'
+
+  const primaryRecommendation = args.brief.actions[0] || args.brief.summary
+  const expectedImpact = args.brief.financialMetrics
+    ? `Revenue ${formatCurrency(args.brief.financialMetrics.revenue)} | Profit ${formatCurrency(args.brief.financialMetrics.profit)} | Margin ${args.brief.financialMetrics.margin.toFixed(1)}%`
+    : `Coverage ${Math.round(args.grounding.coverageScore * 100)}% with ${args.grounding.dataQuality.recency} data`
+  const nextReview = args.policy.taskType === 'prioritize' || args.policy.taskType === 'status'
+    ? 'Review again in 7 days or after a material KPI change.'
+    : args.policy.taskType === 'forecast'
+      ? 'Re-run after the next reporting period or major assumption change.'
+      : 'Review again after the next operational update.'
+
+  return {
+    operatingMode,
+    confidenceLabel,
+    why: args.policy.lowSignal
+      ? 'Coverage or data completeness is not strong enough for aggressive recommendations.'
+      : `Grounding quality is ${Math.round(args.reliability.groundingQualityScore * 100)}% with ${args.reliability.confidenceLevel} confidence.`,
+    primaryRecommendation,
+    expectedImpact,
+    nextReview,
+    audience: args.policy.audience,
+  }
+}
+
+function applyContradictionFilters(args: {
+  brief: AssistantBrief
+  grounding: AssistantGrounding
+  responseGrounding: AssistantGrounding
+  intent: PromptIntent
+  policy: AssistantResponsePolicy
+}): AssistantBrief {
+  const brief = { ...args.brief }
+  const stableContext = `${brief.summary} ${brief.risks.join(' ')}`.toLowerCase()
+
+  if (
+    brief.causalAnalysis
+    && (args.intent === 'BRANCH' || args.responseGrounding.deltas.revenuePct >= 0 || /no immediate|stable|not applicable/.test(stableContext))
+    && brief.causalAnalysis.problem === 'revenue_decline'
+  ) {
+    const conflictingCause = brief.causalAnalysis.topCauses.some((cause) => /declin|low transaction velocity|demand softening/i.test(cause.cause))
+    if (conflictingCause) {
+      brief.causalAnalysis = undefined
+    }
+  }
+
+  if (
+    brief.scenarioAnalysis
+    && (
+      (brief.scenarioAnalysis.bestScenario === brief.scenarioAnalysis.worstScenario && brief.scenarioAnalysis.profitSpread === 0)
+      || ((brief.scenarioAnalysis.calibrationScore || 0) < 0.35 && (brief.scenarioAnalysis.historicalAccuracy || 0) <= 0)
+      || args.policy.lowSignal
+    )
+  ) {
+    brief.scenarioAnalysis = undefined
+    brief.comparativeInsights = removeMatchingLines(brief.comparativeInsights, /^Scenario best-case:/i)
+  }
+
+  if (args.policy.lowSignal || args.policy.taskType === 'status') {
+    brief.actions = brief.actions.filter((item) => !/STRATEGIC:/i.test(item))
+    if (brief.strategicInsights?.length === 1 && /stable|measurement cadence/i.test(brief.strategicInsights[0]?.insight || '')) {
+      brief.strategicInsights = undefined
+    }
+  }
+
+  if (!args.policy.allowExecution && (!brief.executionPlan?.highPriorityHumanActions || brief.executionPlan.highPriorityHumanActions.length === 0)) {
+    brief.executionPlan = undefined
+  }
+
+  return brief
+}
+
+function applyResponsePolicyToBrief(args: {
+  brief: AssistantBrief
+  prompt: string
+  intent: PromptIntent
+  grounding: AssistantGrounding
+  responseGrounding: AssistantGrounding
+  reliability: AssistantReliability
+  policy: AssistantResponsePolicy
+}): AssistantBrief {
+  let nextBrief = { ...args.brief }
+
+  if (args.policy.needsClarification) {
+    nextBrief = buildClarificationBrief({
+      prompt: args.prompt,
+      intent: args.intent,
+      grounding: args.grounding,
+      policy: args.policy,
+    })
+  }
+
+  if (args.policy.singleBranchComparisonsNotMeaningful && args.intent === 'BRANCH') {
+    nextBrief = applySingleBranchOperationalRewrite(nextBrief, args.grounding)
+  }
+
+  if (!args.policy.allowScenario) nextBrief.scenarioAnalysis = undefined
+  if (!args.policy.allowCausal) nextBrief.causalAnalysis = undefined
+  if (!args.policy.allowStrategic) {
+    nextBrief.strategicInsights = undefined
+    nextBrief.actions = nextBrief.actions.filter((item) => !/STRATEGIC:/i.test(item))
+  }
+  if (!args.policy.allowExecution && (!nextBrief.executionPlan?.highPriorityHumanActions || nextBrief.executionPlan.highPriorityHumanActions.length === 0)) {
+    nextBrief.executionPlan = undefined
+  }
+
+  nextBrief = applyContradictionFilters({
+    brief: nextBrief,
+    grounding: args.grounding,
+    responseGrounding: args.responseGrounding,
+    intent: args.intent,
+    policy: args.policy,
+  })
+
+  const listLimit = args.policy.detailLevel === 'deep' ? 6 : 4
+  const riskLimit = args.policy.detailLevel === 'deep' ? 5 : 3
+  nextBrief.comparativeInsights = limitList(nextBrief.comparativeInsights, listLimit)
+  nextBrief.actions = limitList(nextBrief.actions, listLimit)
+  nextBrief.risks = limitList(nextBrief.risks, riskLimit)
+  nextBrief.followUpQuestions = limitList(nextBrief.followUpQuestions, 3)
+  nextBrief.quickWins = nextBrief.quickWins ? limitList(nextBrief.quickWins, 3) : undefined
+  nextBrief.responseMode = args.policy.responseMode
+  nextBrief.groundingNotes = buildGroundingNotes({ grounding: args.responseGrounding, policy: args.policy })
+  nextBrief.factBasis = buildFactBasis({
+    intent: args.intent,
+    grounding: args.grounding,
+    responseGrounding: args.responseGrounding,
+  })
+  nextBrief.businessGuidance = buildBusinessGuidance({
+    brief: nextBrief,
+    grounding: args.responseGrounding,
+    policy: args.policy,
+    reliability: args.reliability,
+  })
+
+  return nextBrief
 }
 
 // ============================================================
@@ -1474,7 +2065,24 @@ async function analyzeSalesInsights(
 
   const productsWithStock = await prisma.product.findMany({
     where: { tenantId, archived: false, quantity: { gt: 0 } },
-    select: { id: true, name: true, category: true, quantity: true, costPrice: true, createdAt: true },
+    select: {
+      id: true,
+      name: true,
+      category: true,
+      quantity: true,
+      costPrice: true,
+      purchaseDate: true,
+      createdAt: true,
+      productReceipts: {
+        select: {
+          purchaseDate: true,
+          unitCost: true,
+          isEstimated: true,
+        },
+        orderBy: { purchaseDate: 'asc' },
+        take: 1,
+      },
+    },
     take: 50,
   })
 
@@ -1493,7 +2101,13 @@ async function analyzeSalesInsights(
 
   const slowMoving = productsWithStock.map((product) => {
     const unitsSold = soldUnitsByProductId.get(product.id) || 0
-    const daysOnShelf = Math.max(1, Math.floor((Date.now() - product.createdAt.getTime()) / (24 * 60 * 60 * 1000)))
+    const provenance = resolveProductProvenance({
+      earliestReceipt: product.productReceipts[0],
+      purchaseDate: product.purchaseDate,
+      createdAt: product.createdAt,
+      costPrice: product.costPrice,
+    })
+    const daysOnShelf = calculateDaysOnShelf(provenance.originalPurchaseDate, calculateDaysOnShelf(product.createdAt, 30))
     const stockValue = toNumber(product.quantity) * toNumber(product.costPrice)
     return {
       name: product.name,
@@ -1502,6 +2116,9 @@ async function analyzeSalesInsights(
       daysOnShelf,
       turnover: unitsSold / daysOnShelf,
       stockValue,
+      originalUnitCost: provenance.originalUnitCost,
+      originalPurchaseDate: provenance.originalPurchaseDate,
+      provenanceEstimated: provenance.provenanceEstimated,
     }
   })
 
@@ -1509,7 +2126,16 @@ async function analyzeSalesInsights(
     .filter(p => p.unitsSold < 5 && p.daysOnShelf > 30)
     .sort((a, b) => a.turnover - b.turnover)
     .slice(0, 5)
-    .map(p => ({ name: p.name, category: p.category, unitsSold: p.unitsSold, daysOnShelf: p.daysOnShelf, stockValue: round2(p.stockValue) }))
+    .map(p => ({
+      name: p.name,
+      category: p.category,
+      unitsSold: p.unitsSold,
+      daysOnShelf: p.daysOnShelf,
+      stockValue: round2(p.stockValue),
+      originalUnitCost: p.originalUnitCost,
+      originalPurchaseDate: p.originalPurchaseDate,
+      provenanceEstimated: p.provenanceEstimated,
+    }))
 
   return {
     totalSales: round2(totalIncome),
@@ -1686,6 +2312,17 @@ async function getInventoryRiskItems(tenantId: string, currentStart: Date): Prom
         quantity: true,
         lowStockThreshold: true,
         costPrice: true,
+        purchaseDate: true,
+        createdAt: true,
+        productReceipts: {
+          select: {
+            purchaseDate: true,
+            unitCost: true,
+            isEstimated: true,
+          },
+          orderBy: { purchaseDate: 'asc' },
+          take: 1,
+        },
       },
       take: 500,
     }),
@@ -1706,6 +2343,12 @@ async function getInventoryRiskItems(tenantId: string, currentStart: Date): Prom
 
   const riskItems = products
     .map((product) => {
+      const provenance = resolveProductProvenance({
+        earliestReceipt: product.productReceipts[0],
+        purchaseDate: product.purchaseDate,
+        createdAt: product.createdAt,
+        costPrice: product.costPrice,
+      })
       const currentStock = toNumber(product.quantity)
       const lowStockThreshold = toNumber(product.lowStockThreshold) || 10
       const soldUnits30 = toNumber(soldByProduct.get(product.id)) || 0
@@ -1794,6 +2437,9 @@ async function getInventoryRiskItems(tenantId: string, currentStart: Date): Prom
         stockValue: round2(stockValue),
         turnoverRate: round2(turnoverRate),
         costPrice: toNumber(product.costPrice),
+        originalUnitCost: provenance.originalUnitCost,
+        originalPurchaseDate: provenance.originalPurchaseDate,
+        provenanceEstimated: provenance.provenanceEstimated,
         daysOfInventory: round2(daysOfInventory),
         reorderPoint: round2(reorderPoint),
         economicOrderQty: round2(economicOrderQty),
@@ -2476,7 +3122,16 @@ async function buildUserPrompt(
       `Forecast confidence: ${(grounding.salesInsights.salesForecast.confidence * 100).toFixed(0)}%`,
       `Top selling products: ${JSON.stringify(grounding.salesInsights.topSellingProducts.slice(0, 5))}`,
       `Top selling categories: ${JSON.stringify(grounding.salesInsights.topSellingCategories.slice(0, 3))}`,
-      `Slow moving products: ${JSON.stringify(grounding.salesInsights.slowMovingProducts.slice(0, 3))}`,
+      `Slow moving products: ${JSON.stringify(grounding.salesInsights.slowMovingProducts.slice(0, 3).map((product) => ({
+        name: product.name,
+        category: product.category,
+        unitsSold: product.unitsSold,
+        daysOnShelf: product.daysOnShelf,
+        stockValue: product.stockValue,
+        originalPurchaseDate: product.originalPurchaseDate,
+        originalUnitCost: product.originalUnitCost,
+        provenanceEstimated: product.provenanceEstimated,
+      })))}`,
       `Sales anomalies detected: ${grounding.salesInsights.anomalies.length}`,
       '',
     )
@@ -2514,7 +3169,11 @@ async function buildUserPrompt(
         priority: i.urgency,
         eoq: i.economicOrderQty,
         stockoutProbability: `${(i.stockoutProbability * 100).toFixed(0)}%`,
-        recommendedAction: i.recommendedAction
+        recommendedAction: i.recommendedAction,
+        currentUnitCost: i.costPrice,
+        originalUnitCost: i.originalUnitCost,
+        originalPurchaseDate: i.originalPurchaseDate,
+        provenanceEstimated: i.provenanceEstimated,
       })))}`,
       '',
     )
@@ -2908,6 +3567,20 @@ function formatBriefAsText(brief: AssistantBrief, tenantName?: string): string {
       lines.push(`   → Action: ${alert.actionRequired}`)
     }
   }
+
+  if (brief.businessGuidance) {
+    lines.push(
+      '',
+      '🧭 BUSINESS GUIDANCE',
+      '─'.repeat(40),
+      `Mode: ${brief.businessGuidance.confidenceLabel}`,
+      `Audience: ${brief.businessGuidance.audience}`,
+      `Primary Recommendation: ${brief.businessGuidance.primaryRecommendation}`,
+      `Why: ${brief.businessGuidance.why}`,
+      `Expected Impact: ${brief.businessGuidance.expectedImpact}`,
+      `Next Review: ${brief.businessGuidance.nextReview}`,
+    )
+  }
   
   lines.push(
     '',
@@ -2936,6 +3609,14 @@ function formatBriefAsText(brief: AssistantBrief, tenantName?: string): string {
 
   if (brief.risks.length > 0) {
     lines.push('', '⚠️ RISKS TO MONITOR', '─'.repeat(40), ...brief.risks.map((item) => `• ${item}`))
+  }
+
+  if (brief.factBasis && brief.factBasis.length > 0) {
+    lines.push('', '🧾 FACT BASIS', '─'.repeat(40), ...brief.factBasis.map((item) => `• ${item}`))
+  }
+
+  if (brief.groundingNotes && brief.groundingNotes.length > 0) {
+    lines.push('', '🔐 GROUNDING NOTES', '─'.repeat(40), ...brief.groundingNotes.map((item) => `• ${item}`))
   }
 
   if (brief.followUpQuestions.length > 0) {
@@ -3018,64 +3699,6 @@ function storeCurrentState(tenantId: string, grounding: AssistantGrounding): voi
     if (oldestKey) {
       previousStateCache.delete(oldestKey)
     }
-  }
-}
-
-async function generateAutonomousReport(grounding: AssistantGrounding): Promise<{
-  predictiveAlerts: Array<{
-    severity: 'critical' | 'warning' | 'info'
-    title: string
-    recommendedAction: string
-  }>
-  dataQualityIssues: string[]
-  purchaseRecommendations: {
-    recommendations: Array<{
-      productName: string
-      suggestedReorderQty: number
-      totalCost: number
-    }>
-  }
-}> {
-  const predictiveAlerts: Array<{
-    severity: 'critical' | 'warning' | 'info'
-    title: string
-    recommendedAction: string
-  }> = grounding.anomalies.slice(0, 5).map((anomaly) => ({
-    severity: anomaly.severity === 'high' ? 'critical' : anomaly.severity === 'medium' ? 'warning' : 'info',
-    title: anomaly.description,
-    recommendedAction: anomaly.recommendedAction,
-  }))
-
-  const dataQualityIssues: string[] = []
-  if (grounding.dataQuality.recency === 'stale') {
-    dataQualityIssues.push('Data recency is stale')
-  }
-  if (grounding.dataQuality.recency === 'outdated') {
-    dataQualityIssues.push('Data recency is outdated')
-  }
-  if (grounding.dataQuality.completeness < grounding.confidenceThresholds.minCompleteness) {
-    dataQualityIssues.push(`Data completeness is low (${Math.round(grounding.dataQuality.completeness * 100)}%)`)
-  }
-  if (grounding.coverageScore < grounding.confidenceThresholds.minCoverageScore) {
-    dataQualityIssues.push(`Coverage score is low (${Math.round(grounding.coverageScore * 100)}%)`)
-  }
-
-  const purchaseRecommendations = {
-    recommendations: grounding.inventoryRiskItems
-      .filter((item) => item.urgency === 'P1' || item.urgency === 'P2')
-      .map((item) => ({
-        productName: item.productName,
-        suggestedReorderQty: item.suggestedReorderQty,
-        totalCost: round2(item.suggestedReorderQty * (item.costPrice || 0)),
-      }))
-      .filter((item) => item.suggestedReorderQty > 0)
-      .slice(0, 5),
-  }
-
-  return {
-    predictiveAlerts,
-    dataQualityIssues,
-    purchaseRecommendations,
   }
 }
 
@@ -3310,6 +3933,7 @@ async function buildDeterministicBrief(question: string, grounding: AssistantGro
     const p1Items = grounding.inventoryRiskItems.filter(i => i.urgency === 'P1')
     const p2Items = grounding.inventoryRiskItems.filter(i => i.urgency === 'P2')
     const p3Items = grounding.inventoryRiskItems.filter(i => i.urgency === 'P3')
+    const actionableRiskItems = grounding.inventoryRiskItems.filter(i => i.urgency === 'P1' || i.urgency === 'P2')
     
     let summary = ''
     let comparativeInsights: string[] = []
@@ -3334,14 +3958,34 @@ async function buildDeterministicBrief(question: string, grounding: AssistantGro
         `Consider clearance for slow-moving inventory`,
       ]
     } else {
-      const totalReorderValue = p1Items.reduce((sum, i) => sum + (i.suggestedReorderQty * (i.costPrice || 10)), 0)
-      summary = `🚨 ${tenantName} INVENTORY ALERT: ${p1Items.length} CRITICAL (P1), ${p2Items.length} IMPORTANT (P2) items need attention. Estimated reorder cost: ${formatCurrency(totalReorderValue)}.`
+      const totalReorderValue = actionableRiskItems.reduce((sum, item) => {
+        const unitCost = toNumber(item.costPrice)
+        const normalizedUnitCost = unitCost > 0 ? unitCost : 0
+        return sum + (item.suggestedReorderQty * normalizedUnitCost)
+      }, 0)
+      const missingCostCoverage = actionableRiskItems.some((item) => item.suggestedReorderQty > 0 && !(toNumber(item.costPrice) > 0))
+      const reorderCostText = totalReorderValue > 0
+        ? formatCurrency(totalReorderValue)
+        : missingCostCoverage
+          ? 'unavailable (missing item cost prices)'
+          : formatCurrency(0)
+      const p1Count = p1Items.length > 0 ? `${p1Items.length} CRITICAL (P1 - IMMEDIATE):` : ''
+      const p2Count = p2Items.length > 0 ? `${p2Items.length} IMPORTANT (P2 - THIS WEEK):` : ''
+      const summaryLineItems = [p1Count, p2Count].filter(Boolean).join(' + ')
+      summary = `🚨 ${tenantName} INVENTORY ALERT: ${summaryLineItems || 'No urgent action required'}. Total reorder cost: ${reorderCostText}.`
+      
+      let belowThresholdNow: string[] = []
+      let reorderListByUrgency: string[] = []
       
       if (p1Items.length > 0) {
         comparativeInsights.push(`🔴 P1 - STOCKOUT IMMINENT (24 hours):`)
         for (const item of p1Items) {
           const daysLeft = item.daysToStockout?.toFixed(1) || '0'
           const lostSalesRisk = item.avgDailyDemand * (item.costPrice || 10) * 2
+          belowThresholdNow.push(`${item.productName}: ${item.currentStock}/${item.lowStockThreshold}`)
+          const unitCost = toNumber(item.costPrice)
+          const lineCost = unitCost > 0 ? formatCurrency(item.suggestedReorderQty * unitCost) : '(cost data missing)'
+          reorderListByUrgency.push(`[P1] ${item.productName}: ${item.suggestedReorderQty} units @ ${lineCost}`)
           comparativeInsights.push(
             `  • ${item.productName} (${item.category || 'uncategorized'}): ${item.currentStock} units left (threshold: ${item.lowStockThreshold}), ` +
             `${item.avgDailyDemand.toFixed(1)} units/day → ${daysLeft} days remaining. ` +
@@ -3354,12 +3998,35 @@ async function buildDeterministicBrief(question: string, grounding: AssistantGro
       if (p2Items.length > 0) {
         comparativeInsights.push(`🟡 P2 - Important (This week):`)
         for (const item of p2Items.slice(0, 5)) {
+          const thresholdMessage = item.currentStock <= item.lowStockThreshold
+            ? `below safety threshold now at ${item.currentStock} units (threshold: ${item.lowStockThreshold})`
+            : `${item.currentStock} units on hand (threshold: ${item.lowStockThreshold})`
+          const coverageMessage = item.daysToStockout !== null
+            ? `${item.daysToStockout.toFixed(1)} days of cover at recent demand`
+            : 'demand history is limited, so threshold breach is the main signal'
+          if (item.currentStock <= item.lowStockThreshold) {
+            belowThresholdNow.push(`${item.productName}: ${item.currentStock}/${item.lowStockThreshold}`)
+          }
+          const unitCost = toNumber(item.costPrice)
+          const lineCost = unitCost > 0 ? formatCurrency(item.suggestedReorderQty * unitCost) : '(cost data missing)'
+          reorderListByUrgency.push(`[P2] ${item.productName}: ${item.suggestedReorderQty} units @ ${lineCost}`)
           comparativeInsights.push(
-            `  • ${item.productName} (${item.category || 'uncategorized'}): ${item.currentStock} units (threshold: ${item.lowStockThreshold}), ` +
-            `${item.daysToStockout?.toFixed(1)} days left. Reorder ${item.suggestedReorderQty} units.`
+            `  • ${item.productName} (${item.category || 'uncategorized'}): ${thresholdMessage}; ${coverageMessage}. Reorder ${item.suggestedReorderQty} units this week.`
           )
           actions.push(`P2 - THIS WEEK: Order ${item.suggestedReorderQty} units of ${item.productName}`)
         }
+      }
+      
+      if (belowThresholdNow.length > 0) {
+        comparativeInsights.push('')
+        comparativeInsights.push(`📋 Items Below Safety Threshold RIGHT NOW:`)
+        belowThresholdNow.forEach(item => comparativeInsights.push(`  • ${item}`))
+      }
+      
+      if (reorderListByUrgency.length > 0) {
+        comparativeInsights.push('')
+        comparativeInsights.push(`📦 EXACT REORDER LIST (sorted by urgency):`)
+        reorderListByUrgency.forEach(item => comparativeInsights.push(`  ${item}`))
       }
       
       if (p3Items.length > 0 && p1Items.length === 0 && p2Items.length === 0) {
@@ -3376,6 +4043,7 @@ async function buildDeterministicBrief(question: string, grounding: AssistantGro
     
     const risks = [
       p1Items.length > 0 ? `P1 items (${p1Items.map(i => i.productName).join(', ')}) will cause lost sales if not reordered today` : 'No critical stockout risks',
+      p1Items.length === 0 && p2Items.length > 0 ? `P2 items (${p2Items.map(i => i.productName).join(', ')}) are below safety threshold and should be reordered this week` : '',
       `Inventory turnover: ${currentTurnover.toFixed(1)}x - ${currentTurnover < 2 ? 'slow turnover needs attention' : 'healthy'}`,
       `Cash tied in inventory: ${formatCurrency(cashTied)}`,
       currentDaysOfInventory > 60 ? `Days of inventory: ${currentDaysOfInventory.toFixed(0)} days - excessive` : '',
@@ -3401,6 +4069,10 @@ async function buildDeterministicBrief(question: string, grounding: AssistantGro
         severity: 'critical',
         message: `${p1Items.length} products at immediate stockout risk`,
         actionRequired: 'Reorder within 24 hours'
+      }] : p2Items.length > 0 ? [{
+        severity: 'warning',
+        message: `${p2Items.length} products are below stock threshold and need reorder planning this week`,
+        actionRequired: 'Create or approve a reorder plan within 7 days'
       }] : [],
       financialMetrics: {
         revenue: grounding.current.revenue,
@@ -3571,6 +4243,7 @@ async function buildDeterministicBrief(question: string, grounding: AssistantGro
   if (intent === 'BRANCH' || lowerQuestion.includes('branch') || lowerQuestion.includes('subsidiary') || lowerQuestion.includes('store')) {
     const branchPriorities = getBranchPerformancePriorities(grounding.branchComparisons)
     const branchSnapshot = getBranchAttributedSnapshot(grounding.branchComparisons)
+    const branchInventoryTurnover = grounding.businessIntelligence?.inventoryHealth?.inventoryTurnover || 0
     const branchCount = grounding.branchComparisons.length
     const topBranch = grounding.branchComparisons[0]
     const underperforming = grounding.branchComparisons.filter((b) => b.currentMargin < 0 || b.revenueDeltaPct < -15)
@@ -3666,7 +4339,7 @@ async function buildDeterministicBrief(question: string, grounding: AssistantGro
         profit: branchSnapshot.marginCurrent,
         margin: branchSnapshot.marginPctCurrent,
         expenseRatio: branchSnapshot.revenueCurrent > 0 ? round2((branchSnapshot.expenseCurrent / branchSnapshot.revenueCurrent) * 100) : 0,
-        inventoryTurnover: currentTurnover,
+        inventoryTurnover: branchInventoryTurnover,
         cashRunway: grounding.businessIntelligence?.cashFlowInsight?.currentRunway || null,
       },
     }
@@ -3677,9 +4350,22 @@ async function buildDeterministicBrief(question: string, grounding: AssistantGro
   
   // ===== GENERAL INTENT - Comprehensive Overview =====
   const healthScore = grounding.businessIntelligence?.inventoryHealth?.healthScore || 50
-  const summary = `📊 ${tenantName} BUSINESS HEALTH: ${Math.round(healthScore)}/100 (${healthScore >= 70 ? 'Strong' : healthScore >= 50 ? 'Moderate' : 'Critical'}). ` +
+  const hasAnyData = grounding.salesInsights.transactionCount > 0 ||
+    grounding.incomeBreakdown.subscriptionIncome > 0 ||
+    grounding.inventoryRiskItems.length > 0
+
+  let summary = `📊 ${tenantName} BUSINESS HEALTH: ${Math.round(healthScore)}/100 (${healthScore >= 70 ? 'Strong' : healthScore >= 50 ? 'Moderate' : 'Critical'}). ` +
     `Revenue ${formatCurrency(grounding.current.revenue)} (${formatPercent(grounding.deltas.revenuePct)}), ` +
     `${grounding.profitability.netProfit >= 0 ? 'profit' : 'loss'} ${formatCurrency(Math.abs(grounding.profitability.netProfit))} (${grounding.profitability.netMarginPct > 0 ? '+' : ''}${grounding.profitability.netMarginPct.toFixed(1)}% margin).`
+
+  if (!hasAnyData) {
+    summary = `⚠️ ${tenantName} - No recent business data detected.\n\n` +
+      `No sales transactions, subscription income, or inventory activity found in the analysis period.\n\n` +
+      `Please verify that:\n` +
+      `• Sales are being recorded correctly\n` +
+      `• Subscription payments are being captured\n` +
+      `• Inventory items are set up with proper thresholds`
+  }
   
   const comparativeInsights = [
     `💰 Revenue: ${formatCurrency(grounding.current.revenue)} (${formatPercent(grounding.deltas.revenuePct)} vs prior)`,
@@ -3752,7 +4438,7 @@ async function buildDeterministicBrief(question: string, grounding: AssistantGro
 
   if (intent === 'GENERAL') {
     try {
-      const { predictiveAlerts, dataQualityIssues, purchaseRecommendations } = await generateAutonomousReport(grounding)
+      const { predictiveAlerts, dataQualityIssues, purchaseRecommendations } = await generateAutonomousReportModule(grounding)
 
       if (predictiveAlerts.length > 0) {
         brief.alerts = [
@@ -3789,6 +4475,852 @@ async function buildDeterministicBrief(question: string, grounding: AssistantGro
 // MAIN GROUNDING BUILDING
 // ============================================================
 
+type GroundingBusinessData = {
+  source: 'internal' | 'external'
+  salesCurrentTotal: number
+  salesPriorTotal: number
+  expenseCurrent: number
+  expensePrior: number
+  salesCurrent7: number
+  salesPrior7: number
+  expenseCurrent7: number
+  expensePrior7: number
+  branchComparisons: BranchComparison[]
+  productComparisons: ProductComparison[]
+  profitability: ProfitabilityAnalysis
+  salesInsights: SalesInsight
+  expenseInsights: ExpenseInsight
+  inventoryRiskItems: InventoryRiskItem[]
+  latestDataAt: number
+}
+
+function isWithinWindow(value: string, startDate: Date, endDate: Date): boolean {
+  const timestamp = new Date(value).getTime()
+  return timestamp >= startDate.getTime() && timestamp < endDate.getTime()
+}
+
+function getExternalInventoryQuantityByProduct(snapshot: ExternalGroundingSnapshot): Map<string, number> {
+  const inventoryByProduct = new Map<string, number>()
+  for (const row of snapshot.inventory) {
+    inventoryByProduct.set(row.productId, (inventoryByProduct.get(row.productId) || 0) + toNumber(row.quantity))
+  }
+  return inventoryByProduct
+}
+
+function sumExternalSales(snapshot: ExternalGroundingSnapshot, startDate: Date, endDate: Date): number {
+  return round2(snapshot.sales
+    .filter((row) => isWithinWindow(row.saleDate, startDate, endDate))
+    .reduce((sum, row) => sum + toNumber(row.totalAmount), 0))
+}
+
+function sumExternalExpenses(snapshot: ExternalGroundingSnapshot, startDate: Date, endDate: Date): number {
+  return round2(snapshot.expenses
+    .filter((row) => isWithinWindow(row.expenseDate, startDate, endDate))
+    .reduce((sum, row) => sum + toNumber(row.amount), 0))
+}
+
+function buildExternalBranchComparisons(
+  snapshot: ExternalGroundingSnapshot,
+  currentStart: Date,
+  priorStart: Date,
+): BranchComparison[] {
+  const branchNames = new Map(snapshot.branches.map((branch) => [branch.branchId, branch.name]))
+  const revenueCurrent = new Map<string, number>()
+  const revenuePrior = new Map<string, number>()
+  const expenseCurrent = new Map<string, number>()
+  const expensePrior = new Map<string, number>()
+
+  for (const sale of snapshot.sales) {
+    if (!sale.branchId) continue
+    if (isWithinWindow(sale.saleDate, currentStart, new Date(Number.MAX_SAFE_INTEGER))) {
+      revenueCurrent.set(sale.branchId, (revenueCurrent.get(sale.branchId) || 0) + toNumber(sale.totalAmount))
+    } else if (isWithinWindow(sale.saleDate, priorStart, currentStart)) {
+      revenuePrior.set(sale.branchId, (revenuePrior.get(sale.branchId) || 0) + toNumber(sale.totalAmount))
+    }
+  }
+
+  for (const expense of snapshot.expenses) {
+    if (!expense.branchId) continue
+    if (isWithinWindow(expense.expenseDate, currentStart, new Date(Number.MAX_SAFE_INTEGER))) {
+      expenseCurrent.set(expense.branchId, (expenseCurrent.get(expense.branchId) || 0) + toNumber(expense.amount))
+    } else if (isWithinWindow(expense.expenseDate, priorStart, currentStart)) {
+      expensePrior.set(expense.branchId, (expensePrior.get(expense.branchId) || 0) + toNumber(expense.amount))
+    }
+  }
+
+  const branchIds = new Set<string>([
+    ...Array.from(branchNames.keys()),
+    ...Array.from(revenueCurrent.keys()),
+    ...Array.from(revenuePrior.keys()),
+    ...Array.from(expenseCurrent.keys()),
+    ...Array.from(expensePrior.keys()),
+  ])
+
+  const comparisons: BranchComparison[] = []
+  for (const branchId of branchIds) {
+    const currentRevenue = toNumber(revenueCurrent.get(branchId) || 0)
+    const priorRevenueValue = toNumber(revenuePrior.get(branchId) || 0)
+    const currentExpense = toNumber(expenseCurrent.get(branchId) || 0)
+    const priorExpenseValue = toNumber(expensePrior.get(branchId) || 0)
+    const currentMargin = currentRevenue - currentExpense
+    const priorMargin = priorRevenueValue - priorExpenseValue
+    const grossMarginPct = currentRevenue > 0 ? (currentMargin / currentRevenue) * 100 : 0
+    const efficiencyScore = currentRevenue > 0 ? (currentMargin / currentRevenue) * 100 : 0
+
+    comparisons.push({
+      subsidiaryId: branchId,
+      branchName: branchNames.get(branchId) || branchId,
+      currentRevenue: round2(currentRevenue),
+      priorRevenue: round2(priorRevenueValue),
+      revenueDeltaPct: round2(pctDelta(currentRevenue, priorRevenueValue)),
+      currentExpense: round2(currentExpense),
+      priorExpense: round2(priorExpenseValue),
+      expenseDeltaPct: round2(pctDelta(currentExpense, priorExpenseValue)),
+      currentMargin: round2(currentMargin),
+      priorMargin: round2(priorMargin),
+      marginDeltaPct: round2(pctDelta(currentMargin, priorMargin)),
+      grossMarginPct: round2(grossMarginPct),
+      contributionMargin: round2(grossMarginPct),
+      efficiencyScore: round2(efficiencyScore),
+      rank: 0,
+    })
+  }
+
+  const sorted = [...comparisons].sort((a, b) => b.efficiencyScore - a.efficiencyScore)
+  sorted.forEach((branch, index) => {
+    branch.rank = index + 1
+  })
+  return sorted
+}
+
+function buildExternalProductComparisons(
+  snapshot: ExternalGroundingSnapshot,
+  currentStart: Date,
+  priorStart: Date,
+): ProductComparison[] {
+  const inventoryByProduct = getExternalInventoryQuantityByProduct(snapshot)
+  const productMap = new Map(snapshot.products.map((product) => [product.productId, {
+    name: product.name,
+    category: product.category,
+    costPrice: toNumber(product.costPrice),
+    currentStock: inventoryByProduct.get(product.productId) ?? toNumber(product.currentStock),
+  }]))
+
+  const currentStats = new Map<string, { revenue: number; units: number }>()
+  const priorStats = new Map<string, { revenue: number; units: number }>()
+
+  for (const row of snapshot.saleItems) {
+    const target = isWithinWindow(row.saleDate, currentStart, new Date(Number.MAX_SAFE_INTEGER))
+      ? currentStats
+      : isWithinWindow(row.saleDate, priorStart, currentStart)
+        ? priorStats
+        : null
+    if (!target) continue
+    const current = target.get(row.productId) || { revenue: 0, units: 0 }
+    current.revenue += toNumber(row.subtotal)
+    current.units += toNumber(row.quantity)
+    target.set(row.productId, current)
+  }
+
+  const productIds = new Set<string>([
+    ...Array.from(productMap.keys()),
+    ...Array.from(currentStats.keys()),
+    ...Array.from(priorStats.keys()),
+  ])
+
+  const comparisons: ProductComparison[] = []
+  for (const productId of productIds) {
+    const product = productMap.get(productId)
+    const current = currentStats.get(productId) || { revenue: 0, units: 0 }
+    const prior = priorStats.get(productId) || { revenue: 0, units: 0 }
+    const currentCost = current.units * toNumber(product?.costPrice || 0)
+    const priorCost = prior.units * toNumber(product?.costPrice || 0)
+    const currentProfit = current.revenue - currentCost
+    const priorProfit = prior.revenue - priorCost
+    const marginPct = current.revenue > 0 ? (currentProfit / current.revenue) * 100 : 0
+    const currentStock = Math.max(0, toNumber(product?.currentStock || 0))
+    const inventoryTurnover = currentStock > 0 ? current.units / currentStock : 0
+    const daysOfInventory = inventoryTurnover > 0 ? 30 / inventoryTurnover : 999
+    const revenueGrowth = pctDelta(current.revenue, prior.revenue)
+
+    comparisons.push({
+      productId,
+      productName: product?.name || productId,
+      category: product?.category || null,
+      currentRevenue: round2(current.revenue),
+      priorRevenue: round2(prior.revenue),
+      revenueDeltaPct: round2(revenueGrowth),
+      currentUnits: round2(current.units),
+      priorUnits: round2(prior.units),
+      unitsDeltaPct: round2(pctDelta(current.units, prior.units)),
+      currentProfit: round2(currentProfit),
+      priorProfit: round2(priorProfit),
+      profitDeltaPct: round2(pctDelta(currentProfit, priorProfit)),
+      marginPct: round2(marginPct),
+      isProfitable: currentProfit > 0,
+      profitRank: 0,
+      inventoryTurnover: round2(inventoryTurnover),
+      daysOfInventory: round2(daysOfInventory),
+      velocityScore: round2((current.units / 30) / Math.max(1, currentStock)),
+      lifecycleStage: detectLifecycleStage({
+        revenueGrowth,
+        margin: marginPct,
+        inventoryTurnover,
+      }),
+      priceElasticity: null,
+    })
+  }
+
+  const sorted = [...comparisons].sort((a, b) => b.currentProfit - a.currentProfit)
+  sorted.forEach((product, index) => {
+    product.profitRank = index + 1
+  })
+  return sorted.slice(0, 20)
+}
+
+function buildExternalInventoryRiskItems(
+  snapshot: ExternalGroundingSnapshot,
+  currentStart: Date,
+): InventoryRiskItem[] {
+  const inventoryByProduct = getExternalInventoryQuantityByProduct(snapshot)
+  const soldUnitsByProduct = new Map<string, number>()
+  for (const row of snapshot.saleItems) {
+    if (!isWithinWindow(row.saleDate, currentStart, new Date(Number.MAX_SAFE_INTEGER))) continue
+    soldUnitsByProduct.set(row.productId, (soldUnitsByProduct.get(row.productId) || 0) + toNumber(row.quantity))
+  }
+
+  return snapshot.products
+    .map((product) => {
+      const daysOnShelf = calculateDaysOnShelf(product.purchaseDate, 30)
+      const currentStock = inventoryByProduct.get(product.productId) ?? toNumber(product.currentStock)
+      const lowStockThreshold = toNumber(product.lowStockThreshold) || 10
+      const soldUnits30 = toNumber(soldUnitsByProduct.get(product.productId) || 0)
+      const avgDailyDemand = soldUnits30 / 30
+      const daysOfInventory = avgDailyDemand > 0 ? currentStock / avgDailyDemand : 999
+      let daysToStockout: number | null = null
+
+      if (avgDailyDemand > 0) {
+        daysToStockout = currentStock / avgDailyDemand
+      } else if (currentStock < lowStockThreshold) {
+        daysToStockout = 0.5
+      }
+
+      const safetyStock = avgDailyDemand * 3
+      const reorderPoint = Math.ceil(avgDailyDemand * 7 + safetyStock)
+      const holdingCostPerUnit = toNumber(product.costPrice) * 0.2
+      const eoqRaw = holdingCostPerUnit > 0
+        ? Math.sqrt((2 * soldUnits30 * 50) / holdingCostPerUnit)
+        : 0
+      const economicOrderQty = Number.isFinite(eoqRaw) && eoqRaw > 0
+        ? Math.ceil(eoqRaw)
+        : Math.ceil(avgDailyDemand * 14)
+      const targetStock = Math.ceil(Math.max(avgDailyDemand * 14, lowStockThreshold * 1.5))
+      const suggestedReorderQty = Math.max(0, targetStock - currentStock)
+      const stockValue = currentStock * toNumber(product.costPrice)
+      const turnoverRate = soldUnits30 > 0 ? (soldUnits30 / 30) / Math.max(1, currentStock) : 0
+
+      let stockoutProbability = 0
+      if (avgDailyDemand > 0 && daysToStockout !== null) {
+        const leadTimeDemand = avgDailyDemand * 7
+        const zScore = (currentStock - leadTimeDemand) / Math.sqrt(leadTimeDemand)
+        stockoutProbability = clamp(1 - 0.5 * (1 + approxErf(zScore / Math.sqrt(2))), 0, 1)
+      } else if (currentStock < lowStockThreshold) {
+        stockoutProbability = 0.7
+      }
+
+      let riskScore = 0
+      if (currentStock <= lowStockThreshold) riskScore += 0.4
+      else if (currentStock <= lowStockThreshold * 2) riskScore += 0.2
+
+      if (daysToStockout !== null) {
+        if (daysToStockout <= 2) riskScore += 0.4
+        else if (daysToStockout <= 5) riskScore += 0.3
+        else if (daysToStockout <= 7) riskScore += 0.2
+        else if (daysToStockout <= 14) riskScore += 0.1
+      } else if (currentStock < lowStockThreshold) {
+        riskScore += 0.3
+      }
+
+      if (soldUnits30 > 50) riskScore += 0.2
+      else if (soldUnits30 > 20) riskScore += 0.1
+      riskScore = clamp(riskScore, 0, 1)
+
+      let urgency: InventoryRiskItem['urgency'] = 'P3'
+      let recommendedAction: InventoryRiskItem['recommendedAction'] = 'monitor'
+      if (riskScore >= 0.7 || (daysToStockout !== null && daysToStockout <= 2)) {
+        urgency = 'P1'
+        recommendedAction = 'order_immediately'
+      } else if (riskScore >= 0.4 || (daysToStockout !== null && daysToStockout <= 7)) {
+        urgency = 'P2'
+        recommendedAction = 'order_soon'
+      } else if (daysOfInventory > 90) {
+        recommendedAction = 'reduce_stock'
+      }
+
+      return {
+        productId: product.productId,
+        productName: product.name,
+        category: product.category,
+        subsidiaryId: product.branchId,
+        currentStock: round2(currentStock),
+        lowStockThreshold,
+        soldUnits30: round2(soldUnits30),
+        avgDailyDemand: round2(avgDailyDemand),
+        daysToStockout: daysToStockout !== null ? round2(daysToStockout) : null,
+        suggestedReorderQty,
+        urgency,
+        riskScore: round2(riskScore),
+        stockValue: round2(stockValue),
+        turnoverRate: round2(turnoverRate),
+        costPrice: toNumber(product.costPrice),
+        originalUnitCost: toNumber(product.originalCostPrice),
+        originalPurchaseDate: formatIsoDate(product.purchaseDate),
+        provenanceEstimated: false,
+        daysOfInventory: round2(daysOfInventory),
+        reorderPoint: round2(reorderPoint),
+        economicOrderQty: round2(economicOrderQty),
+        stockoutProbability: round2(stockoutProbability),
+        recommendedAction,
+      }
+    })
+    .filter((item) =>
+      item.riskScore > 0.2
+      || item.suggestedReorderQty > 0
+      || item.currentStock <= item.lowStockThreshold * 1.5
+      || item.daysOfInventory > 90,
+    )
+    .sort((a, b) => b.riskScore - a.riskScore)
+    .slice(0, 20)
+}
+
+function buildExternalProfitability(
+  snapshot: ExternalGroundingSnapshot,
+  startDate: Date,
+  endDate: Date,
+  additionalIncome = 0,
+): ProfitabilityAnalysis {
+  const productMap = new Map(snapshot.products.map((product) => [product.productId, product]))
+  const currentSaleItems = snapshot.saleItems.filter((row) => isWithinWindow(row.saleDate, startDate, endDate))
+  const totalRevenue = snapshot.sales
+    .filter((row) => isWithinWindow(row.saleDate, startDate, endDate))
+    .reduce((sum, row) => sum + toNumber(row.totalAmount), 0)
+  const totalExpenses = sumExternalExpenses(snapshot, startDate, endDate)
+
+  let totalCost = 0
+  const productProfit: Record<string, { revenue: number; cost: number; name: string; category: string | null }> = {}
+  const categoryProfit: Record<string, { revenue: number; cost: number }> = {}
+
+  for (const item of currentSaleItems) {
+    const product = productMap.get(item.productId)
+    const revenue = toNumber(item.subtotal)
+    const cost = toNumber(item.quantity) * toNumber(product?.costPrice || 0)
+    totalCost += cost
+
+    if (!productProfit[item.productId]) {
+      productProfit[item.productId] = {
+        revenue: 0,
+        cost: 0,
+        name: product?.name || item.productId,
+        category: product?.category || null,
+      }
+    }
+    productProfit[item.productId].revenue += revenue
+    productProfit[item.productId].cost += cost
+
+    const category = product?.category
+    if (category) {
+      if (!categoryProfit[category]) {
+        categoryProfit[category] = { revenue: 0, cost: 0 }
+      }
+      categoryProfit[category].revenue += revenue
+      categoryProfit[category].cost += cost
+    }
+  }
+
+  const grossProfit = totalRevenue - totalCost
+  const netProfit = grossProfit - totalExpenses
+  const grossMarginPct = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0
+  const netMarginPct = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0
+  const fixedCosts = totalExpenses * 0.7
+  const variableCostRatio = 1 - grossMarginPct / 100
+  const breakEvenRevenue = fixedCosts / Math.max(0.01, 1 - variableCostRatio)
+
+  const productMetrics = Object.entries(productProfit).map(([id, data]) => {
+    const profit = data.revenue - data.cost
+    const margin = data.revenue > 0 ? (profit / data.revenue) * 100 : 0
+    const contributionPct = totalRevenue > 0 ? (profit / totalRevenue) * 100 : 0
+    return { id, ...data, profit, margin, contributionPct }
+  })
+
+  const sortedByProfit = [...productMetrics].sort((a, b) => b.profit - a.profit)
+  const sortedByMargin = [...productMetrics].sort((a, b) => a.margin - b.margin)
+  const categoryMetrics = Object.entries(categoryProfit).map(([category, data]) => {
+    const profit = data.revenue - data.cost
+    const margin = data.revenue > 0 ? (profit / data.revenue) * 100 : 0
+    return { category, revenue: data.revenue, profit, margin }
+  })
+  const sortedCategoriesByProfit = [...categoryMetrics].sort((a, b) => b.profit - a.profit)
+  const sortedCategoriesByLoss = [...categoryMetrics].sort((a, b) => a.profit - b.profit)
+
+  const avgMarginByCategory: Record<string, number> = {}
+  for (const category of categoryMetrics) {
+    avgMarginByCategory[category.category] = round2(category.margin)
+  }
+
+  const profitDrivers: string[] = []
+  const profitRisks: string[] = []
+  if (sortedByProfit[0]?.profit > 0) {
+    profitDrivers.push(`${sortedByProfit[0].name} (${formatCurrency(sortedByProfit[0].profit)} profit, ${sortedByProfit[0].margin.toFixed(0)}% margin)`)
+  }
+  if (sortedCategoriesByProfit[0]?.profit > 0) {
+    profitDrivers.push(`${sortedCategoriesByProfit[0].category} category (${formatCurrency(sortedCategoriesByProfit[0].profit)} profit)`)
+  }
+  if (sortedByMargin[0]?.profit < 0) {
+    profitRisks.push(`${sortedByMargin[0].name} losing ${formatCurrency(Math.abs(sortedByMargin[0].profit))}`)
+  }
+  if (productMetrics.length > 0 && productMetrics.filter((product) => product.profit < 0).length > productMetrics.length * 0.3) {
+    const lossMakingCount = productMetrics.filter((product) => product.profit < 0).length
+    profitRisks.push(`${lossMakingCount} products (${Math.round((lossMakingCount / productMetrics.length) * 100)}%) are unprofitable`)
+  }
+  if (netMarginPct < 10 && netMarginPct > 0) {
+    profitRisks.push(`Thin net margin of ${netMarginPct.toFixed(0)}% leaves little room for errors`)
+  }
+  if (netMarginPct < 0) {
+    profitRisks.push(`🚨 CRITICAL: Business is operating at a net loss of ${formatCurrency(Math.abs(netProfit))}`)
+  }
+
+  const marginForecast = forecastSales([grossMarginPct, grossMarginPct * 0.95, grossMarginPct * 0.98], 30)
+
+  return {
+    totalRevenue: round2(totalRevenue + additionalIncome),
+    totalCost: round2(totalCost),
+    grossProfit: round2(grossProfit + additionalIncome),
+    grossMarginPct: round2((totalRevenue + additionalIncome) > 0 ? ((grossProfit + additionalIncome) / (totalRevenue + additionalIncome)) * 100 : 0),
+    netProfit: round2(netProfit + additionalIncome),
+    netMarginPct: round2((totalRevenue + additionalIncome) > 0 ? ((netProfit + additionalIncome) / (totalRevenue + additionalIncome)) * 100 : 0),
+    topProfitableProducts: sortedByProfit.slice(0, 5).map((product) => ({
+      name: product.name,
+      category: product.category,
+      profit: round2(product.profit),
+      margin: round2(product.margin),
+      contributionPct: round2(product.contributionPct),
+    })),
+    topLossMakingProducts: sortedByMargin.slice(0, 5).filter((product) => product.profit < 0).map((product) => ({
+      name: product.name,
+      category: product.category,
+      loss: round2(Math.abs(product.profit)),
+      margin: round2(product.margin),
+    })),
+    profitableProductCount: productMetrics.filter((product) => product.profit > 0).length,
+    lossMakingProductCount: productMetrics.filter((product) => product.profit < 0).length,
+    breakEvenProducts: productMetrics.filter((product) => product.profit === 0).length,
+    avgMarginByCategory,
+    topCategoriesByProfit: sortedCategoriesByProfit.slice(0, 5).map((category) => ({
+      category: category.category,
+      profit: round2(category.profit),
+      margin: round2(category.margin),
+      revenue: round2(category.revenue),
+    })),
+    topCategoriesByLoss: sortedCategoriesByLoss.slice(0, 5).filter((category) => category.profit < 0).map((category) => ({
+      category: category.category,
+      loss: round2(Math.abs(category.profit)),
+      margin: round2(category.margin),
+    })),
+    profitDrivers,
+    profitRisks,
+    breakEvenRevenue: round2(breakEvenRevenue),
+    profitMarginForecast: {
+      next30Days: round2(marginForecast.forecast),
+      next90Days: round2(marginForecast.forecast * 0.98),
+      confidence: marginForecast.confidence,
+    },
+  }
+}
+
+function buildExternalSalesInsights(
+  snapshot: ExternalGroundingSnapshot,
+  currentStart: Date,
+  endDate: Date,
+  sevenDaysAgo: Date,
+  fourteenDaysAgo: Date,
+  additionalIncome = 0,
+  seasonalFactor = 1,
+): SalesInsight {
+  const currentSales = snapshot.sales.filter((row) => isWithinWindow(row.saleDate, currentStart, endDate))
+  const currentSaleItems = snapshot.saleItems.filter((row) => isWithinWindow(row.saleDate, currentStart, endDate))
+  const currentSalesTotal = currentSales.reduce((sum, row) => sum + toNumber(row.totalAmount), 0)
+  const totalIncome = currentSalesTotal + additionalIncome
+  const transactionCount = currentSales.length
+  const avgOrderValue = transactionCount > 0 ? currentSalesTotal / transactionCount : 0
+  const last7Total = sumExternalSales(snapshot, sevenDaysAgo, endDate)
+  const prev7Total = sumExternalSales(snapshot, fourteenDaysAgo, sevenDaysAgo)
+  const trendPct = prev7Total > 0 ? (last7Total - prev7Total) / prev7Total : 0
+
+  let salesTrend: SalesInsight['salesTrend'] = 'stable'
+  let trendStrength = 0
+  if (trendPct > 0.1) {
+    salesTrend = 'increasing'
+    trendStrength = Math.min(1, trendPct)
+  } else if (trendPct < -0.1) {
+    salesTrend = 'decreasing'
+    trendStrength = Math.min(1, Math.abs(trendPct))
+  }
+
+  const productMap = new Map(snapshot.products.map((product) => [product.productId, product]))
+  const productAccumulator = new Map<string, { revenue: number; units: number }>()
+  for (const row of currentSaleItems) {
+    const current = productAccumulator.get(row.productId) || { revenue: 0, units: 0 }
+    current.revenue += toNumber(row.subtotal)
+    current.units += toNumber(row.quantity)
+    productAccumulator.set(row.productId, current)
+  }
+
+  const productSales = Array.from(productAccumulator.entries())
+    .map(([productId, stats]) => ({ productId, revenue: stats.revenue, units: stats.units }))
+    .sort((a, b) => b.revenue - a.revenue)
+
+  const topSellingProducts = productSales.slice(0, 5).map((product) => ({
+    name: productMap.get(product.productId)?.name || product.productId,
+    category: productMap.get(product.productId)?.category || null,
+    revenue: round2(product.revenue),
+    units: round2(product.units),
+    contributionPct: totalIncome > 0 ? round2((product.revenue / totalIncome) * 100) : 0,
+  }))
+
+  const categorySales = new Map<string, number>()
+  for (const item of productSales) {
+    const category = productMap.get(item.productId)?.category
+    if (!category) continue
+    categorySales.set(category, (categorySales.get(category) || 0) + item.revenue)
+  }
+  const categoryTotal = Array.from(categorySales.values()).reduce((sum, value) => sum + value, 0)
+  const topSellingCategories = Array.from(categorySales.entries())
+    .map(([category, revenue]) => ({
+      category,
+      revenue: round2(revenue),
+      percentage: categoryTotal > 0 ? round2((revenue / categoryTotal) * 100) : 0,
+    }))
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, 5)
+
+  const dailySalesMap = new Map<string, number>()
+  for (const sale of currentSales) {
+    const key = sale.saleDate.slice(0, 10)
+    dailySalesMap.set(key, (dailySalesMap.get(key) || 0) + toNumber(sale.totalAmount))
+  }
+  const salesHistory = Array.from(dailySalesMap.values())
+  const forecast7 = forecastSales(salesHistory, 7, seasonalFactor)
+  const forecast30 = forecastSales(salesHistory, 30, seasonalFactor)
+  const forecast90 = forecastSales(salesHistory, 90, seasonalFactor)
+
+  const anomalies = detectAnomalies(
+    currentSales.map((sale) => ({ date: new Date(sale.saleDate), amount: toNumber(sale.totalAmount) })),
+    [],
+    [],
+  )
+    .filter((anomaly) => anomaly.type === 'sales_spike' || anomaly.type === 'sales_drop')
+    .map((anomaly) => ({
+      date: anomaly.description.match(/\d{4}-\d{2}-\d{2}/)?.[0] || 'unknown',
+      expectedRevenue: 0,
+      actualRevenue: 0,
+      deviation: 0,
+      severity: anomaly.severity,
+    }))
+
+  const inventoryByProduct = getExternalInventoryQuantityByProduct(snapshot)
+  const slowMovingProducts = snapshot.products
+    .map((product) => {
+      const unitsSold = toNumber(productAccumulator.get(product.productId)?.units || 0)
+      const stockValue = (inventoryByProduct.get(product.productId) ?? toNumber(product.currentStock)) * toNumber(product.costPrice)
+      return {
+        name: product.name,
+        category: product.category,
+        unitsSold,
+        daysOnShelf: calculateDaysOnShelf(product.purchaseDate, 30),
+        stockValue,
+        originalUnitCost: toNumber(product.originalCostPrice),
+        originalPurchaseDate: formatIsoDate(product.purchaseDate),
+        provenanceEstimated: false,
+      }
+    })
+    .filter((product) => product.unitsSold < 5)
+    .sort((a, b) => a.unitsSold - b.unitsSold)
+    .slice(0, 5)
+    .map((product) => ({
+      name: product.name,
+      category: product.category,
+      unitsSold: round2(product.unitsSold),
+      daysOnShelf: product.daysOnShelf,
+      stockValue: round2(product.stockValue),
+      originalUnitCost: product.originalUnitCost,
+      originalPurchaseDate: product.originalPurchaseDate,
+      provenanceEstimated: product.provenanceEstimated,
+    }))
+
+  return {
+    totalSales: round2(totalIncome),
+    transactionCount,
+    avgOrderValue: round2(avgOrderValue),
+    topSellingProducts,
+    topSellingCategories,
+    slowMovingProducts,
+    salesTrend,
+    trendStrength,
+    peakHours: [],
+    bestSellingDay: '',
+    salesForecast: {
+      next7Days: round2(forecast7.forecast),
+      next30Days: round2(forecast30.forecast),
+      next90Days: round2(forecast90.forecast),
+      confidence: forecast30.confidence,
+      upperBound: round2(forecast30.upperBound),
+      lowerBound: round2(forecast30.lowerBound),
+    },
+    anomalies,
+  }
+}
+
+function buildExternalExpenseInsights(
+  snapshot: ExternalGroundingSnapshot,
+  startDate: Date,
+  endDate: Date,
+  revenueOverride: number,
+): ExpenseInsight {
+  const currentExpenses = snapshot.expenses.filter((row) => isWithinWindow(row.expenseDate, startDate, endDate))
+  const priorStart = new Date(startDate.getTime() - (endDate.getTime() - startDate.getTime()))
+  const priorExpenses = snapshot.expenses.filter((row) => isWithinWindow(row.expenseDate, priorStart, startDate))
+  const totalExpenses = currentExpenses.reduce((sum, row) => sum + toNumber(row.amount), 0)
+  const priorTotal = priorExpenses.reduce((sum, row) => sum + toNumber(row.amount), 0)
+
+  const categoryMap = new Map<string, number>()
+  const priorCategoryMap = new Map<string, number>()
+  for (const expense of currentExpenses) {
+    const category = expense.category || 'Other'
+    categoryMap.set(category, (categoryMap.get(category) || 0) + toNumber(expense.amount))
+  }
+  for (const expense of priorExpenses) {
+    const category = expense.category || 'Other'
+    priorCategoryMap.set(category, (priorCategoryMap.get(category) || 0) + toNumber(expense.amount))
+  }
+
+  const topExpenseCategories = Array.from(categoryMap.entries())
+    .map(([category, amount]) => {
+      const priorAmount = priorCategoryMap.get(category) || 0
+      const trend = priorAmount > 0 ? (amount - priorAmount) / priorAmount : 0
+      let trendStatus: 'rising' | 'stable' | 'falling' = 'stable'
+      if (trend > 0.1) trendStatus = 'rising'
+      else if (trend < -0.1) trendStatus = 'falling'
+      return {
+        category,
+        amount: round2(amount),
+        pctOfTotal: totalExpenses > 0 ? round2((amount / totalExpenses) * 100) : 0,
+        trend: trendStatus,
+      }
+    })
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 5)
+
+  const expenseGrowthRate = priorTotal > 0 ? ((totalExpenses - priorTotal) / priorTotal) * 100 : 0
+  const amounts = currentExpenses.map((expense) => toNumber(expense.amount))
+  const mean = amounts.length > 0 ? amounts.reduce((sum, value) => sum + value, 0) / amounts.length : 0
+  const variance = amounts.length > 0
+    ? amounts.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / amounts.length
+    : 0
+  const stdDev = Math.sqrt(variance)
+  const threshold = mean + 2 * stdDev
+
+  const unusualExpenses = currentExpenses
+    .filter((expense) => toNumber(expense.amount) > threshold && toNumber(expense.amount) > 1000)
+    .slice(0, 5)
+    .map((expense) => ({
+      title: expense.title || 'Expense',
+      amount: round2(toNumber(expense.amount)),
+      date: expense.expenseDate.slice(0, 10),
+      category: expense.category || 'Other',
+      isAnomaly: true,
+    }))
+
+  const costToRevenueRatio = revenueOverride > 0 ? (totalExpenses / revenueOverride) * 100 : 0
+  const expenseEfficiencyScore = clamp(100 - costToRevenueRatio, 0, 100)
+  const recommendedSavings: ExpenseInsight['recommendedSavings'] = []
+
+  for (const category of topExpenseCategories.filter((entry) => entry.pctOfTotal > 20)) {
+    const potentialSavings = category.amount * 0.15
+    recommendedSavings.push({
+      category: category.category,
+      potentialSavings: round2(potentialSavings),
+      action: `Review ${category.category} expenses for potential 15% reduction through vendor negotiation`,
+      priority: potentialSavings > 5000 ? 'P2' : 'P3',
+    })
+  }
+
+  if (expenseGrowthRate > 20) {
+    recommendedSavings.push({
+      category: 'Overall Spending',
+      potentialSavings: round2(totalExpenses * 0.1),
+      action: `Conduct full expense audit - spending grew ${expenseGrowthRate.toFixed(0)}% vs prior period`,
+      priority: 'P1',
+    })
+  }
+
+  const expenseForecast30 = forecastSales(amounts.slice(-30), 30)
+  const expenseForecast90 = forecastSales(amounts.slice(-30), 90)
+
+  return {
+    totalExpenses: round2(totalExpenses),
+    topExpenseCategories,
+    expenseGrowthRate: round2(expenseGrowthRate),
+    unusualExpenses,
+    costToRevenueRatio: round2(costToRevenueRatio),
+    recommendedSavings,
+    expenseEfficiencyScore: round2(expenseEfficiencyScore),
+    expenseForecast: {
+      next30Days: round2(expenseForecast30.forecast),
+      next90Days: round2(expenseForecast90.forecast),
+      confidence: expenseForecast30.confidence,
+    },
+  }
+}
+
+async function loadGroundingBusinessData(args: {
+  tenantId: string
+  tenantBaseCurrency: string
+  now: Date
+  currentStart: Date
+  priorStart: Date
+  sevenDaysAgo: Date
+  fourteenDaysAgo: Date
+  subscriptionIncomeCurrent: number
+  totalIncomeCurrent: number
+  seasonalFactor: number
+}): Promise<GroundingBusinessData> {
+  const externalSnapshot = await loadExternalGroundingSnapshot({
+    tenantId: args.tenantId,
+    startDate: args.priorStart,
+    endDate: args.now,
+  })
+
+  if (externalSnapshot) {
+    const salesCurrentTotal = sumExternalSales(externalSnapshot, args.currentStart, args.now)
+    const salesPriorTotal = sumExternalSales(externalSnapshot, args.priorStart, args.currentStart)
+    const expenseCurrent = sumExternalExpenses(externalSnapshot, args.currentStart, args.now)
+    const expensePrior = sumExternalExpenses(externalSnapshot, args.priorStart, args.currentStart)
+    const salesCurrent7 = sumExternalSales(externalSnapshot, args.sevenDaysAgo, args.now)
+    const salesPrior7 = sumExternalSales(externalSnapshot, args.fourteenDaysAgo, args.sevenDaysAgo)
+    const expenseCurrent7 = sumExternalExpenses(externalSnapshot, args.sevenDaysAgo, args.now)
+    const expensePrior7 = sumExternalExpenses(externalSnapshot, args.fourteenDaysAgo, args.sevenDaysAgo)
+    const branchComparisons = buildExternalBranchComparisons(externalSnapshot, args.currentStart, args.priorStart)
+    const productComparisons = buildExternalProductComparisons(externalSnapshot, args.currentStart, args.priorStart)
+    const inventoryRiskItems = buildExternalInventoryRiskItems(externalSnapshot, args.currentStart)
+    const profitability = buildExternalProfitability(
+      externalSnapshot,
+      args.currentStart,
+      args.now,
+      args.subscriptionIncomeCurrent,
+    )
+    const salesInsights = buildExternalSalesInsights(
+      externalSnapshot,
+      args.currentStart,
+      args.now,
+      args.sevenDaysAgo,
+      args.fourteenDaysAgo,
+      args.subscriptionIncomeCurrent,
+      args.seasonalFactor,
+    )
+    const expenseInsights = buildExternalExpenseInsights(
+      externalSnapshot,
+      args.currentStart,
+      args.now,
+      args.totalIncomeCurrent,
+    )
+
+    return {
+      source: 'external',
+      salesCurrentTotal,
+      salesPriorTotal,
+      expenseCurrent,
+      expensePrior,
+      salesCurrent7,
+      salesPrior7,
+      expenseCurrent7,
+      expensePrior7,
+      branchComparisons,
+      productComparisons,
+      profitability,
+      salesInsights,
+      expenseInsights,
+      inventoryRiskItems,
+      latestDataAt: externalSnapshot.latestDataAt ? new Date(externalSnapshot.latestDataAt).getTime() : 0,
+    }
+  }
+
+  const [
+    salesCurrentTotal,
+    salesPriorTotal,
+    expenseCurrent,
+    expensePrior,
+    salesCurrent7,
+    salesPrior7,
+    expenseCurrent7,
+    expensePrior7,
+    branchComparisons,
+    productComparisons,
+    profitability,
+    salesInsights,
+    expenseInsights,
+    inventoryRiskItems,
+    latestSale,
+    latestExpense,
+  ] = await Promise.all([
+    sumSalesToBaseCurrency(args.tenantId, args.currentStart, args.now, args.tenantBaseCurrency),
+    sumSalesToBaseCurrency(args.tenantId, args.priorStart, args.currentStart, args.tenantBaseCurrency),
+    sumExpensesToBaseCurrency(args.tenantId, args.currentStart, args.now, args.tenantBaseCurrency),
+    sumExpensesToBaseCurrency(args.tenantId, args.priorStart, args.currentStart, args.tenantBaseCurrency),
+    sumSalesToBaseCurrency(args.tenantId, args.sevenDaysAgo, args.now, args.tenantBaseCurrency),
+    sumSalesToBaseCurrency(args.tenantId, args.fourteenDaysAgo, args.sevenDaysAgo, args.tenantBaseCurrency),
+    sumExpensesToBaseCurrency(args.tenantId, args.sevenDaysAgo, args.now, args.tenantBaseCurrency),
+    sumExpensesToBaseCurrency(args.tenantId, args.fourteenDaysAgo, args.sevenDaysAgo, args.tenantBaseCurrency),
+    getBranchComparisons(args.tenantId, args.currentStart, args.priorStart),
+    getProductComparisons(args.tenantId, args.currentStart, args.priorStart),
+    analyzeProfitability(args.tenantId, args.currentStart, args.now, args.subscriptionIncomeCurrent),
+    analyzeSalesInsights(args.tenantId, args.currentStart, args.now, args.subscriptionIncomeCurrent, args.seasonalFactor),
+    analyzeExpenseInsights(args.tenantId, args.currentStart, args.now, args.totalIncomeCurrent),
+    getInventoryRiskItems(args.tenantId, args.currentStart),
+    prisma.sale.findFirst({
+      where: { tenantId: args.tenantId, archived: false },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    }),
+    prisma.expense.findFirst({
+      where: { tenantId: args.tenantId, archived: false },
+      orderBy: { date: 'desc' },
+      select: { date: true },
+    }),
+  ])
+
+  return {
+    source: 'internal',
+    salesCurrentTotal: toNumber(salesCurrentTotal),
+    salesPriorTotal: toNumber(salesPriorTotal),
+    expenseCurrent: toNumber(expenseCurrent),
+    expensePrior: toNumber(expensePrior),
+    salesCurrent7: toNumber(salesCurrent7),
+    salesPrior7: toNumber(salesPrior7),
+    expenseCurrent7: toNumber(expenseCurrent7),
+    expensePrior7: toNumber(expensePrior7),
+    branchComparisons,
+    productComparisons,
+    profitability,
+    salesInsights,
+    expenseInsights,
+    inventoryRiskItems,
+    latestDataAt: Math.max(
+      latestSale?.createdAt?.getTime() || 0,
+      latestExpense?.date?.getTime() || 0,
+    ),
+  }
+}
+
 export async function buildAssistantGrounding(tenantId: string, conversationId?: string): Promise<AssistantGrounding> {
   const now = new Date()
   
@@ -3806,7 +5338,24 @@ export async function buildAssistantGrounding(tenantId: string, conversationId?:
   const incomePrior7 = await computeIncomeBreakdown(tenantId, fourteenDaysAgo, sevenDaysAgo, tenantInfo.baseCurrency, { crossTenantScope })
   const seasonalFactor = getSeasonalityFactor(now, tenantInfo.businessType)
 
-  const [
+  const [history, businessData] = await Promise.all([
+    getAssistantHistory(tenantId, conversationId),
+    loadGroundingBusinessData({
+      tenantId,
+      tenantBaseCurrency: tenantInfo.baseCurrency,
+      now,
+      currentStart,
+      priorStart,
+      sevenDaysAgo,
+      fourteenDaysAgo,
+      subscriptionIncomeCurrent: incomeCurrent.subscriptionIncome,
+      totalIncomeCurrent: incomeCurrent.totalIncome,
+      seasonalFactor,
+    }),
+  ])
+
+  const {
+    source,
     salesCurrentTotal,
     salesPriorTotal,
     expenseCurrent,
@@ -3817,28 +5366,12 @@ export async function buildAssistantGrounding(tenantId: string, conversationId?:
     expensePrior7,
     branchComparisons,
     productComparisons,
-    history,
     profitability,
     salesInsights,
     expenseInsights,
     inventoryRiskItems,
-  ] = await Promise.all([
-    sumSalesToBaseCurrency(tenantId, currentStart, now, tenantInfo.baseCurrency),
-    sumSalesToBaseCurrency(tenantId, priorStart, currentStart, tenantInfo.baseCurrency),
-    sumExpensesToBaseCurrency(tenantId, currentStart, now, tenantInfo.baseCurrency),
-    sumExpensesToBaseCurrency(tenantId, priorStart, currentStart, tenantInfo.baseCurrency),
-    sumSalesToBaseCurrency(tenantId, sevenDaysAgo, now, tenantInfo.baseCurrency),
-    sumSalesToBaseCurrency(tenantId, fourteenDaysAgo, sevenDaysAgo, tenantInfo.baseCurrency),
-    sumExpensesToBaseCurrency(tenantId, sevenDaysAgo, now, tenantInfo.baseCurrency),
-    sumExpensesToBaseCurrency(tenantId, fourteenDaysAgo, sevenDaysAgo, tenantInfo.baseCurrency),
-    getBranchComparisons(tenantId, currentStart, priorStart),
-    getProductComparisons(tenantId, currentStart, priorStart),
-    getAssistantHistory(tenantId, conversationId),
-    analyzeProfitability(tenantId, currentStart, now, incomeCurrent.subscriptionIncome),
-    analyzeSalesInsights(tenantId, currentStart, now, incomeCurrent.subscriptionIncome, seasonalFactor),
-    analyzeExpenseInsights(tenantId, currentStart, now, incomeCurrent.totalIncome),
-    getInventoryRiskItems(tenantId, currentStart),
-  ])
+    latestDataAt,
+  } = businessData
 
   const currentRevenue = incomeCurrent.totalIncome
   const priorRevenue = incomePrior.totalIncome
@@ -3858,21 +5391,6 @@ export async function buildAssistantGrounding(tenantId: string, conversationId?:
   const currentNet7 = currentRevenue7 - currentExpense7
   const priorNet7 = priorRevenue7 - priorExpense7
 
-  const latestSale = await prisma.sale.findFirst({
-    where: { tenantId, archived: false },
-    orderBy: { createdAt: 'desc' },
-    select: { createdAt: true },
-  })
-  const latestExpense = await prisma.expense.findFirst({
-    where: { tenantId, archived: false },
-    orderBy: { date: 'desc' },
-    select: { date: true },
-  })
-
-  const latestDataAt = Math.max(
-    latestSale?.createdAt?.getTime() || 0,
-    latestExpense?.date?.getTime() || 0,
-  )
   const freshnessHours = latestDataAt > 0
     ? round2((Date.now() - latestDataAt) / (1000 * 60 * 60))
     : null
@@ -3921,6 +5439,7 @@ export async function buildAssistantGrounding(tenantId: string, conversationId?:
 
   return {
     tenantId,
+    groundingSource: source,
     tenantInfo,
     incomeBreakdown: incomeCurrent,
     periodLabel: 'last 30 days vs previous 30 days',
@@ -3992,7 +5511,9 @@ function recordCognitiveInsights(grounding: AssistantGrounding): void {
       inventoryTurnover: grounding.businessIntelligence.inventoryHealth.inventoryTurnover,
       stockoutRiskCount: grounding.businessIntelligence.inventoryHealth.stockoutRiskCount,
     },
-  }).catch(() => {})
+  }).catch((err) => {
+    console.error('[Cognitive] Failed to record insights:', err)
+  })
 }
 
 // ============================================================
@@ -4004,6 +5525,7 @@ export async function generateEnterpriseAssistantResponse(args: {
   prompt: string
   conversationId?: string
   userId?: string
+  userRole?: string
 }): Promise<{
   response: string
   brief: AssistantBrief
@@ -4047,6 +5569,12 @@ export async function generateEnterpriseAssistantResponse(args: {
       })
       const groundingQualityScore = computeGroundingQualityScore(grounding)
       const intent = detectPromptIntent(args.prompt)
+      const responsePolicy = buildResponsePolicy({
+        prompt: args.prompt,
+        intent,
+        grounding,
+        userRole: args.userRole,
+      })
 
       const useCase: 'business' | 'market' | 'routine' =
         intent === 'PROFITABILITY' ? 'business' :
@@ -4164,7 +5692,7 @@ export async function generateEnterpriseAssistantResponse(args: {
           })()
         : grounding
 
-      const finalBrief: AssistantBrief = {
+      let finalBrief: AssistantBrief = {
         ...(llmBrief || deterministicBrief),
       }
       if (finalBrief.requiresApproval === undefined) {
@@ -4178,6 +5706,147 @@ export async function generateEnterpriseAssistantResponse(args: {
         )
       }
 
+      let simulationResults: any[] = []
+
+      try {
+        if (responsePolicy.allowScenario) {
+          const simulation = await generateStrategicSimulationReport(args.prompt, grounding)
+          simulationResults = simulation.results
+          if (simulation.results.length > 0) {
+            finalBrief.scenarioAnalysis = {
+              bestScenario: simulation.best?.scenario.name || null,
+              worstScenario: simulation.worst?.scenario.name || null,
+              profitSpread: simulation.sensitivity.profitSpread || 0,
+              roiSpread: simulation.sensitivity.roiSpread || 0,
+              calibrationSampleSize: simulation.calibrationSummary?.sampleSize || 0,
+              averageSuccessScore: simulation.calibrationSummary?.averageSuccessScore || 0,
+              calibrationScore: simulation.calibrationSummary?.calibrationScore || 0,
+              historicalAccuracy: simulation.calibrationSummary?.historicalAccuracy || 0,
+              profitConfidenceInterval: simulation.best
+                ? {
+                    low: simulation.best.confidenceInterval.profitLow,
+                    high: simulation.best.confidenceInterval.profitHigh,
+                  }
+                : undefined,
+            }
+
+            if (simulation.best) {
+              finalBrief.comparativeInsights.push(
+                `Scenario best-case: ${simulation.best.scenario.name} -> projected profit ${formatCurrency(simulation.best.projectedProfit)} (ROI ${simulation.best.roi.toFixed(2)}x).`,
+              )
+            }
+          }
+        }
+
+        if (responsePolicy.allowCausal) {
+          const causal = await identifyLikelyRootCausesFromPrompt(args.prompt, grounding)
+          finalBrief.causalAnalysis = {
+            problem: causal.problem,
+            topCauses: causal.rootCauses.slice(0, 3).map((rc) => ({ cause: rc.cause, contribution: rc.contribution })),
+            interventions: causal.recommendedInterventions.slice(0, 3).map((i) => i.action),
+            methods: causal.methods.slice(0, 3).map((method) => ({
+              method: method.method,
+              title: method.title,
+              confidence: method.confidence,
+              pValue: method.pValue,
+              effectSize: method.effectSize,
+            })),
+            confidenceScore: causal.confidenceScore,
+          }
+        }
+
+        let marketIntel = null
+        if (responsePolicy.allowStrategic && (intent === 'GENERAL' || intent === 'PROFITABILITY' || intent === 'SALES' || intent === 'EXPENSES')) {
+          marketIntel = await getMarketIntelligence(args.tenantId)
+        }
+
+        if (responsePolicy.allowStrategic) {
+          const strategic = generateStrategicInsights(grounding, marketIntel)
+          if (strategic.length > 0) {
+            finalBrief.strategicInsights = strategic.map((s) => ({
+              level: s.level,
+              insight: s.insight,
+              estimatedROI: s.estimatedROI,
+              timeHorizon: s.timeHorizon,
+            }))
+            finalBrief.actions = [
+              ...finalBrief.actions,
+              ...strategic.slice(0, 2).map((s) => `P2 - STRATEGIC: ${s.insight}`),
+            ].slice(0, 8)
+          }
+        }
+
+        const explanation = buildRecommendationExplanation(finalBrief, grounding, simulationResults)
+        finalBrief.explanation = {
+          summary: explanation.summary,
+          confidence: explanation.confidence,
+          keyFactors: explanation.keyFactors,
+          limitations: explanation.limitations,
+        }
+
+        const executableActions = responsePolicy.allowExecution
+          ? deriveExecutableActionsFromBrief({
+              actions: finalBrief.actions,
+              estimatedCost: finalBrief.estimatedCost,
+            })
+          : []
+        if (executableActions.length > 0) {
+          const executionPlan = await buildExecutionPlan(executableActions, {
+            confidence: hybrid.confidenceScore,
+            tenantId: args.tenantId,
+            userId: args.userId,
+          })
+          finalBrief.executionPlan = {
+            autoExecutableCount: executionPlan.autoExecutableCount,
+            approvalRequiredCount: executionPlan.approvalRequiredCount,
+            highPriorityHumanActions: executionPlan.highPriorityHumanActions,
+            workflowCoverageScore: executionPlan.workflowCoverageScore,
+            workflowStages: executionPlan.actions.map((item) => ({
+              actionType: item.action.type,
+              stageCount: item.workflowStages.length,
+              matchedRules: item.matchedRuleIds.length,
+              requiresHumanDecision: item.requiresHumanDecision,
+              executionId: item.workflowRecord?.executionId,
+              approvalStatus: item.workflowRecord?.approvalStatus,
+              rollbackReady: item.workflowRecord?.rollbackReady,
+            })),
+            topActionDecision: executionPlan.actions[0]?.decision,
+          }
+
+          if (executionPlan.highPriorityHumanActions.length > 0) {
+            const humanPriorityActions = executionPlan.highPriorityHumanActions
+              .slice(0, 2)
+              .map((action) => `P1 - HIGH RECOMMENDATION (HUMAN APPROVAL): ${action}`)
+
+            finalBrief.actions = [
+              ...humanPriorityActions,
+              ...finalBrief.actions,
+            ].slice(0, 10)
+
+            finalBrief.alerts = [
+              ...(finalBrief.alerts || []),
+              {
+                severity: 'critical',
+                message: 'Order/stock-transfer actions require explicit human approval before execution.',
+                actionRequired: 'Review high-priority recommendations and approve or reject each action manually',
+              },
+            ]
+          }
+        }
+      } catch (error) {
+        console.error('[Strategic] Failed to enrich advanced insights:', error)
+      }
+
+      finalBrief = applyResponsePolicyToBrief({
+        brief: finalBrief,
+        prompt: args.prompt,
+        intent,
+        grounding,
+        responseGrounding,
+        reliability,
+        policy: responsePolicy,
+      })
+
       await prisma.enterpriseAiMetric.createMany({
         data: [
           {
@@ -4189,6 +5858,8 @@ export async function generateEnterpriseAssistantResponse(args: {
               model: modelOutput?.model || 'none',
               attempts: modelOutput?.attempts || 0,
               intent,
+              taskType: responsePolicy.taskType,
+              responseMode: responsePolicy.responseMode,
             },
           },
           {
@@ -4199,6 +5870,7 @@ export async function generateEnterpriseAssistantResponse(args: {
               provider,
               coverageScore: grounding.coverageScore,
               intent,
+              taskType: responsePolicy.taskType,
             },
           },
           {
@@ -4209,6 +5881,7 @@ export async function generateEnterpriseAssistantResponse(args: {
               provider,
               fusionMethod: hybrid.fusionMethod,
               intent,
+              responseMode: responsePolicy.responseMode,
             },
           },
           {
@@ -4219,6 +5892,34 @@ export async function generateEnterpriseAssistantResponse(args: {
               fusionMethod: hybrid.fusionMethod,
               hasLLM: !!llmBrief,
               hasAutonomous: autonomousReport.predictiveAlerts.length > 0,
+            },
+          },
+          {
+            tenantId: args.tenantId,
+            metricKey: 'assistant_simulation_profit_spread',
+            metricValue: finalBrief.scenarioAnalysis?.profitSpread || 0,
+            dimensions: {
+              hasScenario: !!finalBrief.scenarioAnalysis,
+              bestScenario: finalBrief.scenarioAnalysis?.bestScenario || 'none',
+              worstScenario: finalBrief.scenarioAnalysis?.worstScenario || 'none',
+            },
+          },
+          {
+            tenantId: args.tenantId,
+            metricKey: 'assistant_human_approval_required_count',
+            metricValue: finalBrief.executionPlan?.approvalRequiredCount || 0,
+            dimensions: {
+              autoExecutableCount: finalBrief.executionPlan?.autoExecutableCount || 0,
+              highPriorityHumanActions: finalBrief.executionPlan?.highPriorityHumanActions?.length || 0,
+            },
+          },
+          {
+            tenantId: args.tenantId,
+            metricKey: 'assistant_workflow_rule_coverage_score',
+            metricValue: finalBrief.executionPlan?.workflowCoverageScore || 0,
+            dimensions: {
+              workflowStageCount: finalBrief.executionPlan?.workflowStages?.reduce((sum, item) => sum + item.stageCount, 0) || 0,
+              actionCount: finalBrief.executionPlan?.workflowStages?.length || 0,
             },
           },
         ],
@@ -4239,7 +5940,7 @@ export async function generateEnterpriseAssistantResponse(args: {
       }).catch(() => {})
 
       return {
-        response: hybrid.finalResponse,
+        response: formatBriefAsText(finalBrief, responseGrounding.tenantInfo.name),
         brief: finalBrief,
         provider,
         modelVersion: `hybrid-v1-${hybrid.fusionMethod}`,

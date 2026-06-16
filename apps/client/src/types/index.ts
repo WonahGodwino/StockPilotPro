@@ -29,20 +29,34 @@ export interface Product {
   tenantId: string
   subsidiaryId: string
   name: string
+  category?: string
   description?: string
   type: ProductType
   unit: string
   quantity: number
   costPrice: number
   sellingPrice: number
+  originalCurrency?: string
+  originalCostPrice?: number
+  originalSellingPrice?: number
   barcode?: string
   lowStockThreshold: number
+  purchaseDate?: string
   expiryDate?: string
   status: ProductStatus
   createdAt: string
   updatedAt: string
   createdBy?: string
   subsidiary?: { id: string; name: string }
+  productReceipts?: Array<{
+    id: string
+    quantity: number
+    unitCost: number
+    purchaseDate: string
+    source: 'INITIAL_STOCK' | 'RESTOCK' | 'LEGACY_IMPORT'
+    isEstimated: boolean
+    notes?: string | null
+  }>
 }
 
 // ── Sales ─────────────────────────────────────────────────────────────────────
@@ -245,7 +259,7 @@ export interface Plan {
   billingCycle: 'MONTHLY' | 'YEARLY'
   maxSubsidiaries: number
   extraSubsidiaryPrice: number
-  features: Record<string, unknown>
+  features: unknown
   isActive: boolean
 }
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { EnterpriseAccessError, getFreshFeatureSnapshot, requireEnterpriseAiAccess } from '@/lib/enterprise-ai'
+import { getExternalDataConnectionSummary, resolveEnterpriseAiDataProviderContext } from '@/lib/enterprise-ai-external-data'
 
 export async function OPTIONS() {
   return handleOptions()
@@ -12,8 +13,9 @@ export async function GET(req: NextRequest) {
     const user = authenticate(req)
     const access = await requireEnterpriseAiAccess(user)
 
-    const snapshot = await getFreshFeatureSnapshot(access.tenantId)
-    const signals = await prisma.enterpriseAiSignal.findMany({
+    const [snapshot, signals, externalData, providerContext] = await Promise.all([
+      getFreshFeatureSnapshot(access.tenantId),
+      prisma.enterpriseAiSignal.findMany({
       where: {
         OR: [
           { signalClass: 'PUBLIC' },
@@ -32,12 +34,17 @@ export async function GET(req: NextRequest) {
         tags: true,
         effectiveDate: true,
       },
-    })
+      }),
+      getExternalDataConnectionSummary(access.tenantId),
+      resolveEnterpriseAiDataProviderContext(access.tenantId),
+    ])
 
     return NextResponse.json({
       data: {
         tenantId: access.tenantId,
         planName: access.planName,
+        providerContext,
+        externalData,
         snapshot: {
           id: snapshot.id,
           version: snapshot.snapshotVersion,

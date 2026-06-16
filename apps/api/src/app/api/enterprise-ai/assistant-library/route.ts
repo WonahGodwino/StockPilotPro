@@ -20,6 +20,15 @@ const saveSchema = z.object({
   }).optional(),
   conversationId: z.string().max(120).optional(),
   provider: z.string().max(120).optional(),
+  groundingSource: z.enum(['internal', 'external']).optional(),
+  externalData: z.object({
+    externalGroundingReady: z.boolean(),
+    contractIssues: z.array(z.object({
+      entity: z.string(),
+      missingMappings: z.array(z.string()),
+      missingSchemaColumns: z.array(z.string()),
+    })).optional(),
+  }).nullable().optional(),
   sourceRecommendationId: z.string().max(120).optional(),
   brief: z.object({
     summary: z.string(),
@@ -27,6 +36,19 @@ const saveSchema = z.object({
     actions: z.array(z.string()),
     risks: z.array(z.string()),
     followUpQuestions: z.array(z.string()),
+    responseMode: z.enum(['clarify', 'brief', 'deep']).optional(),
+    clarificationPrompt: z.string().optional(),
+    businessGuidance: z.object({
+      operatingMode: z.enum(['clarification_needed', 'insufficient_evidence', 'monitor_only', 'manual_intervention', 'decision_ready']),
+      confidenceLabel: z.string(),
+      why: z.string(),
+      primaryRecommendation: z.string(),
+      expectedImpact: z.string(),
+      nextReview: z.string(),
+      audience: z.string(),
+    }).optional(),
+    groundingNotes: z.array(z.string()).optional(),
+    factBasis: z.array(z.string()).optional(),
     alerts: z.array(z.object({
       severity: z.enum(['critical', 'warning', 'info']),
       message: z.string(),
@@ -52,6 +74,15 @@ type SavedAssistantItem = {
   }
   conversationId?: string
   provider?: string
+  groundingSource?: 'internal' | 'external'
+  externalData?: {
+    externalGroundingReady: boolean
+    contractIssues: Array<{
+      entity: string
+      missingMappings: string[]
+      missingSchemaColumns: string[]
+    }>
+  } | null
   sourceRecommendationId?: string
   brief?: {
     summary: string
@@ -59,6 +90,19 @@ type SavedAssistantItem = {
     actions: string[]
     risks: string[]
     followUpQuestions: string[]
+    responseMode?: 'clarify' | 'brief' | 'deep'
+    clarificationPrompt?: string
+    businessGuidance?: {
+      operatingMode: 'clarification_needed' | 'insufficient_evidence' | 'monitor_only' | 'manual_intervention' | 'decision_ready'
+      confidenceLabel: string
+      why: string
+      primaryRecommendation: string
+      expectedImpact: string
+      nextReview: string
+      audience: string
+    }
+    groundingNotes?: string[]
+    factBasis?: string[]
     alerts?: Array<{
       severity: 'critical' | 'warning' | 'info'
       message: string
@@ -77,6 +121,8 @@ function toSavedAssistantItem(row: { id: string; createdAt: Date; outputPayload:
     incomeBreakdown?: unknown
     conversationId?: unknown
     provider?: unknown
+    groundingSource?: unknown
+    externalData?: unknown
     savedForLater?: unknown
     sourceRecommendationId?: unknown
     brief?: unknown
@@ -87,6 +133,7 @@ function toSavedAssistantItem(row: { id: string; createdAt: Date; outputPayload:
 
   let brief: SavedAssistantItem['brief'] | undefined
   let incomeBreakdown: SavedAssistantItem['incomeBreakdown'] | undefined
+  let externalData: SavedAssistantItem['externalData'] | undefined
   if (payload.brief && typeof payload.brief === 'object' && !Array.isArray(payload.brief)) {
     const maybeBrief = payload.brief as {
       summary?: unknown
@@ -94,6 +141,11 @@ function toSavedAssistantItem(row: { id: string; createdAt: Date; outputPayload:
       actions?: unknown
       risks?: unknown
       followUpQuestions?: unknown
+      responseMode?: unknown
+      clarificationPrompt?: unknown
+      businessGuidance?: unknown
+      groundingNotes?: unknown
+      factBasis?: unknown
       alerts?: unknown
     }
 
@@ -129,7 +181,87 @@ function toSavedAssistantItem(row: { id: string; createdAt: Date; outputPayload:
         actions: toStringArray(maybeBrief.actions),
         risks: toStringArray(maybeBrief.risks),
         followUpQuestions: toStringArray(maybeBrief.followUpQuestions),
+        responseMode: maybeBrief.responseMode === 'clarify' || maybeBrief.responseMode === 'brief' || maybeBrief.responseMode === 'deep'
+          ? maybeBrief.responseMode
+          : undefined,
+        clarificationPrompt: typeof maybeBrief.clarificationPrompt === 'string' ? maybeBrief.clarificationPrompt : undefined,
+        businessGuidance: maybeBrief.businessGuidance && typeof maybeBrief.businessGuidance === 'object' && !Array.isArray(maybeBrief.businessGuidance)
+          ? (() => {
+              const value = maybeBrief.businessGuidance as {
+                operatingMode?: unknown
+                confidenceLabel?: unknown
+                why?: unknown
+                primaryRecommendation?: unknown
+                expectedImpact?: unknown
+                nextReview?: unknown
+                audience?: unknown
+              }
+              if (
+                (value.operatingMode !== 'clarification_needed'
+                  && value.operatingMode !== 'insufficient_evidence'
+                  && value.operatingMode !== 'monitor_only'
+                  && value.operatingMode !== 'manual_intervention'
+                  && value.operatingMode !== 'decision_ready')
+                || typeof value.confidenceLabel !== 'string'
+                || typeof value.why !== 'string'
+                || typeof value.primaryRecommendation !== 'string'
+                || typeof value.expectedImpact !== 'string'
+                || typeof value.nextReview !== 'string'
+                || typeof value.audience !== 'string'
+              ) {
+                return undefined
+              }
+              return {
+                operatingMode: value.operatingMode,
+                confidenceLabel: value.confidenceLabel,
+                why: value.why,
+                primaryRecommendation: value.primaryRecommendation,
+                expectedImpact: value.expectedImpact,
+                nextReview: value.nextReview,
+                audience: value.audience,
+              }
+            })()
+          : undefined,
+        groundingNotes: toStringArray(maybeBrief.groundingNotes),
+        factBasis: toStringArray(maybeBrief.factBasis),
         alerts,
+      }
+    }
+  }
+
+  if (payload.externalData === null) {
+    externalData = null
+  } else if (payload.externalData && typeof payload.externalData === 'object' && !Array.isArray(payload.externalData)) {
+    const maybeExternalData = payload.externalData as {
+      externalGroundingReady?: unknown
+      contractIssues?: unknown
+    }
+
+    if (typeof maybeExternalData.externalGroundingReady === 'boolean') {
+      externalData = {
+        externalGroundingReady: maybeExternalData.externalGroundingReady,
+        contractIssues: Array.isArray(maybeExternalData.contractIssues)
+          ? maybeExternalData.contractIssues
+            .map((entry) => {
+              if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null
+              const value = entry as {
+                entity?: unknown
+                missingMappings?: unknown
+                missingSchemaColumns?: unknown
+              }
+              if (typeof value.entity !== 'string') return null
+              return {
+                entity: value.entity,
+                missingMappings: Array.isArray(value.missingMappings)
+                  ? value.missingMappings.filter((item): item is string => typeof item === 'string')
+                  : [],
+                missingSchemaColumns: Array.isArray(value.missingSchemaColumns)
+                  ? value.missingSchemaColumns.filter((item): item is string => typeof item === 'string')
+                  : [],
+              }
+            })
+            .filter((entry): entry is { entity: string; missingMappings: string[]; missingSchemaColumns: string[] } => Boolean(entry))
+          : [],
       }
     }
   }
@@ -177,6 +309,10 @@ function toSavedAssistantItem(row: { id: string; createdAt: Date; outputPayload:
     incomeBreakdown,
     conversationId: typeof payload.conversationId === 'string' ? payload.conversationId : undefined,
     provider: typeof payload.provider === 'string' ? payload.provider : undefined,
+    groundingSource: payload.groundingSource === 'internal' || payload.groundingSource === 'external'
+      ? payload.groundingSource
+      : undefined,
+    externalData,
     sourceRecommendationId: typeof payload.sourceRecommendationId === 'string' ? payload.sourceRecommendationId : undefined,
     brief,
   }
@@ -249,6 +385,8 @@ export async function POST(req: NextRequest) {
           incomeBreakdown: payload.incomeBreakdown || null,
           conversationId: payload.conversationId || null,
           provider: payload.provider || null,
+          groundingSource: payload.groundingSource || null,
+          externalData: payload.externalData || null,
           sourceRecommendationId: payload.sourceRecommendationId || null,
           brief: payload.brief || null,
           savedForLater: true,

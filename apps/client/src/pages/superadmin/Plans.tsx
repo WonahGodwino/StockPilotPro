@@ -6,8 +6,148 @@ import { Plus, CreditCard, Edit, X, Loader2, Check, Zap } from 'lucide-react'
 import { SUPPORTED_CURRENCIES, makeCurrencyFormatter } from '@/lib/currency'
 import { getSuperadminCacheKey, isOnlineNow, readSuperadminCache, writeSuperadminCache } from '@/lib/superadminCache'
 
-interface PlanForm { name: string; price: number; priceCurrency: string; maxBranches: number; benefits: string; billingCycle: string }
-const emptyForm: PlanForm = { name: '', price: 0, priceCurrency: 'USD', maxBranches: 1, benefits: '', billingCycle: 'MONTHLY' }
+interface PlanForm {
+  name: string
+  price: number
+  priceCurrency: string
+  maxBranches: number
+  billingCycle: string
+  selectedFeatures: string[]
+  extraFeatureTokens: string
+}
+
+const FEATURE_TOGGLES = [
+  {
+    key: 'ENTERPRISE_PACKAGE',
+    label: 'Enterprise package',
+    description: 'Marks the plan as an Enterprise tier plan.',
+  },
+  {
+    key: 'ENTERPRISE_AI_ENABLED',
+    label: 'Enterprise AI core',
+    description: 'Enables Enterprise AI access for eligible tenant roles.',
+  },
+  {
+    key: 'AI_NATURAL_LANGUAGE_ASSISTANT',
+    label: 'Natural language assistant',
+    description: 'Unlocks the assistant chat, saved replies, and approval surfaces.',
+  },
+  {
+    key: 'ENTERPRISE_AI_EXTERNAL_DATA',
+    label: 'External data grounding',
+    description: 'Shows the external database setup panel on the tenant Enterprise AI page and allows read-only grounding configuration.',
+  },
+  {
+    key: 'AI_BRANCH_PERFORMANCE_COPILOT',
+    label: 'Branch performance copilot',
+    description: 'Enables branch ranking and performance copilots.',
+  },
+  {
+    key: 'AI_DEMAND_FORECAST',
+    label: 'Demand forecast',
+    description: 'Enables AI demand forecasting recommendations.',
+  },
+  {
+    key: 'AI_REORDER_ADVISOR',
+    label: 'Reorder advisor',
+    description: 'Enables replenishment and stock-transfer guidance.',
+  },
+  {
+    key: 'AI_PRICING_MARGIN_ADVISOR',
+    label: 'Pricing and margin advisor',
+    description: 'Enables price adjustment simulations and margin recommendations.',
+  },
+  {
+    key: 'AI_CASHFLOW_FORECAST',
+    label: 'Cashflow forecast',
+    description: 'Enables cashflow forecasting recommendations.',
+  },
+  {
+    key: 'AI_EXPENSE_RISK_ALERTS',
+    label: 'Expense risk alerts',
+    description: 'Enables spend risk alerts and expense-cap simulations.',
+  },
+  {
+    key: 'AI_ANOMALY_DETECTION',
+    label: 'Anomaly detection',
+    description: 'Enables AI anomaly detection recommendations.',
+  },
+] as const
+
+const ENTERPRISE_AI_BUNDLE_KEYS = [
+  'ENTERPRISE_PACKAGE',
+  'ENTERPRISE_AI_ENABLED',
+  'AI_NATURAL_LANGUAGE_ASSISTANT',
+  'ENTERPRISE_AI_EXTERNAL_DATA',
+] as const
+
+const emptyForm: PlanForm = {
+  name: '',
+  price: 0,
+  priceCurrency: 'USD',
+  maxBranches: 1,
+  billingCycle: 'MONTHLY',
+  selectedFeatures: [],
+  extraFeatureTokens: '',
+}
+
+function normalizeFeatureToken(token: string): string {
+  return token.trim().toUpperCase().replace(/\s+/g, '_')
+}
+
+function extractPlanFeatureTokens(features: unknown): string[] {
+  if (Array.isArray(features)) {
+    return features
+      .map((value) => String(value).trim())
+      .filter(Boolean)
+  }
+
+  if (features && typeof features === 'object') {
+    return Object.entries(features as Record<string, unknown>)
+      .flatMap(([key, value]) => {
+        if (value === true) return [normalizeFeatureToken(key)]
+        if (typeof value === 'number' && Number.isFinite(value)) return [`${normalizeFeatureToken(key)}=${value}`]
+        if (typeof value === 'string' && value.trim()) return [`${normalizeFeatureToken(key)}=${value.trim()}`]
+        return []
+      })
+  }
+
+  return []
+}
+
+function buildPlanFeatureList(selectedFeatures: string[], extraFeatureTokens: string): string[] {
+  const deduped = new Map<string, string>()
+
+  for (const feature of selectedFeatures) {
+    const normalized = normalizeFeatureToken(feature)
+    if (normalized) deduped.set(normalized, normalized)
+  }
+
+  for (const rawToken of extraFeatureTokens.split('\n')) {
+    const trimmed = rawToken.trim()
+    if (!trimmed) continue
+
+    const [head, ...tail] = trimmed.split('=')
+    const normalizedHead = normalizeFeatureToken(head)
+    if (!normalizedHead) continue
+    const normalizedToken = tail.length > 0
+      ? `${normalizedHead}=${tail.join('=').trim()}`
+      : normalizedHead
+    deduped.set(normalizedToken, normalizedToken)
+  }
+
+  return Array.from(deduped.values())
+}
+
+function toggleSelectedFeature(selectedFeatures: string[], feature: string): string[] {
+  return selectedFeatures.includes(feature)
+    ? selectedFeatures.filter((entry) => entry !== feature)
+    : [...selectedFeatures, feature]
+}
+
+function hasFeatureToken(features: string[], featureKey: string): boolean {
+  return features.some((token) => normalizeFeatureToken(token.split('=')[0] || token) === featureKey)
+}
 
 export default function PlansPage() {
   const [plans, setPlans] = useState<Plan[]>([])
@@ -61,19 +201,23 @@ export default function PlansPage() {
 
   const openCreate = () => { setForm(emptyForm); setCurrencySearch(''); setModal({ open: true, plan: null }) }
   const openEdit = (p: Plan) => {
-    const featureList = Array.isArray(p.features)
-      ? p.features.map(String)
-      : typeof p.features === 'object' && p.features !== null
-      ? Object.keys(p.features)
-      : []
-    const featuresText = featureList.join('\n')
+    const featureList = extractPlanFeatureTokens(p.features)
+    const featureKeySet = new Set(featureList.map((token) => normalizeFeatureToken(token.split('=')[0] || token)))
+    const selectedFeatures = FEATURE_TOGGLES
+      .map((feature) => feature.key)
+      .filter((feature) => featureKeySet.has(feature))
+    const selectedFeatureSet = new Set(selectedFeatures)
+    const extraFeatureTokens = featureList
+      .filter((token) => !selectedFeatureSet.has(normalizeFeatureToken(token.split('=')[0] || token) as typeof selectedFeatures[number]))
+      .join('\n')
     setForm({
       name: p.name,
       price: Number(p.price),
       priceCurrency: p.priceCurrency,
       maxBranches: p.maxSubsidiaries,
-      benefits: featuresText,
       billingCycle: p.billingCycle,
+      selectedFeatures,
+      extraFeatureTokens,
     })
     setCurrencySearch('')
     setModal({ open: true, plan: p })
@@ -87,7 +231,12 @@ export default function PlansPage() {
         return
       }
 
-      const payload = { ...form, benefits: form.benefits.split('\n').map((f) => f.trim()).filter(Boolean), price: Number(form.price), maxBranches: Number(form.maxBranches) }
+      const payload = {
+        ...form,
+        featureList: buildPlanFeatureList(form.selectedFeatures, form.extraFeatureTokens),
+        price: Number(form.price),
+        maxBranches: Number(form.maxBranches),
+      }
       const mappedPayload = {
         name: payload.name,
         price: payload.price,
@@ -95,7 +244,7 @@ export default function PlansPage() {
         billingCycle: form.billingCycle,
         maxSubsidiaries: payload.maxBranches,
         extraSubsidiaryPrice: 0,
-        benefits: payload.benefits,
+        features: payload.featureList,
       }
       if (modal.plan) { await api.put(`/plans/${modal.plan.id}`, mappedPayload); toast.success('Plan updated') }
       else { await api.post('/plans', mappedPayload); toast.success('Plan created') }
@@ -118,12 +267,11 @@ export default function PlansPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           {plans.map((p) => {
-            const features = Array.isArray(p.features)
-              ? (p.features as string[])
-              : typeof p.features === 'object' && p.features !== null
-              ? Object.keys(p.features)
-              : []
+            const features = extractPlanFeatureTokens(p.features)
             const fmt = makeCurrencyFormatter(p.priceCurrency || 'USD')
+            const enterpriseAiEnabled = hasFeatureToken(features, 'ENTERPRISE_AI_ENABLED')
+            const assistantEnabled = hasFeatureToken(features, 'AI_NATURAL_LANGUAGE_ASSISTANT')
+            const externalGroundingEnabled = hasFeatureToken(features, 'ENTERPRISE_AI_EXTERNAL_DATA')
             return (
               <div key={p.id} className="card relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-20 h-20 rounded-bl-full bg-indigo-50 flex items-start justify-end p-2">
@@ -135,6 +283,17 @@ export default function PlansPage() {
                 </div>
                 <p className="text-3xl font-black text-indigo-600">{fmt(Number(p.price))}<span className="text-sm font-normal text-gray-400">/{p.billingCycle === 'YEARLY' ? 'yr' : 'mo'}</span></p>
                 <p className="text-sm text-gray-500 mt-1">Up to <strong>{p.maxSubsidiaries}</strong> branch{p.maxSubsidiaries !== 1 ? 'es' : ''}</p>
+                <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold">
+                  <span className={`rounded-full border px-2.5 py-1 ${enterpriseAiEnabled ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                    AI Core {enterpriseAiEnabled ? 'On' : 'Off'}
+                  </span>
+                  <span className={`rounded-full border px-2.5 py-1 ${assistantEnabled ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                    Assistant {assistantEnabled ? 'On' : 'Off'}
+                  </span>
+                  <span className={`rounded-full border px-2.5 py-1 ${externalGroundingEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                    External DB {externalGroundingEnabled ? 'On' : 'Off'}
+                  </span>
+                </div>
                 {features.length > 0 && (
                   <ul className="mt-3 space-y-1.5">
                     {features.map((f, i) => <li key={i} className="flex items-center gap-2 text-sm text-gray-600"><Check className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />{f}</li>)}
@@ -188,8 +347,87 @@ export default function PlansPage() {
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Benefits (one per line)</label>
-                <textarea className="input resize-none" rows={4} value={form.benefits} onChange={(e) => setForm({ ...form, benefits: e.target.value })} placeholder="Unlimited products&#10;POS system&#10;Inventory tracking" />
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 mb-3">
+                  <p className="text-sm font-semibold text-indigo-900">Enterprise AI access bundle</p>
+                  <p className="mt-1 text-xs text-indigo-800">Turn on the first four switches below to give tenant admins access to the Enterprise AI console, assistant workflows, and the external database setup panel. Without ENTERPRISE_AI_EXTERNAL_DATA, the external DB setup section stays hidden on the tenant AI page.</p>
+                  <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-semibold text-indigo-700">
+                    {ENTERPRISE_AI_BUNDLE_KEYS.map((featureKey) => (
+                      <span key={featureKey} className={`rounded-full border px-2.5 py-1 ${form.selectedFeatures.includes(featureKey) ? 'border-indigo-300 bg-white text-indigo-700' : 'border-indigo-100 bg-indigo-100/70 text-indigo-500'}`}>
+                        {featureKey}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Platform Feature Access</label>
+                  <span className="text-xs text-gray-500">Used by runtime feature checks</span>
+                </div>
+                <div className="space-y-3 rounded-xl border border-gray-200 bg-gray-50 p-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Tenant access controls</p>
+                    <div className="mt-2 space-y-2">
+                      {FEATURE_TOGGLES.filter((feature) => ENTERPRISE_AI_BUNDLE_KEYS.includes(feature.key as typeof ENTERPRISE_AI_BUNDLE_KEYS[number])).map((feature) => {
+                        const checked = form.selectedFeatures.includes(feature.key)
+                        return (
+                          <label key={feature.key} className="flex cursor-pointer items-start gap-3 rounded-lg border border-indigo-100 bg-white px-3 py-2 hover:border-indigo-200">
+                            <input
+                              type="checkbox"
+                              className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                              checked={checked}
+                              onChange={() => setForm((current) => ({
+                                ...current,
+                                selectedFeatures: toggleSelectedFeature(current.selectedFeatures, feature.key),
+                              }))}
+                            />
+                            <div>
+                              <p className="text-sm font-medium text-gray-900">{feature.label}</p>
+                              <p className="text-xs text-gray-500">{feature.key} · {feature.description}</p>
+                            </div>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Additional AI modules</p>
+                    <div className="mt-2 space-y-2">
+                      {FEATURE_TOGGLES.filter((feature) => !ENTERPRISE_AI_BUNDLE_KEYS.includes(feature.key as typeof ENTERPRISE_AI_BUNDLE_KEYS[number])).map((feature) => {
+                    const checked = form.selectedFeatures.includes(feature.key)
+                    return (
+                      <label key={feature.key} className="flex cursor-pointer items-start gap-3 rounded-lg border border-transparent bg-white px-3 py-2 hover:border-indigo-200">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          checked={checked}
+                          onChange={() => setForm((current) => ({
+                            ...current,
+                            selectedFeatures: toggleSelectedFeature(current.selectedFeatures, feature.key),
+                          }))}
+                        />
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{feature.label}</p>
+                          <p className="text-xs text-gray-500">{feature.key} · {feature.description}</p>
+                        </div>
+                      </label>
+                    )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Additional Feature Tokens</label>
+                <textarea
+                  className="input resize-none"
+                  rows={4}
+                  value={form.extraFeatureTokens}
+                  onChange={(e) => setForm({ ...form, extraFeatureTokens: e.target.value })}
+                  placeholder="MAX_BUSINESS_ADMINS=3&#10;UNLIMITED_BRANCHES"
+                />
+                <p className="mt-1 text-xs text-gray-500">Use one token per line for advanced flags or numeric limits that are not covered by the toggles above.</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500">Custom plan entries can be added in the additional token box above. They will be stored with the same feature payload the backend enforces.</p>
               </div>
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setModal({ open: false, plan: null })} className="btn-secondary flex-1">Cancel</button>

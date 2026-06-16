@@ -204,16 +204,43 @@ async function main() {
   // ── Demo Tenant ────────────────────────────────────────
   const demoTenant = await prisma.tenant.upsert({
     where: { slug: 'demo-corp' },
-    update: { acquisitionAgentId: businessAgent.id },
+    update: { acquisitionAgentId: businessAgent.id, baseCurrency: 'NGN' },
     create: {
       name: 'Demo Corporation',
       slug: 'demo-corp',
       email: 'info@democorp.com',
       phone: '+1-555-0100',
       isActive: true,
+      baseCurrency: 'NGN',
       acquisitionAgentId: businessAgent.id,
     },
   })
+
+  // Use the already-saved NGN/USD rate if one exists; only create a default if there's none.
+  // Rate convention: fromCurrency=NGN, toCurrency=USD → how many USD per 1 NGN.
+  const savedRate = await prisma.currencyRate.findFirst({
+    where: { tenantId: demoTenant.id, fromCurrency: 'NGN', toCurrency: 'USD' },
+    orderBy: { date: 'desc' },
+  })
+
+  let NGN_PER_USD: number
+  if (savedRate) {
+    // 1 NGN = savedRate.rate USD  →  1 USD = 1 / savedRate.rate NGN
+    NGN_PER_USD = 1 / Number(savedRate.rate)
+    console.log(`   ↳ Using saved NGN/USD rate: 1 USD = ₦${NGN_PER_USD.toFixed(2)}`)
+  } else {
+    NGN_PER_USD = 1600
+    await prisma.currencyRate.create({
+      data: {
+        id: 'seed_rate_ngn_usd',
+        tenantId: demoTenant.id,
+        fromCurrency: 'NGN',
+        toCurrency: 'USD',
+        rate: 1 / NGN_PER_USD,   // 0.000625
+      },
+    })
+    console.log(`   ↳ No saved rate found – created default: 1 USD = ₦${NGN_PER_USD}`)
+  }
 
   // Subscription for demo tenant
   await prisma.subscription.upsert({
@@ -345,60 +372,84 @@ async function main() {
     {
       id: 'prod_001',
       name: 'Wireless Keyboard',
+      category: 'Accessories',
       type: ProductType.GOODS,
       unit: 'pcs',
       quantity: 50,
-      costPrice: 25.00,
-      sellingPrice: 49.99,
+      originalCurrency: 'USD',
+      originalCostPrice: 25.00,
+      originalSellingPrice: 49.99,
+      costPrice: 25.00 * NGN_PER_USD,
+      sellingPrice: 49.99 * NGN_PER_USD,
       barcode: '8901234567001',
       lowStockThreshold: 10,
+      purchaseDate: new Date('2026-01-10T00:00:00.000Z'),
       status: ProductStatus.ACTIVE,
     },
     {
       id: 'prod_002',
       name: 'USB-C Hub 7-in-1',
+      category: 'Accessories',
       type: ProductType.GOODS,
       unit: 'pcs',
       quantity: 30,
-      costPrice: 18.00,
-      sellingPrice: 39.99,
+      originalCurrency: 'USD',
+      originalCostPrice: 18.00,
+      originalSellingPrice: 39.99,
+      costPrice: 18.00 * NGN_PER_USD,
+      sellingPrice: 39.99 * NGN_PER_USD,
       barcode: '8901234567002',
       lowStockThreshold: 5,
+      purchaseDate: new Date('2025-12-02T00:00:00.000Z'),
       status: ProductStatus.ACTIVE,
     },
     {
       id: 'prod_003',
       name: '27" Monitor',
+      category: 'Displays',
       type: ProductType.GOODS,
       unit: 'pcs',
       quantity: 8,
-      costPrice: 180.00,
-      sellingPrice: 299.99,
+      originalCurrency: 'USD',
+      originalCostPrice: 180.00,
+      originalSellingPrice: 299.99,
+      costPrice: 180.00 * NGN_PER_USD,
+      sellingPrice: 299.99 * NGN_PER_USD,
       barcode: '8901234567003',
       lowStockThreshold: 3,
+      purchaseDate: new Date('2025-09-15T00:00:00.000Z'),
       status: ProductStatus.ACTIVE,
     },
     {
       id: 'prod_004',
       name: 'IT Support (per hour)',
+      category: 'Services',
       type: ProductType.SERVICE,
       unit: 'hr',
       quantity: 999,
-      costPrice: 20.00,
-      sellingPrice: 75.00,
+      originalCurrency: 'USD',
+      originalCostPrice: 20.00,
+      originalSellingPrice: 75.00,
+      costPrice: 20.00 * NGN_PER_USD,
+      sellingPrice: 75.00 * NGN_PER_USD,
       lowStockThreshold: 0,
       status: ProductStatus.ACTIVE,
     },
     {
       id: 'prod_005',
       name: 'Laptop Stand',
+      category: 'Accessories',
       type: ProductType.GOODS,
       unit: 'pcs',
       quantity: 3,
-      costPrice: 12.00,
-      sellingPrice: 24.99,
+      originalCurrency: 'USD',
+      originalCostPrice: 12.00,
+      originalSellingPrice: 24.99,
+      costPrice: 12.00 * NGN_PER_USD,
+      sellingPrice: 24.99 * NGN_PER_USD,
       barcode: '8901234567005',
       lowStockThreshold: 5,
+      purchaseDate: new Date('2026-02-20T00:00:00.000Z'),
       status: ProductStatus.ACTIVE,
     },
   ]
@@ -406,13 +457,44 @@ async function main() {
   for (const p of products) {
     await prisma.product.upsert({
       where: { id: p.id },
-      update: {},
+      update: {
+        ...p,
+        tenantId: demoTenant.id,
+        subsidiaryId: headOffice.id,
+      },
       create: {
         ...p,
         tenantId: demoTenant.id,
         subsidiaryId: headOffice.id,
       },
     })
+
+    if (p.type === ProductType.GOODS && p.quantity > 0 && p.purchaseDate) {
+      await prisma.productReceipt.upsert({
+        where: { id: `seed_receipt_${p.id}` },
+        update: {
+          tenantId: demoTenant.id,
+          subsidiaryId: headOffice.id,
+          productId: p.id,
+          quantity: p.quantity,
+          unitCost: p.costPrice,
+          purchaseDate: p.purchaseDate,
+          source: 'INITIAL_STOCK',
+          isEstimated: false,
+        },
+        create: {
+          id: `seed_receipt_${p.id}`,
+          tenantId: demoTenant.id,
+          subsidiaryId: headOffice.id,
+          productId: p.id,
+          quantity: p.quantity,
+          unitCost: p.costPrice,
+          purchaseDate: p.purchaseDate,
+          source: 'INITIAL_STOCK',
+          isEstimated: false,
+        },
+      })
+    }
   }
 
   console.log('✅ Demo products created')
@@ -436,7 +518,7 @@ async function main() {
           quantity: 2,
           reason: 'DAMAGED',
           description: 'Defective units with broken keys',
-          cost: 2 * 25.00,
+          cost: 2 * 25.00 * NGN_PER_USD,
           date: new Date(),
           createdBy: salesUser.id,
         },
@@ -453,7 +535,7 @@ async function main() {
           quantity: 1,
           reason: 'EXPIRED',
           description: 'Batch expired on 2026-03-15',
-          cost: 1 * 18.00,
+          cost: 1 * 18.00 * NGN_PER_USD,
           date: new Date(),
           createdBy: salesUser.id,
         },

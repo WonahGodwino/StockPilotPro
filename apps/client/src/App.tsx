@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
 import toast from 'react-hot-toast'
-import { useEffect, lazy, Suspense } from 'react'
+import { useEffect, lazy, Suspense, Component, type ReactNode } from 'react'
 import { useAuthStore } from '@/store/auth.store'
 import { initSyncListener } from '@/lib/sync'
 import api from '@/lib/api'
@@ -29,6 +29,38 @@ const SubscriptionTransactionsPage = lazy(() => import('@/pages/superadmin/Subsc
 const SystemMaintenancePage = lazy(() => import('@/pages/superadmin/SystemMaintenance'))
 const SettingsPage = lazy(() => import('@/pages/Settings'))
 const EnterpriseAIPage = lazy(() => import('@/pages/EnterpriseAI'))
+
+// Error boundary to catch crashes from lazy-loaded page components
+class RouteErrorBoundary extends Component<{ children: ReactNode; fallback?: ReactNode }, { hasError: boolean; error: Error | null }> {
+  constructor(props: { children: ReactNode; fallback?: ReactNode }) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback ?? (
+        <div className="min-h-[40vh] flex flex-col items-center justify-center gap-3 text-center px-4">
+          <div className="text-lg font-semibold text-gray-700 dark:text-gray-300">Something went wrong</div>
+          <p className="text-sm text-gray-500 max-w-md">
+            {this.state.error?.message ?? 'An unexpected error occurred while loading this page.'}
+          </p>
+          <button
+            onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload() }}
+            className="mt-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
+          >
+            Reload Page
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 function PageLoader() {
   return (

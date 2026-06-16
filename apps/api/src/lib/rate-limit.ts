@@ -17,6 +17,9 @@ type LockoutState = {
   reason?: 'account' | 'ip'
 }
 
+const MAX_STORE_SIZE = 10_000
+const GC_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
+
 const store = new Map<string, RateLimitRecord>()
 
 function nowMs() {
@@ -29,9 +32,45 @@ function gc(now: number) {
   }
 }
 
+// Evict oldest entries when the store exceeds the max size cap
+function evictExcess(now: number) {
+  if (store.size <= MAX_STORE_SIZE) return
+
+  // First pass: remove all expired entries
+  gc(now)
+
+  // Second pass: if still over limit, remove oldest by resetAt
+  if (store.size > MAX_STORE_SIZE) {
+    const sorted = [...store.entries()].sort((a, b) => a[1].resetAt - b[1].resetAt)
+    const toRemove = sorted.slice(0, store.size - MAX_STORE_SIZE)
+    for (const [k] of toRemove) {
+      store.delete(k)
+    }
+  }
+}
+
+// Periodic cleanup to prevent stale entry accumulation even when
+// consumeRateLimit is not called frequently
+let gcTimer: ReturnType<typeof setInterval> | null = null
+
+function ensurePeriodicGC() {
+  if (gcTimer !== null) return
+  gcTimer = setInterval(() => {
+    evictExcess(nowMs())
+  }, GC_INTERVAL_MS)
+  // Allow the process to exit even if this timer is still active
+  if (gcTimer && typeof gcTimer === 'object' && 'unref' in gcTimer) {
+    gcTimer.unref()
+  }
+}
+
+// Start the periodic GC timer on first import
+ensurePeriodicGC()
+
 export function consumeRateLimit(key: string, limit: number, windowMs: number): RateLimitResult {
   const now = nowMs()
   gc(now)
+  evictExcess(now)
 
   const existing = store.get(key)
   if (!existing || existing.resetAt <= now) {

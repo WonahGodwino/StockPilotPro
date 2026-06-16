@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate } from 'react-router-dom'
-import { Bot, Sparkles, ShieldAlert, RefreshCw, CalendarDays, ClipboardCheck, TrendingUp, SlidersHorizontal, Gauge, Save, Printer, Trash2, Search, Download, FileText } from 'lucide-react'
+import { Bot, Sparkles, ShieldAlert, RefreshCw, CalendarDays, ClipboardCheck, TrendingUp, SlidersHorizontal, Gauge, Save, Printer, Trash2, Search, Download, FileText, CheckCircle2, XCircle, RotateCcw } from 'lucide-react'
 import api from '@/lib/api'
 import { useAuthStore } from '@/store/auth.store'
 import { useAppStore } from '@/store/app.store'
@@ -24,11 +24,178 @@ type AssistantBrief = {
   actions: string[]
   risks: string[]
   followUpQuestions: string[]
+  responseMode?: 'clarify' | 'brief' | 'deep'
+  clarificationPrompt?: string
+  businessGuidance?: {
+    operatingMode: 'clarification_needed' | 'insufficient_evidence' | 'monitor_only' | 'manual_intervention' | 'decision_ready'
+    confidenceLabel: string
+    why: string
+    primaryRecommendation: string
+    expectedImpact: string
+    nextReview: string
+    audience: string
+  }
+  groundingNotes?: string[]
+  factBasis?: string[]
+  financialMetrics?: {
+    revenue?: number
+    profit?: number
+    margin?: number
+    expenseRatio?: number
+    inventoryTurnover?: number
+    cashRunway?: number | null
+  }
   alerts?: Array<{
     severity: 'critical' | 'warning' | 'info'
     message: string
     actionRequired: string
   }>
+  scenarioAnalysis?: {
+    bestScenario: string | null
+    worstScenario: string | null
+    profitSpread: number
+    roiSpread: number
+    calibrationSampleSize?: number
+    averageSuccessScore?: number
+    calibrationScore?: number
+    historicalAccuracy?: number
+    profitConfidenceInterval?: {
+      low: number
+      high: number
+    }
+  }
+  causalAnalysis?: {
+    problem: string
+    topCauses: Array<{ cause: string; contribution: number }>
+    interventions: string[]
+    methods?: Array<{
+      method: 'granger' | 'difference_in_differences' | 'synthetic_control'
+      title: string
+      confidence: number
+      pValue?: number
+      effectSize?: number
+    }>
+    confidenceScore?: number
+  }
+  strategicInsights?: Array<{
+    level: 'tactical' | 'operational' | 'strategic' | 'visionary'
+    insight: string
+    estimatedROI: number
+    timeHorizon: 'immediate' | 'quarter' | 'year' | '3_years'
+  }>
+  explanation?: {
+    summary: string
+    confidence: number
+    keyFactors: Array<{ factor: string; contribution: number; direction: 'positive' | 'negative' }>
+    limitations: string[]
+  }
+  executionPlan?: {
+    autoExecutableCount: number
+    approvalRequiredCount: number
+    highPriorityHumanActions?: string[]
+    workflowCoverageScore?: number
+    workflowStages?: Array<{
+      actionType: string
+      stageCount: number
+      matchedRules: number
+      requiresHumanDecision: boolean
+      executionId?: string
+      approvalStatus?: string
+      rollbackReady?: boolean
+    }>
+    topActionDecision?: 'auto_execute' | 'pending_approval'
+  }
+}
+
+type CausalDiagnosticsResponse = {
+  data: {
+    problem: string
+    confidenceScore: number
+    topCauses: Array<{ cause: string; contribution: number; evidence?: string[] }>
+    contributingFactors: string[]
+    interventions: Array<{ action: string; expectedImpact: number; confidence: number }>
+    methods: Array<{
+      method: 'granger' | 'difference_in_differences' | 'synthetic_control'
+      title: string
+      signal: string
+      confidence: number
+      pValue?: number
+      effectSize?: number
+      lagDays?: number
+      treatedUnit?: string
+      controlUnits?: string[]
+    }>
+    selectedMethod?: {
+      method: 'granger' | 'difference_in_differences' | 'synthetic_control'
+      title: string
+      signal: string
+      confidence: number
+      pValue?: number
+      effectSize?: number
+      lagDays?: number
+    } | null
+    significant: boolean
+    interpretation: string
+  }
+}
+
+type SimulationPreviewResponse = {
+  data: {
+    scenario: string
+    pointEstimate: number
+    projectedRevenue: number
+    projectedMargin: number
+    confidenceInterval: [number, number]
+    percentile10: number
+    percentile90: number
+    calibrationScore: number
+    historicalAccuracy: number
+    recommendation: string
+    interpretation: string
+  }
+}
+
+type WorkflowExecutionSummary = {
+  id: string
+  ruleId: string
+  ruleName: string
+  trigger: string
+  action: string
+  status: string
+  approvalStatus: string
+  createdAt: string
+  approvedAt: string | null
+  approvedBy: string | null
+  triggerData: unknown
+  actionTaken: unknown
+  result: unknown
+  errorMessage: string | null
+}
+
+type WorkflowDashboardResponse = {
+  data: {
+    workflows: Array<{
+      id: string
+      name: string
+      trigger: string
+      isActive: boolean
+      requiresApproval: boolean
+      priority: number
+      maxAutoAmount: number
+      executionCount: number
+      successCount: number
+      updatedAt: string
+    }>
+    pendingApprovals: WorkflowExecutionSummary[]
+    recentExecutions: WorkflowExecutionSummary[]
+    stats: {
+      totalWorkflows: number
+      activeWorkflows: number
+      pendingApprovalsCount: number
+      successRate: number
+      executionCount: number
+    }
+  }
 }
 
 type AssistantIncomeBreakdown = {
@@ -51,13 +218,66 @@ type AssistantReply = {
   incomeBreakdown?: AssistantIncomeBreakdown
   conversationId?: string
   provider?: string
+  groundingSource?: 'internal' | 'external'
+  externalData?: {
+    externalGroundingReady: boolean
+    contractIssues: ExternalGroundingContractIssue[]
+  } | null
   sourceRecommendationId?: string
   brief?: AssistantBrief
 }
 
+type HumanApprovalQueueItem = {
+  recommendationId: string
+  status: 'OPEN' | 'SNOOZED'
+  createdAt: string
+  prompt: string
+  provider: string | null
+  summary: string
+  highPriorityHumanActions: string[]
+}
+
+type HumanApprovalQueueResponse = {
+  data: HumanApprovalQueueItem[]
+}
+
+type HumanApprovalHistoryEntry = {
+  id: string
+  action: string
+  note: string | null
+  createdAt: string
+  actor: {
+    userId: string
+    firstName: string
+    lastName: string
+    email: string
+    role: string
+  } | null
+}
+
+type HumanApprovalHistoryResponse = {
+  data: {
+    recommendationId: string
+    status: string
+    title: string
+    summary: string
+    actedAt: string | null
+    actedByUserId: string | null
+    history: HumanApprovalHistoryEntry[]
+  }
+}
+
 function shouldShowSubscriptionIncomeRow(incomeBreakdown?: AssistantIncomeBreakdown): boolean {
   if (!incomeBreakdown) return false
-  return Boolean(incomeBreakdown.hasSubscriptionIncomeSource) || Number(incomeBreakdown.subscriptionIncome) > 0
+  return Number(incomeBreakdown.subscriptionIncome) > 0
+}
+
+function shouldShowIncomeBreakdownForPrompt(prompt: string, incomeBreakdown?: AssistantIncomeBreakdown): boolean {
+  if (!incomeBreakdown) return false
+  if (/(restock|reorder|inventory|stockout|stock out|shortage|replenish|low stock|stock level)/i.test(prompt)) {
+    return false
+  }
+  return Number(incomeBreakdown.totalIncome) > 0 || shouldShowSubscriptionIncomeRow(incomeBreakdown)
 }
 
 type AssistantLibraryResponse = {
@@ -180,9 +400,540 @@ type ReliabilityPanelData = {
   sampleSize: number
 }
 
+type ExternalGroundingContractIssue = {
+  entity: string
+  missingMappings: string[]
+  missingSchemaColumns: string[]
+}
+
+type ExternalGroundingContextData = {
+  providerContext: {
+    source: 'internal' | 'external'
+    externalGroundingReady: boolean
+  }
+  externalData: null | {
+    providerType: string
+    status: string
+    validationState: string
+    groundingEnabled: boolean
+    contractIssues: ExternalGroundingContractIssue[]
+    lastValidatedAt: string | null
+    lastValidationError: string | null
+    host: string
+    databaseName: string
+    schemaName: string
+  }
+}
+
+type ExternalMappingEntityKey = 'sales' | 'saleItems' | 'expenses' | 'products' | 'inventory' | 'branches'
+
+type ExternalSchemaTable = {
+  name: string
+  columns: Array<{
+    name: string
+    dataType: string
+    nullable: boolean
+  }>
+}
+
+type ExternalEntityMapping = {
+  table: string
+  columns: Record<string, string>
+}
+
+type ExternalMappingConfig = Partial<Record<ExternalMappingEntityKey, ExternalEntityMapping>>
+
+type ExternalDataConnectionSummary = {
+  id: string
+  tenantId: string
+  providerType: string
+  connectionName: string | null
+  host: string
+  port: number
+  databaseName: string
+  schemaName: string
+  sslRequired: boolean
+  status: string
+  validationState: string
+  groundingEnabled: boolean
+  isActive: boolean
+  lastValidatedAt: string | null
+  lastValidationError: string | null
+  lastHealthStatus: string | null
+  lastHealthAt: string | null
+  hasStoredCredentials: boolean
+  schemaSnapshot: {
+    tableCount: number
+    tables: ExternalSchemaTable[]
+  } | null
+  mappingConfig: ExternalMappingConfig
+  contractIssues: ExternalGroundingContractIssue[]
+}
+
+type ExternalDiscoveryResult = {
+  tables: ExternalSchemaTable[]
+  suggestions: ExternalMappingConfig
+  defaultTransactionReadOnly: boolean
+}
+
+type ExternalValidationResult = {
+  ok: boolean
+  requiredEntitiesMapped: string[]
+  missingEntities: string[]
+  entityResults: Array<{
+    entity: ExternalMappingEntityKey
+    ok: boolean
+    table?: string
+    rowCount?: number
+    checkedColumns: string[]
+    error?: string
+  }>
+}
+
+type ExternalConnectionFormState = {
+  connectionName: string
+  host: string
+  port: string
+  databaseName: string
+  schemaName: string
+  sslRequired: boolean
+  username: string
+  password: string
+}
+
+type ExternalProvisioningProfile = 'generic' | 'supabase' | 'neon' | 'aws_rds' | 'self_hosted'
+
+const EXTERNAL_CONNECTION_FORM_DEFAULTS: ExternalConnectionFormState = {
+  connectionName: '',
+  host: '',
+  port: '5432',
+  databaseName: '',
+  schemaName: 'public',
+  sslRequired: true,
+  username: '',
+  password: '',
+}
+
+const EXTERNAL_MAPPING_REQUIREMENTS: Array<{
+  key: ExternalMappingEntityKey
+  label: string
+  description: string
+  requiredColumns: string[]
+  optionalColumns?: string[]
+}> = [
+  {
+    key: 'sales',
+    label: 'Sales',
+    description: 'Header-level sales transactions for revenue trends and branch comparisons.',
+    requiredColumns: ['id', 'date', 'totalAmount', 'currency', 'branchId'],
+  },
+  {
+    key: 'saleItems',
+    label: 'Sale Items',
+    description: 'Line items used for SKU-level demand and basket analysis.',
+    requiredColumns: ['saleId', 'productId', 'quantity', 'subtotal'],
+  },
+  {
+    key: 'expenses',
+    label: 'Expenses',
+    description: 'Operating expense rows for margin, burn, and anomaly checks.',
+    requiredColumns: ['date', 'amount', 'category', 'title', 'branchId'],
+  },
+  {
+    key: 'products',
+    label: 'Products',
+    description: 'Product catalog and stock metrics used by pricing and replenishment workflows.',
+    requiredColumns: ['id', 'name', 'category', 'costPrice', 'sellingPrice', 'currentStock', 'lowStockThreshold', 'branchId'],
+    optionalColumns: ['purchaseDate', 'originalCostPrice'],
+  },
+  {
+    key: 'inventory',
+    label: 'Inventory',
+    description: 'Branch inventory snapshots used when stock is tracked outside the product table.',
+    requiredColumns: ['productId', 'quantity', 'branchId'],
+  },
+  {
+    key: 'branches',
+    label: 'Branches',
+    description: 'Branch dimension table for location names and branch-level grounding.',
+    requiredColumns: ['id', 'name'],
+  },
+]
+
+const EXTERNAL_ENTITY_TABLE_HINTS: Record<ExternalMappingEntityKey, string[]> = {
+  sales: ['sales', 'orders', 'transactions', 'invoices'],
+  saleItems: ['sale_items', 'order_items', 'invoice_items', 'line_items'],
+  expenses: ['expenses', 'costs', 'bills', 'payments'],
+  products: ['products', 'items', 'inventory_products', 'goods'],
+  inventory: ['inventory', 'stock', 'inventory_items'],
+  branches: ['branches', 'stores', 'locations', 'subsidiaries'],
+}
+
+const EXTERNAL_ENTITY_COLUMN_HINTS: Record<ExternalMappingEntityKey, Record<string, string[]>> = {
+  sales: {
+    id: ['id', 'sale_id', 'order_id', 'invoice_id'],
+    date: ['date', 'created_at', 'sale_date', 'order_date', 'invoice_date'],
+    totalAmount: ['total_amount', 'amount', 'grand_total', 'total'],
+    currency: ['currency', 'currency_code'],
+    branchId: ['branch_id', 'store_id', 'location_id', 'subsidiary_id'],
+  },
+  saleItems: {
+    saleId: ['sale_id', 'order_id', 'invoice_id'],
+    productId: ['product_id', 'item_id'],
+    quantity: ['quantity', 'qty', 'count'],
+    subtotal: ['subtotal', 'line_total', 'amount'],
+  },
+  expenses: {
+    date: ['date', 'created_at', 'expense_date'],
+    amount: ['amount', 'total_amount'],
+    category: ['category', 'expense_category', 'type'],
+    title: ['title', 'name', 'description'],
+    branchId: ['branch_id', 'store_id', 'location_id', 'subsidiary_id'],
+  },
+  products: {
+    id: ['id', 'product_id', 'item_id'],
+    name: ['name', 'product_name', 'title'],
+    category: ['category', 'type'],
+    costPrice: ['cost_price', 'cost'],
+    originalCostPrice: ['original_cost_price', 'purchase_cost', 'initial_cost', 'unit_cost'],
+    purchaseDate: ['purchase_date', 'received_at', 'received_date', 'acquired_at', 'created_at'],
+    sellingPrice: ['selling_price', 'price', 'unit_price'],
+    currentStock: ['current_stock', 'stock_on_hand', 'quantity', 'qty', 'stock'],
+    lowStockThreshold: ['low_stock_threshold', 'reorder_level', 'reorder_point', 'minimum_stock'],
+    branchId: ['branch_id', 'store_id', 'location_id', 'subsidiary_id'],
+  },
+  inventory: {
+    productId: ['product_id', 'item_id'],
+    quantity: ['quantity', 'qty', 'stock', 'stock_on_hand'],
+    branchId: ['branch_id', 'store_id', 'location_id', 'subsidiary_id'],
+  },
+  branches: {
+    id: ['id', 'branch_id', 'store_id', 'location_id'],
+    name: ['name', 'branch_name', 'store_name', 'location_name'],
+  },
+}
+
+function normalizeExternalSchemaToken(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+function scoreExternalSchemaCandidate(value: string, candidates: string[]): number {
+  const normalizedValue = normalizeExternalSchemaToken(value)
+  if (!normalizedValue) return 0
+
+  let bestScore = 0
+  for (const candidate of candidates) {
+    const normalizedCandidate = normalizeExternalSchemaToken(candidate)
+    if (!normalizedCandidate) continue
+    if (normalizedValue === normalizedCandidate) return 100
+    if (normalizedValue.startsWith(normalizedCandidate) || normalizedCandidate.startsWith(normalizedValue)) {
+      bestScore = Math.max(bestScore, 80)
+      continue
+    }
+    if (normalizedValue.includes(normalizedCandidate) || normalizedCandidate.includes(normalizedValue)) {
+      bestScore = Math.max(bestScore, 65)
+      continue
+    }
+
+    const candidateTokens = candidate.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+    const valueTokens = value.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+    const overlap = candidateTokens.filter((token) => valueTokens.includes(token)).length
+    if (overlap > 0) bestScore = Math.max(bestScore, 40 + overlap * 10)
+  }
+
+  return bestScore
+}
+
+function pickBestExternalColumnMatch(table: ExternalSchemaTable, candidates: string[]): string | undefined {
+  let bestMatch: string | undefined
+  let bestScore = 0
+  for (const column of table.columns) {
+    const score = scoreExternalSchemaCandidate(column.name, candidates)
+    if (score > bestScore) {
+      bestScore = score
+      bestMatch = column.name
+    }
+  }
+  return bestScore >= 40 ? bestMatch : undefined
+}
+
+function buildSuggestedExternalColumns(entity: ExternalMappingEntityKey, table: ExternalSchemaTable): Record<string, string> {
+  const hints = EXTERNAL_ENTITY_COLUMN_HINTS[entity]
+  const suggested: Record<string, string> = {}
+  for (const [columnKey, candidates] of Object.entries(hints)) {
+    const match = pickBestExternalColumnMatch(table, candidates)
+    if (match) suggested[columnKey] = match
+  }
+  return suggested
+}
+
+function buildExternalMappingColumnsForTable(
+  entity: ExternalMappingEntityKey,
+  table: ExternalSchemaTable | null,
+  currentColumns?: Record<string, string>,
+): Record<string, string> {
+  const requirement = EXTERNAL_MAPPING_REQUIREMENTS.find((item) => item.key === entity)
+  if (!requirement) return {}
+
+  if (!table) {
+    return Object.fromEntries(
+      Object.entries(currentColumns || {}).filter(([, value]) => typeof value === 'string' && value.trim().length > 0),
+    )
+  }
+
+  const availableColumnNames = new Set(table.columns.map((column) => column.name))
+  const suggestedColumns = buildSuggestedExternalColumns(entity, table)
+  const nextColumns: Record<string, string> = {}
+
+  for (const columnKey of [...requirement.requiredColumns, ...(requirement.optionalColumns || [])]) {
+    const currentValue = currentColumns?.[columnKey]?.trim()
+    if (currentValue && availableColumnNames.has(currentValue)) {
+      nextColumns[columnKey] = currentValue
+      continue
+    }
+    const suggestedValue = suggestedColumns[columnKey]
+    if (suggestedValue) nextColumns[columnKey] = suggestedValue
+  }
+
+  return nextColumns
+}
+
+function buildExternalConnectionForm(summary: ExternalDataConnectionSummary | null): ExternalConnectionFormState {
+  if (!summary) return { ...EXTERNAL_CONNECTION_FORM_DEFAULTS }
+  return {
+    connectionName: summary.connectionName || '',
+    host: summary.host,
+    port: String(summary.port || 5432),
+    databaseName: summary.databaseName,
+    schemaName: summary.schemaName || 'public',
+    sslRequired: summary.sslRequired,
+    username: '',
+    password: '',
+  }
+}
+
+function mergeExternalMappingSuggestions(current: ExternalMappingConfig, suggestions: ExternalMappingConfig): ExternalMappingConfig {
+  const merged: ExternalMappingConfig = { ...current }
+  for (const entity of EXTERNAL_MAPPING_REQUIREMENTS) {
+    const currentMapping = current[entity.key]
+    const suggestedMapping = suggestions[entity.key]
+    if (!currentMapping?.table && suggestedMapping?.table) {
+      merged[entity.key] = suggestedMapping
+      continue
+    }
+    if (currentMapping?.table && suggestedMapping?.columns) {
+      merged[entity.key] = {
+        table: currentMapping.table,
+        columns: {
+          ...suggestedMapping.columns,
+          ...currentMapping.columns,
+        },
+      }
+    }
+  }
+  return merged
+}
+
+function sanitizeExternalMappingConfig(mappingConfig: ExternalMappingConfig): ExternalMappingConfig {
+  const sanitized: ExternalMappingConfig = {}
+  for (const entity of EXTERNAL_MAPPING_REQUIREMENTS) {
+    const mapping = mappingConfig[entity.key]
+    const table = mapping?.table?.trim()
+    if (!table) continue
+    const columns = Object.fromEntries(
+      Object.entries(mapping?.columns || {}).filter(([, value]) => typeof value === 'string' && value.trim().length > 0),
+    )
+    sanitized[entity.key] = {
+      table,
+      columns,
+    }
+  }
+  return sanitized
+}
+
+function quoteSqlIdentifier(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`
+}
+
+function quoteSqlLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`
+}
+
+function buildReportingUserSql(args: {
+  username: string
+  databaseName: string
+  schemaName: string
+}): string {
+  const username = args.username.trim() || 'reporting_reader'
+  const databaseName = args.databaseName.trim() || 'your_database'
+  const schemaName = args.schemaName.trim() || 'public'
+  return [
+    `CREATE ROLE ${quoteSqlIdentifier(username)} LOGIN PASSWORD ${quoteSqlLiteral('replace-with-strong-password')};`,
+    `ALTER ROLE ${quoteSqlIdentifier(username)} SET default_transaction_read_only = on;`,
+    `GRANT CONNECT ON DATABASE ${quoteSqlIdentifier(databaseName)} TO ${quoteSqlIdentifier(username)};`,
+    `GRANT USAGE ON SCHEMA ${quoteSqlIdentifier(schemaName)} TO ${quoteSqlIdentifier(username)};`,
+    `GRANT SELECT ON ALL TABLES IN SCHEMA ${quoteSqlIdentifier(schemaName)} TO ${quoteSqlIdentifier(username)};`,
+    `ALTER DEFAULT PRIVILEGES IN SCHEMA ${quoteSqlIdentifier(schemaName)} GRANT SELECT ON TABLES TO ${quoteSqlIdentifier(username)};`,
+    '',
+    `-- Verify in a session for ${username}`,
+    'SHOW default_transaction_read_only;',
+  ].join('\n')
+}
+
+const EXTERNAL_PROVISIONING_PROFILES: Array<{
+  key: ExternalProvisioningProfile
+  label: string
+  summary: string
+  notes: string[]
+}> = [
+  {
+    key: 'generic',
+    label: 'Generic PostgreSQL',
+    summary: 'Use when you have normal PostgreSQL admin access and can run role and grant statements directly.',
+    notes: [
+      'Run the generated SQL with a database admin account.',
+      'Replace the placeholder password before executing the script.',
+      'Confirm the reporting user can connect and SHOW default_transaction_read_only returns on.',
+    ],
+  },
+  {
+    key: 'supabase',
+    label: 'Supabase',
+    summary: 'Use the Supabase SQL editor with a privileged project role, then connect StockPilotPro with the generated reporting user.',
+    notes: [
+      'Run the generated SQL in the Supabase SQL editor under the project owner/admin connection.',
+      'Make sure your grants cover the schema that holds the reporting tables, often public.',
+      'Use the project database host and the new reporting username in the StockPilotPro connection form.',
+    ],
+  },
+  {
+    key: 'neon',
+    label: 'Neon',
+    summary: 'Use a Neon role with read-only defaults if your branch allows role management.',
+    notes: [
+      'Run the generated SQL from psql or Neon SQL editor using an admin-capable role on the target branch.',
+      'If branch-level permissions restrict role creation, create the role on the parent environment first.',
+      'Use the branch connection host together with the generated reporting username in StockPilotPro.',
+    ],
+  },
+  {
+    key: 'aws_rds',
+    label: 'AWS RDS / Aurora',
+    summary: 'Run the generated statements through Query Editor, psql, or another admin session against the instance or cluster.',
+    notes: [
+      'Use the master or delegated admin user to create the reporting role and grants.',
+      'If IAM auth is enabled for your environment, keep StockPilotPro on normal password auth for this reporting user unless you add a custom integration layer.',
+      'Verify the role against the same database and schema you will connect to from StockPilotPro.',
+    ],
+  },
+  {
+    key: 'self_hosted',
+    label: 'Self-hosted PostgreSQL',
+    summary: 'Use psql, pgAdmin, or your existing DBA workflow to create a constrained reporting user.',
+    notes: [
+      'Prefer a dedicated reporting account rather than reusing an application login.',
+      'Limit network access for the reporting user to the StockPilotPro host or VPN if possible.',
+      'Re-run the grant statements if you move tables to a different schema.',
+    ],
+  },
+]
+
+function getApiErrorMessage(err: unknown, fallback: string): string {
+  const errorPayload = (err as { response?: { data?: { error?: unknown } } })?.response?.data?.error
+  if (typeof errorPayload === 'string' && errorPayload.trim()) {
+    if (/default_transaction_read_only=on|no write privileges on the target schema/i.test(errorPayload)) {
+      return 'This PostgreSQL user is not read-only enough for Phase 1. Either set default_transaction_read_only to on for the reporting user, or remove all write privileges from that user on the target schema so it is effectively read-only before reconnecting.'
+    }
+    return errorPayload
+  }
+  if (Array.isArray(errorPayload)) return fallback
+  return fallback
+}
+
 function toRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   return value as Record<string, unknown>
+}
+
+function toFiniteNumber(value: unknown): number | null {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function toTextValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function getWorkflowStatusUi(status: string): { label: string; classes: string } {
+  if (status === 'executed') return { label: 'Executed', classes: 'border-emerald-200 bg-emerald-50 text-emerald-700' }
+  if (status === 'rolled_back') return { label: 'Rolled Back', classes: 'border-slate-300 bg-slate-100 text-slate-700' }
+  if (status === 'handoff_required') return { label: 'Handoff', classes: 'border-violet-200 bg-violet-50 text-violet-700' }
+  if (status === 'failed') return { label: 'Failed', classes: 'border-rose-200 bg-rose-50 text-rose-700' }
+  if (status === 'pending_approval') return { label: 'Pending Approval', classes: 'border-amber-200 bg-amber-50 text-amber-700' }
+  if (status === 'rejected') return { label: 'Rejected', classes: 'border-rose-200 bg-rose-50 text-rose-700' }
+  if (status === 'executing') return { label: 'Executing', classes: 'border-sky-200 bg-sky-50 text-sky-700' }
+  return { label: status.replace(/_/g, ' '), classes: 'border-gray-200 bg-gray-50 text-gray-700' }
+}
+
+function summarizeWorkflowOutcome(result: unknown): {
+  operation: string | null
+  actualImpact: number | null
+  measuredAt: string | null
+  rolledBackAt: string | null
+  message: string | null
+  handoffRequired: boolean
+  rollbackReady: boolean
+  detailLines: string[]
+} {
+  const record = toRecord(result)
+  const operation = toTextValue(record.operation)
+  const actualImpact = toFiniteNumber(record.actualImpact)
+  const measuredAt = toTextValue(record.measuredAt)
+  const rolledBackAt = toTextValue(record.rolledBackAt)
+  const message = toTextValue(record.message)
+  const handoffRequired = record.handoffRequired === true
+  const rollbackReady = record.rollbackReady === true
+  const detailLines: string[] = []
+
+  const units = toFiniteNumber(record.units)
+  if (units !== null) detailLines.push(`Units moved: ${units.toLocaleString()}`)
+
+  const previousPrice = toFiniteNumber(record.previousPrice)
+  const newPrice = toFiniteNumber(record.newPrice)
+  if (previousPrice !== null && newPrice !== null) {
+    detailLines.push(`Price updated from ${previousPrice.toLocaleString()} to ${newPrice.toLocaleString()}`)
+  }
+
+  const expenseId = toTextValue(record.expenseId)
+  if (expenseId) detailLines.push(`Expense record: ${expenseId}`)
+
+  const notificationId = toTextValue(record.notificationId)
+  if (notificationId) detailLines.push(`Notification: ${notificationId}`)
+
+  const sourceProductId = toTextValue(record.sourceProductId)
+  const targetProductId = toTextValue(record.targetProductId)
+  if (sourceProductId && targetProductId) {
+    detailLines.push(`Transfer route: ${sourceProductId} -> ${targetProductId}`)
+  }
+
+  return {
+    operation,
+    actualImpact,
+    measuredAt,
+    rolledBackAt,
+    message,
+    handoffRequired,
+    rollbackReady,
+    detailLines,
+  }
+}
+
+function stringifyWorkflowPayload(value: unknown): string {
+  try {
+    return JSON.stringify(value ?? {}, null, 2)
+  } catch {
+    return 'Unable to render payload'
+  }
 }
 
 function percentile(values: number[], p: number): number | null {
@@ -222,16 +973,17 @@ type IssueTone = 'critical' | 'moderate' | 'positive' | 'info'
 
 function getIssueTone(severity: 'critical' | 'warning' | 'info', message: string): IssueTone {
   const text = message.toLowerCase()
-  const hasNegatedUrgency = /(no\s+critical|no\s+urgent|no\s+stockout|without\s+critical|resolved\s+critical)/.test(text)
+  const hasNegatedUrgency = /(no\s+critical|no\s+urgent|no\s+stockout|no\s+immediate|without\s+critical|resolved\s+critical|0\s+critical|0\s+urgent|0\s+stockout|0\s+loss\-making|no\s+branch\s+distress)/.test(text)
   const isPositive = /(improv|improved|increase|grew|growth|profitable|healthy|stable|resolved|adequate|above\s+threshold|good|excellent|on\s+track|success|achievement|no\s+critical|no\s+urgent|no\s+stockout)/.test(text)
   const isUrgent = /(urgent|immediate|critical|stockout|operating\s+at\s+a\s+loss|business\s+is\s+operating\s+at\s+a\s+loss|emergency|high\s+risk|crashed|collapsed)/.test(text)
   const isModerate = /(moderate|warning|risk|declin|spike|thin\s+margin|unresolved|attention|important|monitor)/.test(text)
+  const isRiskContext = /(obsolescence|holding\s+cost|storage\s+cost|tied\-up\s+capital|tied\s+up\s+capital|cash\s+tied|days\s+of\s+inventory)/.test(text)
 
-  if (isPositive && !isUrgent) return 'positive'
   if (severity === 'critical' && !hasNegatedUrgency) return 'critical'
   if (severity === 'warning') return 'moderate'
   if (isUrgent && !hasNegatedUrgency) return 'critical'
-  if (isModerate) return 'moderate'
+  if (isModerate || isRiskContext) return 'moderate'
+  if (isPositive && !isUrgent && !isRiskContext) return 'positive'
   return 'info'
 }
 
@@ -248,28 +1000,200 @@ function getIssueToneUi(tone: IssueTone): { label: string; classes: string } {
   return { label: 'ℹ Info', classes: 'border-sky-200 bg-sky-50 text-sky-700' }
 }
 
+function isBenignIssueMessage(message: string): boolean {
+  const text = message.toLowerCase().trim()
+  return /(^|\b)(no\s+immediate|no\s+critical|no\s+urgent|no\s+stockout|no\s+branch\s+distress|0\s+critical|0\s+stockout|0\s+loss\-making)(\b|$)/.test(text)
+}
+
+function extractPositiveCount(text: string, pattern: RegExp): number {
+  const match = text.match(pattern)
+  if (!match) return 0
+  const parsed = Number(match[1])
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+}
+
+function normalizeEntityName(raw: string): string {
+  return raw
+    .replace(/[\s\u00A0]+/g, ' ')
+    .replace(/[;,.]+$/g, '')
+    .trim()
+}
+
+function extractIssueEntities(reply: AssistantReply): {
+  stockItems: string[]
+  branches: string[]
+  general: string[]
+} {
+  const texts = [
+    reply.response || '',
+    reply.brief?.summary || '',
+    ...(reply.brief?.comparativeInsights || []),
+    ...(reply.brief?.actions || []),
+    ...(reply.brief?.risks || []),
+  ]
+
+  const stockItemSet = new Set<string>()
+  const branchSet = new Set<string>()
+  const generalSet = new Set<string>()
+
+  const maybeAdd = (candidate: string, bucket: Set<string>) => {
+    const value = normalizeEntityName(candidate)
+    if (!value || value.length < 2) return
+    if (/^(uncategorized|important|critical|monitor|this week|immediate)$/i.test(value)) return
+    bucket.add(value)
+    generalSet.add(value)
+  }
+
+  for (const text of texts) {
+    let match: RegExpExecArray | null
+
+    const quoted = /['\"]([^'\"]{2,70})['\"]/g
+    while ((match = quoted.exec(text)) !== null) {
+      maybeAdd(match[1], generalSet)
+    }
+
+    const stockFromAction = /(?:order|reorder|po\s+for|units\s+of)\s+\d*\s*units?\s+of\s+([A-Za-z0-9][A-Za-z0-9 "&\-().]{1,70})/ig
+    while ((match = stockFromAction.exec(text)) !== null) {
+      maybeAdd(match[1], stockItemSet)
+    }
+
+    const stockFromBullet = /(?:^|•)\s*([A-Za-z0-9][A-Za-z0-9 "&\-().]{1,70})\s*\(/g
+    while ((match = stockFromBullet.exec(text)) !== null) {
+      maybeAdd(match[1], stockItemSet)
+    }
+
+    const branchRegex = /\b([A-Za-z0-9][A-Za-z0-9 "&\-().]{1,50}\s+Branch)\b/ig
+    while ((match = branchRegex.exec(text)) !== null) {
+      maybeAdd(match[1], branchSet)
+    }
+  }
+
+  return {
+    stockItems: Array.from(stockItemSet).slice(0, 8),
+    branches: Array.from(branchSet).slice(0, 8),
+    general: Array.from(generalSet).slice(0, 12),
+  }
+}
+
+function enrichIssueWithEntities(
+  issue: { severity: 'critical' | 'warning' | 'info'; message: string; actionRequired: string },
+  entities: { stockItems: string[]; branches: string[]; general: string[] },
+): { severity: 'critical' | 'warning' | 'info'; message: string; actionRequired: string } {
+  if (/\baffected:\b/i.test(issue.message)) return issue
+
+  const msg = issue.message.toLowerCase()
+  let involved: string[] = []
+
+  if (/(stock|inventory|sku|reorder|stockout|obsolescence|holding\s*cost|days\s+of\s+inventory)/i.test(msg)) {
+    involved = entities.stockItems.length ? entities.stockItems : entities.general
+  } else if (/branch/i.test(msg)) {
+    involved = entities.branches.length ? entities.branches : entities.general
+  } else {
+    involved = entities.general
+  }
+
+  if (!involved.length) return issue
+  return {
+    ...issue,
+    message: `${issue.message} Affected: ${involved.slice(0, 4).join(', ')}.`,
+  }
+}
+
 function buildAutoDetectedIssueList(reply: AssistantReply): Array<{
   severity: 'critical' | 'warning' | 'info'
   message: string
   actionRequired: string
 }> {
+  const entities = extractIssueEntities(reply)
   const issues = (reply.brief?.alerts || [])
     .filter((item) => item && typeof item.message === 'string' && item.message.trim())
+    .filter((item) => !isBenignIssueMessage(item.message))
     .map((item) => ({
       severity: item.severity,
       message: item.message.trim(),
       actionRequired: (item.actionRequired || '').trim() || 'Review and take action',
     }))
 
-  if (issues.length > 0) return issues
+  const metrics = reply.brief?.financialMetrics
+  if (metrics) {
+    if (typeof metrics.margin === 'number' && typeof metrics.expenseRatio === 'number' && metrics.margin >= 95 && metrics.expenseRatio <= 1) {
+      issues.push({
+        severity: 'warning',
+        message: 'Possible reporting anomaly: margin is near 100% while expense ratio is near 0%. Verify COGS and expense categorization.',
+        actionRequired: 'Run a ledger audit for missing COGS and uncategorized expenses in this period',
+      })
+    }
+
+    if (typeof metrics.profit === 'number' && metrics.profit < 0) {
+      issues.push({
+        severity: 'critical',
+        message: 'Business is operating at a net loss in the analyzed window.',
+        actionRequired: 'Reduce controllable costs and prioritize highest-margin products immediately',
+      })
+    }
+
+    if (typeof metrics.inventoryTurnover === 'number' && metrics.inventoryTurnover < 1) {
+      issues.push({
+        severity: 'warning',
+        message: `Inventory turnover is ${metrics.inventoryTurnover.toFixed(1)}x, indicating slow stock movement.`,
+        actionRequired: 'Review dead stock and rebalance reorder quantities for slow-moving SKUs',
+      })
+    }
+
+    if (typeof metrics.cashRunway === 'number' && metrics.cashRunway > 0 && metrics.cashRunway < 2) {
+      issues.push({
+        severity: 'critical',
+        message: `Cash runway is low at ${metrics.cashRunway.toFixed(1)} months.`,
+        actionRequired: 'Activate cash-preservation plan and defer non-essential spend',
+      })
+    }
+  }
+
+  const sourceText = `${reply.response || ''} ${reply.brief?.summary || ''}`
+  const p1Count = extractPositiveCount(sourceText, /(\d+)\s+CRITICAL\s*\(P1/i)
+  const p2Count = extractPositiveCount(sourceText, /(\d+)\s+IMPORTANT\s*\(P2/i)
+  const stockoutCount = extractPositiveCount(sourceText, /(\d+)\s+stockout\s+risks?/i)
+
+  if (p1Count > 0) {
+    issues.push({
+      severity: 'critical',
+      message: `${p1Count} critical stockout item(s) detected.`,
+      actionRequired: 'Create immediate purchase orders for P1 items today',
+    })
+  }
+  if (p2Count > 0) {
+    issues.push({
+      severity: 'warning',
+      message: `${p2Count} important stock-risk item(s) require action this week.`,
+      actionRequired: 'Approve reorder plan for P2 items within 7 days',
+    })
+  }
+  if (stockoutCount > 0 && p1Count === 0 && p2Count === 0) {
+    issues.push({
+      severity: 'warning',
+      message: `${stockoutCount} stockout risk signal(s) identified in the latest analysis.`,
+      actionRequired: 'Review SKU-level risk breakdown and update reorder priorities',
+    })
+  }
+
+  if (issues.length > 0) {
+    const deduped = new Map<string, { severity: 'critical' | 'warning' | 'info'; message: string; actionRequired: string }>()
+    for (const issue of issues) {
+      const key = issue.message.toLowerCase().replace(/\s+/g, ' ').trim()
+      if (!deduped.has(key)) deduped.set(key, issue)
+    }
+    return Array.from(deduped.values()).slice(0, 8).map((issue) => enrichIssueWithEntities(issue, entities))
+  }
 
   const fallback = (reply.brief?.risks || [])
     .filter((item) => typeof item === 'string' && item.trim())
-    .slice(0, 4)
+    .filter((risk) => !isBenignIssueMessage(risk))
+    .filter((risk) => /(risk|loss|declin|spike|warning|below\s+threshold|stockout|distress|slow turnover|cash tied|excessive)/i.test(risk))
+    .slice(0, 6)
     .map((risk) => {
       const lower = risk.toLowerCase()
       const hasNegatedUrgency = /(no\s+critical|no\s+urgent|no\s+stockout|without\s+critical|resolved\s+critical)/.test(lower)
-      const isPositive = /(improv|improved|increase|grew|growth|profitable|healthy|stable|resolved|adequate|above\s+threshold|good|excellent|on\s+track|success|achievement|no\s+critical|no\s+urgent|no\s+stockout)/.test(lower)
+      const isPositive = /(improv|improved|increase|grew|growth|profitable|healthy|stable|resolved|adequate|above\s+threshold|good|excellent|on\s+track|success|achievement|no\s+critical|no\s+urgent|no\s+stockout|0\s+critical|0\s+stockout)/.test(lower)
       const severity: 'critical' | 'warning' | 'info' = (!hasNegatedUrgency && /(critical|urgent|immediate|stockout|operating at a loss|business is operating at a loss|loss|emergency|high risk|crashed|collapsed)/.test(lower))
         ? 'critical'
         : (/(moderate|risk|declin|spike|warning|thin margin|unresolved|attention|important|monitor)/.test(lower))
@@ -285,14 +1209,14 @@ function buildAutoDetectedIssueList(reply: AssistantReply): Array<{
       }
     })
 
-  return fallback
+  return fallback.map((issue) => enrichIssueWithEntities(issue, entities))
 }
 
 function buildIncomeStreamsText(reply: AssistantReply, fallbackCurrency: string): string {
-  if (!reply.incomeBreakdown) return 'Income streams unavailable for this entry.'
+  const breakdown = reply.incomeBreakdown
+  if (!breakdown || !shouldShowIncomeBreakdownForPrompt(reply.prompt, breakdown)) return 'Income streams not shown for this prompt.'
 
   const currency = reply.currencyCode || fallbackCurrency
-  const breakdown = reply.incomeBreakdown
   const showSubscription = shouldShowSubscriptionIncomeRow(breakdown)
 
   const lines = [
@@ -310,10 +1234,10 @@ function buildIncomeStreamsText(reply: AssistantReply, fallbackCurrency: string)
 }
 
 function buildIncomeStreamsHtml(reply: AssistantReply, fallbackCurrency: string): string {
-  if (!reply.incomeBreakdown) return ''
+  const breakdown = reply.incomeBreakdown
+  if (!breakdown || !shouldShowIncomeBreakdownForPrompt(reply.prompt, breakdown)) return ''
 
   const currency = escapeHtml(reply.currencyCode || fallbackCurrency)
-  const breakdown = reply.incomeBreakdown
   const showSubscription = shouldShowSubscriptionIncomeRow(breakdown)
 
   return `
@@ -360,10 +1284,68 @@ function buildIssuesHtml(reply: AssistantReply): string {
   return `<section><h3>AI Auto-Detected Issues</h3><ul>${rendered}</ul></section>`
 }
 
+function buildContractIssueSummary(reply: AssistantReply): string {
+  const issues = reply.externalData?.contractIssues || []
+  if (!issues.length) return 'None'
+  return issues
+    .map((issue) => {
+      const segments: string[] = []
+      if (issue.missingMappings.length) segments.push(`missing mappings: ${issue.missingMappings.join(', ')}`)
+      if (issue.missingSchemaColumns.length) segments.push(`missing schema columns: ${issue.missingSchemaColumns.join(', ')}`)
+      return segments.length ? `${issue.entity} (${segments.join(' | ')})` : issue.entity
+    })
+    .join('; ')
+}
+
+function buildGroundingMetaText(reply: AssistantReply): string {
+  const segments: string[] = []
+  if (reply.provider) segments.push(`Provider: ${reply.provider}`)
+  if (reply.groundingSource) segments.push(`Grounding: ${reply.groundingSource}`)
+  if (reply.externalData) {
+    segments.push(`External ready: ${reply.externalData.externalGroundingReady ? 'yes' : 'no'}`)
+    if (reply.externalData.contractIssues.length) {
+      segments.push(`Contract issues: ${reply.externalData.contractIssues.length}`)
+    }
+  }
+  return segments.join(' | ')
+}
+
+function getBusinessGuidanceTone(mode?: 'clarification_needed' | 'insufficient_evidence' | 'monitor_only' | 'manual_intervention' | 'decision_ready') {
+  switch (mode) {
+    case 'decision_ready':
+      return {
+        card: 'border-emerald-200 bg-emerald-50',
+        badge: 'border-emerald-300 bg-emerald-100 text-emerald-800',
+      }
+    case 'manual_intervention':
+      return {
+        card: 'border-sky-200 bg-sky-50',
+        badge: 'border-sky-300 bg-sky-100 text-sky-800',
+      }
+    case 'clarification_needed':
+      return {
+        card: 'border-amber-200 bg-amber-50',
+        badge: 'border-amber-300 bg-amber-100 text-amber-800',
+      }
+    case 'insufficient_evidence':
+    case 'monitor_only':
+    default:
+      return {
+        card: 'border-slate-200 bg-slate-50',
+        badge: 'border-slate-300 bg-slate-100 text-slate-700',
+      }
+  }
+}
+
 function buildAssistantPrintHtml(reply: AssistantReply): string {
   const prompt = escapeHtml(reply.prompt)
   const response = escapeHtml(reply.response).replace(/\n/g, '<br />')
   const provider = reply.provider ? `<p><strong>Provider:</strong> ${escapeHtml(reply.provider)}</p>` : ''
+  const grounding = reply.groundingSource ? `<p><strong>Grounding:</strong> ${escapeHtml(reply.groundingSource)}</p>` : ''
+  const externalReady = reply.externalData ? `<p><strong>External Ready:</strong> ${reply.externalData.externalGroundingReady ? 'Yes' : 'No'}</p>` : ''
+  const contractIssues = reply.externalData?.contractIssues.length
+    ? `<p><strong>Contract Issues:</strong> ${escapeHtml(buildContractIssueSummary(reply))}</p>`
+    : ''
   const createdAt = new Date(reply.createdAt).toLocaleString()
   const incomeSection = buildIncomeStreamsHtml(reply, 'NGN')
   const issuesSection = buildIssuesHtml(reply)
@@ -373,10 +1355,18 @@ function buildAssistantPrintHtml(reply: AssistantReply): string {
       <section>
         <h3>Structured Brief</h3>
         <p><strong>Summary:</strong> ${escapeHtml(reply.brief.summary)}</p>
+        ${reply.brief.businessGuidance ? `<p><strong>Business Guidance:</strong> ${escapeHtml(reply.brief.businessGuidance.confidenceLabel)} | ${escapeHtml(reply.brief.businessGuidance.primaryRecommendation)} | ${escapeHtml(reply.brief.businessGuidance.expectedImpact)}</p>` : ''}
         ${buildPrintListSection('Comparative Insights', reply.brief.comparativeInsights)}
         ${buildPrintListSection('Actions', reply.brief.actions)}
         ${buildPrintListSection('Risks', reply.brief.risks)}
         ${buildPrintListSection('Follow-up Questions', reply.brief.followUpQuestions)}
+        ${reply.brief.factBasis ? buildPrintListSection('Fact Basis', reply.brief.factBasis) : ''}
+        ${reply.brief.groundingNotes ? buildPrintListSection('Grounding Notes', reply.brief.groundingNotes) : ''}
+        ${reply.brief.scenarioAnalysis ? `<p><strong>Scenario:</strong> Best ${escapeHtml(reply.brief.scenarioAnalysis.bestScenario || 'N/A')} | Worst ${escapeHtml(reply.brief.scenarioAnalysis.worstScenario || 'N/A')} | Profit Spread ${escapeHtml(String(reply.brief.scenarioAnalysis.profitSpread))} | ROI Spread ${escapeHtml(String(reply.brief.scenarioAnalysis.roiSpread))}</p>` : ''}
+        ${reply.brief.causalAnalysis ? buildPrintListSection('Causal Interventions', reply.brief.causalAnalysis.interventions) : ''}
+        ${reply.brief.strategicInsights ? buildPrintListSection('Strategic Insights', reply.brief.strategicInsights.map((s) => `[${s.level}] ${s.insight} (ROI ${s.estimatedROI}%, ${s.timeHorizon})`)) : ''}
+        ${reply.brief.executionPlan ? `<p><strong>Execution Plan:</strong> Auto ${reply.brief.executionPlan.autoExecutableCount}, Approval ${reply.brief.executionPlan.approvalRequiredCount}</p>` : ''}
+        ${reply.brief.executionPlan?.highPriorityHumanActions ? buildPrintListSection('High-Priority Human Approvals', reply.brief.executionPlan.highPriorityHumanActions) : ''}
         ${issuesSection}
       </section>
     `
@@ -406,6 +1396,9 @@ function buildAssistantPrintHtml(reply: AssistantReply): string {
         <h1>Enterprise AI Assistant Record</h1>
         <p class="meta">Generated: ${escapeHtml(createdAt)}</p>
         ${provider}
+        ${grounding}
+        ${externalReady}
+        ${contractIssues}
 
         <h2>Prompt</h2>
         <div class="card"><p>${prompt}</p></div>
@@ -593,10 +1586,21 @@ export default function EnterpriseAIPage() {
   const [deleteConfirmReply, setDeleteConfirmReply] = useState<AssistantReply | null>(null)
   const [deleteDialogVisible, setDeleteDialogVisible] = useState(false)
   const deleteDialogCancelButtonRef = useRef<HTMLButtonElement | null>(null)
+  const [approvalHistoryQueueItem, setApprovalHistoryQueueItem] = useState<HumanApprovalQueueItem | null>(null)
+  const [approvalHistoryVisible, setApprovalHistoryVisible] = useState(false)
+  const [approvalHistoryLoading, setApprovalHistoryLoading] = useState(false)
+  const [approvalHistoryData, setApprovalHistoryData] = useState<HumanApprovalHistoryResponse['data'] | null>(null)
+  const approvalHistoryCloseButtonRef = useRef<HTMLButtonElement | null>(null)
+  const [selectedWorkflowExecution, setSelectedWorkflowExecution] = useState<WorkflowExecutionSummary | null>(null)
+  const [workflowExecutionDetailVisible, setWorkflowExecutionDetailVisible] = useState(false)
+  const workflowExecutionDetailCloseButtonRef = useRef<HTMLButtonElement | null>(null)
   const [loadedSavedReply, setLoadedSavedReply] = useState<AssistantReply | null>(null)
   const [savedAssistantSearch, setSavedAssistantSearch] = useState('')
   const [loadingSavedAssistant, setLoadingSavedAssistant] = useState(false)
   const [conversationId] = useState(() => `enterprise-ai-${Date.now()}`)
+  const [humanApprovalQueue, setHumanApprovalQueue] = useState<HumanApprovalQueueItem[]>([])
+  const [humanApprovalLoading, setHumanApprovalLoading] = useState(false)
+  const [humanApprovalDecisionPendingId, setHumanApprovalDecisionPendingId] = useState<string | null>(null)
   const [actionItems, setActionItems] = useState<ActionItem[]>([])
   const [actionStatusCounts, setActionStatusCounts] = useState<Record<string, number>>({})
   const [actionFilterStatus, setActionFilterStatus] = useState<'ALL' | ActionTrackerStatus>('ALL')
@@ -637,6 +1641,28 @@ export default function EnterpriseAIPage() {
     freshnessHours: null,
     sampleSize: 0,
   })
+  const [externalGroundingLoading, setExternalGroundingLoading] = useState(false)
+  const [externalGroundingContext, setExternalGroundingContext] = useState<ExternalGroundingContextData | null>(null)
+  const [externalDataSummary, setExternalDataSummary] = useState<ExternalDataConnectionSummary | null>(null)
+  const [externalConnectionForm, setExternalConnectionForm] = useState<ExternalConnectionFormState>({ ...EXTERNAL_CONNECTION_FORM_DEFAULTS })
+  const [externalMappingDraft, setExternalMappingDraft] = useState<ExternalMappingConfig>({})
+  const [externalDiscovery, setExternalDiscovery] = useState<ExternalDiscoveryResult | null>(null)
+  const [externalValidation, setExternalValidation] = useState<ExternalValidationResult | null>(null)
+  const [externalDataSetupLoading, setExternalDataSetupLoading] = useState(false)
+  const [externalDataMutating, setExternalDataMutating] = useState(false)
+  const [externalDataFeatureBlocked, setExternalDataFeatureBlocked] = useState<string | null>(null)
+  const [externalDataAccessResolved, setExternalDataAccessResolved] = useState(false)
+  const [externalProvisioningProfile, setExternalProvisioningProfile] = useState<ExternalProvisioningProfile>('generic')
+  const [causalMethod, setCausalMethod] = useState<'granger' | 'did' | 'synthetic'>('granger')
+  const [causalDiagnosticsLoading, setCausalDiagnosticsLoading] = useState(false)
+  const [causalDiagnostics, setCausalDiagnostics] = useState<CausalDiagnosticsResponse['data'] | null>(null)
+  const [simulationPreviewLoading, setSimulationPreviewLoading] = useState(false)
+  const [simulationType, setSimulationType] = useState<'price_change' | 'marketing_spend' | 'inventory_change' | 'staffing_change' | 'expansion'>('price_change')
+  const [simulationPreview, setSimulationPreview] = useState<SimulationPreviewResponse['data'] | null>(null)
+  const [workflowDashboardLoading, setWorkflowDashboardLoading] = useState(false)
+  const [workflowDashboard, setWorkflowDashboard] = useState<WorkflowDashboardResponse['data'] | null>(null)
+  const [workflowDecisionPendingId, setWorkflowDecisionPendingId] = useState<string | null>(null)
+  const [workflowRollbackPendingId, setWorkflowRollbackPendingId] = useState<string | null>(null)
 
   const canAccess = user?.role === 'SUPER_ADMIN' || user?.role === 'BUSINESS_ADMIN'
 
@@ -675,7 +1701,134 @@ export default function EnterpriseAIPage() {
       loadBranchInsights(),
       loadSavedAssistantReplies(),
       loadReliabilityMetrics(),
+      loadExternalGroundingStatus(),
+      loadExternalDataSetup(),
+      loadHumanApprovalQueue(),
+      loadWorkflowDashboard(),
     ])
+  }
+
+  const loadCausalDiagnostics = async () => {
+    const prompt = assistantPrompt.trim() || 'Assess the main drivers of revenue performance for this tenant.'
+    setCausalDiagnosticsLoading(true)
+    try {
+      const { data } = await api.get<CausalDiagnosticsResponse>(`/enterprise-ai/causal?type=${causalMethod}&prompt=${encodeURIComponent(prompt)}`)
+      setCausalDiagnostics(data.data)
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to load causal diagnostics'
+      toast.error(msg)
+    } finally {
+      setCausalDiagnosticsLoading(false)
+    }
+  }
+
+  const loadSimulationPreview = async () => {
+    setSimulationPreviewLoading(true)
+    try {
+      const prompt = assistantPrompt.toLowerCase()
+      const parameters = simulationType === 'price_change'
+        ? { priceChangePct: prompt.includes('decrease') ? -5 : 5 }
+        : simulationType === 'marketing_spend'
+          ? { spendChangePct: 20 }
+          : simulationType === 'inventory_change'
+            ? { p1CoveragePct: 100 }
+            : simulationType === 'staffing_change'
+              ? { staffingCostPct: 10 }
+              : { revenueLiftPct: 12, expenseLiftPct: 7 }
+
+      const { data } = await api.post<SimulationPreviewResponse>('/enterprise-ai/causal', {
+        simulationType,
+        parameters,
+        confidenceLevel: 0.9,
+      })
+      setSimulationPreview(data.data)
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to run calibrated simulation'
+      toast.error(msg)
+    } finally {
+      setSimulationPreviewLoading(false)
+    }
+  }
+
+  const loadWorkflowDashboard = async () => {
+    setWorkflowDashboardLoading(true)
+    try {
+      const { data } = await api.get<WorkflowDashboardResponse>('/enterprise-ai/workflows?limit=20')
+      setWorkflowDashboard(data.data)
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to load workflow dashboard'
+      toast.error(msg)
+    } finally {
+      setWorkflowDashboardLoading(false)
+    }
+  }
+
+  const reviewWorkflowExecution = async (executionId: string, approved: boolean) => {
+    setWorkflowDecisionPendingId(executionId)
+    try {
+      await api.patch('/enterprise-ai/workflows', {
+        executionId,
+        approved,
+        notes: approved ? 'Approved from Enterprise AI workflow dashboard' : 'Rejected from Enterprise AI workflow dashboard',
+      })
+      toast.success(approved ? 'Workflow approved' : 'Workflow rejected')
+      await loadWorkflowDashboard()
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to review workflow execution'
+      toast.error(msg)
+    } finally {
+      setWorkflowDecisionPendingId(null)
+    }
+  }
+
+  const rollbackWorkflowExecution = async (executionId: string) => {
+    setWorkflowRollbackPendingId(executionId)
+    try {
+      await api.patch('/enterprise-ai/workflows', {
+        action: 'rollback',
+        executionId,
+        notes: 'Rolled back from Enterprise AI workflow dashboard',
+      })
+      toast.success('Workflow rolled back')
+      await loadWorkflowDashboard()
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to roll back workflow execution'
+      toast.error(msg)
+    } finally {
+      setWorkflowRollbackPendingId(null)
+    }
+  }
+
+  const loadHumanApprovalQueue = async () => {
+    setHumanApprovalLoading(true)
+    try {
+      const { data } = await api.get<HumanApprovalQueueResponse>('/enterprise-ai/assistant-approvals?limit=25')
+      setHumanApprovalQueue(data.data || [])
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to load human approval queue'
+      toast.error(msg)
+    } finally {
+      setHumanApprovalLoading(false)
+    }
+  }
+
+  const applyHumanApprovalDecision = async (recommendationId: string, action: 'accept' | 'reject') => {
+    setHumanApprovalDecisionPendingId(recommendationId)
+    try {
+      await api.patch(`/enterprise-ai/recommendations/${recommendationId}/decision`, {
+        action,
+        note: action === 'accept'
+          ? 'Approved from Human Approval Queue'
+          : 'Rejected from Human Approval Queue',
+      })
+      toast.success(action === 'accept' ? 'Action approved' : 'Action rejected')
+      await loadHumanApprovalQueue()
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to apply decision'
+      toast.error(msg)
+    } finally {
+      setHumanApprovalDecisionPendingId(null)
+    }
   }
 
   const loadActionCandidates = async () => {
@@ -786,6 +1939,210 @@ export default function EnterpriseAIPage() {
     }
   }
 
+  const loadExternalGroundingStatus = async () => {
+    setExternalGroundingLoading(true)
+    try {
+      const { data } = await api.get<{ data: ExternalGroundingContextData }>('/enterprise-ai/context')
+      setExternalGroundingContext(data.data)
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to load external grounding status'
+      toast.error(msg)
+    } finally {
+      setExternalGroundingLoading(false)
+    }
+  }
+
+  const loadExternalDataSetup = async () => {
+    setExternalDataSetupLoading(true)
+    try {
+      const { data } = await api.get<{ data: ExternalDataConnectionSummary | null }>('/enterprise-ai/external-data')
+      const summary = data.data
+      setExternalDataSummary(summary)
+      setExternalConnectionForm(buildExternalConnectionForm(summary))
+      setExternalMappingDraft(summary?.mappingConfig || {})
+      setExternalDataFeatureBlocked(null)
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status
+      const msg = getApiErrorMessage(err, 'Failed to load external database setup')
+      if (status === 403) {
+        setExternalDataSummary(null)
+        setExternalDiscovery(null)
+        setExternalValidation(null)
+        setExternalMappingDraft({})
+        setExternalConnectionForm({ ...EXTERNAL_CONNECTION_FORM_DEFAULTS })
+        setExternalDataFeatureBlocked(msg)
+      } else {
+        toast.error(msg)
+      }
+    } finally {
+      setExternalDataAccessResolved(true)
+      setExternalDataSetupLoading(false)
+    }
+  }
+
+  const submitExternalConnection = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setExternalDataMutating(true)
+    try {
+      const hadExistingConnection = Boolean(externalDataSummary)
+      const payload = {
+        providerType: 'postgresql' as const,
+        connectionName: externalConnectionForm.connectionName.trim() || undefined,
+        host: externalConnectionForm.host.trim(),
+        port: Number(externalConnectionForm.port || '5432'),
+        databaseName: externalConnectionForm.databaseName.trim(),
+        schemaName: externalConnectionForm.schemaName.trim() || 'public',
+        sslRequired: externalConnectionForm.sslRequired,
+        username: externalConnectionForm.username.trim() || undefined,
+        password: externalConnectionForm.password || undefined,
+      }
+      const { data } = await api.post<{ data: ExternalDataConnectionSummary }>('/enterprise-ai/external-data', payload)
+      setExternalDataSummary(data.data)
+      setExternalConnectionForm(buildExternalConnectionForm(data.data))
+      setExternalMappingDraft(data.data.mappingConfig || {})
+      setExternalValidation(null)
+      toast.success(hadExistingConnection ? 'External database connection updated' : 'External database connection saved')
+      await Promise.all([loadExternalGroundingStatus(), loadExternalDataSetup()])
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, 'Failed to save external database connection'))
+    } finally {
+      setExternalDataMutating(false)
+    }
+  }
+
+  const discoverExternalSchema = async () => {
+    setExternalDataMutating(true)
+    try {
+      const { data } = await api.post<{ data: ExternalDiscoveryResult }>('/enterprise-ai/external-data/discover')
+      setExternalDiscovery(data.data)
+      setExternalMappingDraft((current) => mergeExternalMappingSuggestions(current, data.data.suggestions || {}))
+      toast.success('External schema discovery complete')
+      await loadExternalDataSetup()
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, 'Failed to discover external schema'))
+    } finally {
+      setExternalDataMutating(false)
+    }
+  }
+
+  const saveExternalMappings = async (groundingEnabled = externalDataSummary?.groundingEnabled ?? false) => {
+    setExternalDataMutating(true)
+    try {
+      const mappingPayload = sanitizeExternalMappingConfig(externalMappingDraft)
+      const { data } = await api.patch<{ data: ExternalDataConnectionSummary }>('/enterprise-ai/external-data', {
+        mappingConfig: mappingPayload,
+        groundingEnabled,
+      })
+      setExternalDataSummary(data.data)
+      setExternalMappingDraft(data.data.mappingConfig || {})
+      toast.success(groundingEnabled ? 'Mappings saved and grounding updated' : 'Mappings saved')
+      await Promise.all([loadExternalGroundingStatus(), loadExternalDataSetup()])
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, 'Failed to save external mappings'))
+    } finally {
+      setExternalDataMutating(false)
+    }
+  }
+
+  const validateExternalMappings = async () => {
+    setExternalDataMutating(true)
+    try {
+      const { data } = await api.post<{ data: ExternalValidationResult }>('/enterprise-ai/external-data/validate')
+      setExternalValidation(data.data)
+      toast.success(data.data.ok ? 'External mapping validation passed' : 'Validation completed with issues')
+      await Promise.all([loadExternalGroundingStatus(), loadExternalDataSetup()])
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, 'Failed to validate external mappings'))
+    } finally {
+      setExternalDataMutating(false)
+    }
+  }
+
+  const toggleExternalGrounding = async (enabled: boolean) => {
+    await saveExternalMappings(enabled)
+  }
+
+  const disableExternalConnection = async () => {
+    setExternalDataMutating(true)
+    try {
+      await api.delete('/enterprise-ai/external-data')
+      setExternalDataSummary(null)
+      setExternalDiscovery(null)
+      setExternalValidation(null)
+      setExternalMappingDraft({})
+      setExternalConnectionForm({ ...EXTERNAL_CONNECTION_FORM_DEFAULTS })
+      toast.success('External database connection disabled')
+      await Promise.all([loadExternalGroundingStatus(), loadExternalDataSetup()])
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, 'Failed to disable external database connection'))
+    } finally {
+      setExternalDataMutating(false)
+    }
+  }
+
+  const updateExternalMappingTable = (entity: ExternalMappingEntityKey, table: string) => {
+    const normalizedTableName = table.trim().toLowerCase()
+    const selectedTable = normalizedTableName ? availableExternalTableLookup.get(normalizedTableName) || null : null
+    setExternalMappingDraft((current) => ({
+      ...current,
+      [entity]: {
+        table,
+        columns: buildExternalMappingColumnsForTable(entity, selectedTable, current[entity]?.columns),
+      },
+    }))
+  }
+
+  const updateExternalMappingColumn = (entity: ExternalMappingEntityKey, columnKey: string, value: string) => {
+    setExternalMappingDraft((current) => ({
+      ...current,
+      [entity]: {
+        table: current[entity]?.table || '',
+        columns: {
+          ...(current[entity]?.columns || {}),
+          [columnKey]: value,
+        },
+      },
+    }))
+  }
+
+  const autofillExternalEntityMapping = (entity: ExternalMappingEntityKey) => {
+    const currentTableName = externalMappingDraft[entity]?.table?.trim()
+    const selectedTable = currentTableName ? availableExternalTableLookup.get(currentTableName.toLowerCase()) || null : null
+    if (!selectedTable) {
+      toast.error('Choose a discovered table before auto-filling columns')
+      return
+    }
+
+    setExternalMappingDraft((current) => ({
+      ...current,
+      [entity]: {
+        table: currentTableName,
+        columns: buildExternalMappingColumnsForTable(entity, selectedTable, current[entity]?.columns),
+      },
+    }))
+    toast.success('Column suggestions applied')
+  }
+
+  const applyAllExternalMappingSuggestions = () => {
+    setExternalMappingDraft((current) => {
+      const next: ExternalMappingConfig = { ...current }
+      for (const entity of EXTERNAL_MAPPING_REQUIREMENTS) {
+        const currentTableName = current[entity.key]?.table?.trim()
+        const selectedTable = currentTableName
+          ? availableExternalTableLookup.get(currentTableName.toLowerCase()) || null
+          : externalEntityCandidateTables[entity.key][0] || null
+        const resolvedTableName = currentTableName || selectedTable?.name || ''
+        if (!resolvedTableName) continue
+        next[entity.key] = {
+          table: resolvedTableName,
+          columns: buildExternalMappingColumnsForTable(entity.key, selectedTable, current[entity.key]?.columns),
+        }
+      }
+      return next
+    })
+    toast.success('Suggested mappings applied')
+  }
+
   const saveAlertPolicy = async (e: FormEvent) => {
     e.preventDefault()
     setAlertPolicySaving(true)
@@ -874,6 +2231,11 @@ export default function EnterpriseAIPage() {
       const payload = (data.data.outputPayload as {
         response?: string
         provider?: string
+        groundingSource?: 'internal' | 'external'
+        externalData?: {
+          externalGroundingReady: boolean
+          contractIssues?: ExternalGroundingContractIssue[]
+        } | null
         brief?: AssistantBrief
         currencyCode?: string
         incomeBreakdown?: AssistantIncomeBreakdown
@@ -888,11 +2250,20 @@ export default function EnterpriseAIPage() {
           incomeBreakdown: payload?.incomeBreakdown,
           conversationId,
           provider: payload?.provider,
+          groundingSource: payload?.groundingSource,
+          externalData: payload?.externalData
+            ? {
+                externalGroundingReady: payload.externalData.externalGroundingReady,
+                contractIssues: payload.externalData.contractIssues || [],
+              }
+            : null,
           brief: payload?.brief,
         },
         ...prev,
       ])
       await loadReliabilityMetrics()
+      await loadExternalGroundingStatus()
+      void loadHumanApprovalQueue()
       setBlocked(null)
       return true
     } catch (err: unknown) {
@@ -909,6 +2280,17 @@ export default function EnterpriseAIPage() {
   const sendAssistantPrompt = async (e: FormEvent) => {
     e.preventDefault()
     await runAssistantPrompt(assistantPrompt)
+  }
+
+  const runReplyFollowUp = async (reply: AssistantReply, followUpPrompt: string) => {
+    const trimmed = followUpPrompt.trim()
+    if (!trimmed) return
+    setLoadedSavedReply(reply)
+    setAssistantPrompt(trimmed)
+    const ok = await runAssistantPrompt(trimmed)
+    if (!ok) {
+      toast.error('Follow-up request failed. Try again with a shorter prompt.')
+    }
   }
 
   const loadSavedAssistantReplies = async () => {
@@ -934,6 +2316,8 @@ export default function EnterpriseAIPage() {
         incomeBreakdown: reply.incomeBreakdown,
         conversationId: reply.conversationId || conversationId,
         provider: reply.provider,
+        groundingSource: reply.groundingSource,
+        externalData: reply.externalData,
         sourceRecommendationId: reply.id,
         brief: reply.brief,
       })
@@ -1049,6 +2433,44 @@ export default function EnterpriseAIPage() {
     setDeleteConfirmReply(null)
   }
 
+  const openApprovalHistoryDrawer = async (queueItem: HumanApprovalQueueItem) => {
+    setApprovalHistoryQueueItem(queueItem)
+    setApprovalHistoryVisible(false)
+    setApprovalHistoryLoading(true)
+    try {
+      const { data } = await api.get<HumanApprovalHistoryResponse>(`/enterprise-ai/assistant-approvals/${queueItem.recommendationId}/history`)
+      setApprovalHistoryData(data.data)
+      requestAnimationFrame(() => setApprovalHistoryVisible(true))
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to load approval history'
+      toast.error(msg)
+      setApprovalHistoryQueueItem(null)
+      setApprovalHistoryData(null)
+    } finally {
+      setApprovalHistoryLoading(false)
+    }
+  }
+
+  const closeApprovalHistoryDrawer = () => {
+    if (!approvalHistoryQueueItem) return
+    if (approvalHistoryLoading) return
+    setApprovalHistoryVisible(false)
+    setApprovalHistoryQueueItem(null)
+    setApprovalHistoryData(null)
+  }
+
+  const openWorkflowExecutionDetail = (execution: WorkflowExecutionSummary) => {
+    setSelectedWorkflowExecution(execution)
+    setWorkflowExecutionDetailVisible(false)
+    requestAnimationFrame(() => setWorkflowExecutionDetailVisible(true))
+  }
+
+  const closeWorkflowExecutionDetail = () => {
+    if (!selectedWorkflowExecution) return
+    setWorkflowExecutionDetailVisible(false)
+    setSelectedWorkflowExecution(null)
+  }
+
   const buildFollowUpRecheckPrompt = (reply: AssistantReply): string => {
     const { priorityActions, unresolvedIssues } = extractPriorityFocusFromReply(reply)
     const priorPrompt = truncateForPrompt(reply.prompt, 420)
@@ -1153,11 +2575,15 @@ export default function EnterpriseAIPage() {
       return
     }
 
-    const header = ['id', 'createdAt', 'provider', 'prompt', 'response', 'autoDetectedIssueCount', 'autoDetectedIssues']
+    const header = ['id', 'createdAt', 'provider', 'groundingSource', 'externalGroundingReady', 'contractIssueCount', 'contractIssues', 'prompt', 'response', 'autoDetectedIssueCount', 'autoDetectedIssues']
     const rows = entries.map((entry) => [
       entry.id,
       entry.createdAt,
       entry.provider || '',
+      entry.groundingSource || '',
+      entry.externalData ? String(entry.externalData.externalGroundingReady) : '',
+      entry.externalData?.contractIssues.length || 0,
+      buildContractIssueSummary(entry),
       entry.prompt,
       entry.response,
       buildAutoDetectedIssueList(entry).length,
@@ -1308,17 +2734,33 @@ export default function EnterpriseAIPage() {
         doc.setFont('helvetica', 'normal')
         writeWrapped(`Created: ${new Date(entry.createdAt).toLocaleString()}`, 10, 13, colors.muted)
         if (entry.provider) writeWrapped(`Provider: ${entry.provider}`, 10, 13, colors.muted)
+        if (entry.groundingSource) writeWrapped(`Grounding: ${entry.groundingSource}`, 10, 13, colors.muted)
+        if (entry.externalData) writeWrapped(`External ready: ${entry.externalData.externalGroundingReady ? 'Yes' : 'No'}`, 10, 13, colors.muted)
         cursorY += 8
 
         writeCardSection('Prompt', entry.prompt)
         writeCardSection('Response', entry.response)
-        writeCardSection('Income Streams (30d)', buildIncomeStreamsText(entry, baseCurrency))
+        if (entry.externalData?.contractIssues.length) {
+          writeCardSection('Grounding Contract Issues', buildContractIssueSummary(entry))
+        }
+        if (shouldShowIncomeBreakdownForPrompt(entry.prompt, entry.incomeBreakdown)) {
+          writeCardSection('Income Streams (30d)', buildIncomeStreamsText(entry, baseCurrency))
+        }
 
         if (entry.brief) {
           writeCardSection('Structured Brief Summary', entry.brief.summary)
           writeCardSection('Actions', listToText('Actions', entry.brief.actions))
           writeCardSection('Comparative Insights', listToText('Comparative Insights', entry.brief.comparativeInsights))
           writeCardSection('Risks', listToText('Risks', entry.brief.risks))
+          if (entry.brief.strategicInsights?.length) {
+            writeCardSection('Strategic Insights', listToText('Strategic Insights', entry.brief.strategicInsights.map((s) => `[${s.level}] ${s.insight} (ROI ${s.estimatedROI}%, ${s.timeHorizon})`)))
+          }
+          if (entry.brief.executionPlan) {
+            writeCardSection('Execution Plan', `Auto-executable: ${entry.brief.executionPlan.autoExecutableCount}\nApproval-required: ${entry.brief.executionPlan.approvalRequiredCount}`)
+            if (entry.brief.executionPlan.highPriorityHumanActions?.length) {
+              writeCardSection('High-Priority Human Approvals', listToText('High-Priority Human Approvals', entry.brief.executionPlan.highPriorityHumanActions))
+            }
+          }
         }
 
         writeCardSection('AI Auto-Detected Issues', buildIssuesText(entry))
@@ -1398,7 +2840,11 @@ export default function EnterpriseAIPage() {
       void loadActionItems()
       void loadAlertPolicy()
       void loadReliabilityMetrics()
+      void loadExternalGroundingStatus()
+      void loadExternalDataSetup()
       void loadSavedAssistantReplies()
+      void loadHumanApprovalQueue()
+      void loadWorkflowDashboard()
     }
   }, [canAccess])
 
@@ -1411,6 +2857,87 @@ export default function EnterpriseAIPage() {
   useEffect(() => {
     if (user?.id) setActionOwnerUserId(user.id)
   }, [user?.id])
+
+  const availableExternalTables = useMemo(() => {
+    const summaryTables = externalDataSummary?.schemaSnapshot?.tables || []
+    const discoveredTables = externalDiscovery?.tables || []
+    return discoveredTables.length > 0 ? discoveredTables : summaryTables
+  }, [externalDataSummary?.schemaSnapshot?.tables, externalDiscovery?.tables])
+
+  const availableExternalTableNames = useMemo(
+    () => availableExternalTables.map((table) => table.name),
+    [availableExternalTables],
+  )
+
+  const availableExternalTableLookup = useMemo(
+    () => new Map(availableExternalTables.map((table) => [table.name.toLowerCase(), table])),
+    [availableExternalTables],
+  )
+
+  const externalEntityCandidateTables = useMemo(() => {
+    return EXTERNAL_MAPPING_REQUIREMENTS.reduce<Record<ExternalMappingEntityKey, ExternalSchemaTable[]>>((accumulator, entity) => {
+      accumulator[entity.key] = availableExternalTables
+        .map((table) => ({
+          table,
+          score: scoreExternalSchemaCandidate(table.name, EXTERNAL_ENTITY_TABLE_HINTS[entity.key]),
+        }))
+        .filter((entry) => entry.score >= 40)
+        .sort((left, right) => right.score - left.score || left.table.name.localeCompare(right.table.name))
+        .slice(0, 3)
+        .map((entry) => entry.table)
+      return accumulator
+    }, {
+      sales: [],
+      saleItems: [],
+      expenses: [],
+      products: [],
+      inventory: [],
+      branches: [],
+    })
+  }, [availableExternalTables])
+
+  const externalReportingUsername = useMemo(
+    () => externalConnectionForm.username.trim() || 'reporting_reader',
+    [externalConnectionForm.username],
+  )
+
+  const reportingUserSql = useMemo(
+    () => buildReportingUserSql({
+      username: externalReportingUsername,
+      databaseName: externalConnectionForm.databaseName,
+      schemaName: externalConnectionForm.schemaName,
+    }),
+    [externalConnectionForm.databaseName, externalConnectionForm.schemaName, externalReportingUsername],
+  )
+
+  const selectedProvisioningProfile = useMemo(
+    () => EXTERNAL_PROVISIONING_PROFILES.find((profile) => profile.key === externalProvisioningProfile) || EXTERNAL_PROVISIONING_PROFILES[0],
+    [externalProvisioningProfile],
+  )
+
+  const currentExternalContractIssues = externalDataSummary?.contractIssues || externalGroundingContext?.externalData?.contractIssues || []
+
+  const currentExternalContractIssueByEntity = useMemo(
+    () => new Map(currentExternalContractIssues.map((issue) => [issue.entity, issue])),
+    [currentExternalContractIssues],
+  )
+
+  const copyReportingUserSql = async () => {
+    try {
+      await navigator.clipboard.writeText(reportingUserSql)
+      toast.success('Reporting-user SQL copied')
+    } catch {
+      toast.error('Unable to copy SQL. Select and copy it manually.')
+    }
+  }
+
+  const applySuggestedReportingUsername = () => {
+    setExternalConnectionForm((current) => ({
+      ...current,
+      username: current.username.trim() || 'reporting_reader',
+    }))
+    toast.success('Reporting username applied to connection field')
+  }
 
   useEffect(() => {
     if (!deleteConfirmReply) return
@@ -1437,6 +2964,52 @@ export default function EnterpriseAIPage() {
       document.body.style.overflow = previousOverflow
     }
   }, [deleteConfirmReply, assistantDeletePendingIds])
+
+  useEffect(() => {
+    if (!approvalHistoryQueueItem) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !approvalHistoryLoading) {
+        closeApprovalHistoryDrawer()
+      }
+    }
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    if (!approvalHistoryLoading) {
+      setTimeout(() => {
+        approvalHistoryCloseButtonRef.current?.focus()
+      }, 0)
+    }
+    window.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = previousOverflow
+    }
+  }, [approvalHistoryQueueItem, approvalHistoryLoading])
+
+  useEffect(() => {
+    if (!selectedWorkflowExecution) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeWorkflowExecutionDetail()
+      }
+    }
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    setTimeout(() => {
+      workflowExecutionDetailCloseButtonRef.current?.focus()
+    }, 0)
+    window.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = previousOverflow
+    }
+  }, [selectedWorkflowExecution])
 
   const rankingSummary = useMemo(() => {
     if (!branchRows.length) return 'No branch performance recommendations yet.'
@@ -1598,6 +3171,449 @@ export default function EnterpriseAIPage() {
       )}
 
       <div className="space-y-6">
+        {externalDataAccessResolved && !externalDataFeatureBlocked && (
+        <div className="card space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="w-5 h-5 text-orange-600" />
+              <h2 className="font-semibold text-gray-900">External Grounding Status</h2>
+            </div>
+            <button className="btn-secondary" onClick={() => { void Promise.all([loadExternalGroundingStatus(), loadExternalDataSetup()]) }} disabled={externalGroundingLoading || externalDataSetupLoading}>
+              <RefreshCw className={`w-4 h-4 ${externalGroundingLoading || externalDataSetupLoading ? 'animate-spin' : ''}`} /> Refresh Status
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            <div className="space-y-4">
+              <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+                <p className="font-semibold">Read-only PostgreSQL connector</p>
+                <p className="mt-1">Use a PostgreSQL account with default_transaction_read_only enabled. After connecting, discover the schema, map the six required entities, validate, then enable grounding.</p>
+                <p className="mt-2 text-xs text-sky-800">If setup fails on the read-only check, run ALTER ROLE your_reporting_user SET default_transaction_read_only = on; on the external database, then verify with SHOW default_transaction_read_only; before retrying.</p>
+              </div>
+
+              <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-950">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="font-semibold">Provision reporting user</p>
+                    <p className="mt-1 text-indigo-900">The app should not execute role-management SQL on a customer database. Use this helper to generate the PostgreSQL script, run it in your DB admin tool, then reuse the same username below for connection setup.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className="btn-secondary" onClick={applySuggestedReportingUsername}>
+                      Use {externalReportingUsername}
+                    </button>
+                    <button type="button" className="btn-secondary" onClick={() => { void copyReportingUserSql() }}>
+                      <ClipboardCheck className="w-4 h-4" /> Copy SQL
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-[0.7fr,1.3fr]">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wide text-indigo-700">Environment Profile</label>
+                    <select
+                      className="input mt-1"
+                      value={externalProvisioningProfile}
+                      onChange={(e) => setExternalProvisioningProfile(e.target.value as ExternalProvisioningProfile)}
+                    >
+                      {EXTERNAL_PROVISIONING_PROFILES.map((profile) => (
+                        <option key={profile.key} value={profile.key}>{profile.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="rounded-lg border border-indigo-200 bg-white/80 p-3">
+                    <p className="text-sm font-semibold text-indigo-950">{selectedProvisioningProfile.label}</p>
+                    <p className="mt-1 text-xs text-indigo-900">{selectedProvisioningProfile.summary}</p>
+                    <div className="mt-2 space-y-1 text-xs text-indigo-900">
+                      {selectedProvisioningProfile.notes.map((note) => (
+                        <p key={note}>• {note}</p>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-3 rounded-lg border border-indigo-200 bg-slate-950 p-3">
+                  <pre className="overflow-x-auto whitespace-pre-wrap text-xs leading-5 text-emerald-200">{reportingUserSql}</pre>
+                </div>
+                <p className="mt-2 text-xs text-indigo-800">Replace the placeholder password in the SQL, run it with a privileged PostgreSQL account, then use the same username and password in the connection form below.</p>
+              </div>
+
+              {externalGroundingContext?.externalData ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-gray-600">
+                    Configured source: <span className="font-semibold text-gray-900">{externalGroundingContext.providerContext.source}</span> | Provider: <span className="font-semibold text-gray-900">{externalGroundingContext.externalData.providerType}</span> | Ready: <span className="font-semibold text-gray-900">{externalGroundingContext.providerContext.externalGroundingReady ? 'Yes' : 'No'}</span>
+                  </p>
+
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                    <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                      <p className="text-xs text-gray-500">Status</p>
+                      <p className="text-lg font-semibold text-gray-900">{externalGroundingContext.externalData.status}</p>
+                    </div>
+                    <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                      <p className="text-xs text-gray-500">Validation</p>
+                      <p className="text-lg font-semibold text-gray-900">{externalGroundingContext.externalData.validationState}</p>
+                    </div>
+                    <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                      <p className="text-xs text-gray-500">Grounding Enabled</p>
+                      <p className="text-lg font-semibold text-gray-900">{externalGroundingContext.externalData.groundingEnabled ? 'Yes' : 'No'}</p>
+                    </div>
+                    <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                      <p className="text-xs text-gray-500">Contract Issues</p>
+                      <p className="text-lg font-semibold text-gray-900">{currentExternalContractIssues.length}</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700">
+                    <p><span className="font-semibold">Connection:</span> {externalGroundingContext.externalData.host} / {externalGroundingContext.externalData.databaseName} / {externalGroundingContext.externalData.schemaName}</p>
+                    <p className="mt-1"><span className="font-semibold">Last validated:</span> {externalGroundingContext.externalData.lastValidatedAt ? new Date(externalGroundingContext.externalData.lastValidatedAt).toLocaleString() : 'Not validated yet'}</p>
+                    {externalDataSummary?.lastHealthAt && (
+                      <p className="mt-1"><span className="font-semibold">Last health check:</span> {new Date(externalDataSummary.lastHealthAt).toLocaleString()} ({externalDataSummary.lastHealthStatus || 'unknown'})</p>
+                    )}
+                    {externalGroundingContext.externalData.lastValidationError && (
+                      <p className="mt-1 text-rose-700"><span className="font-semibold">Last validation error:</span> {externalGroundingContext.externalData.lastValidationError}</p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-600">No external data connection is configured for this tenant yet.</p>
+              )}
+
+              <form className="grid grid-cols-1 gap-4 rounded-xl border border-gray-200 bg-gray-50 p-4 lg:grid-cols-2" onSubmit={submitExternalConnection}>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Connection Name</label>
+                    <input
+                      className="input mt-1"
+                      value={externalConnectionForm.connectionName}
+                      onChange={(e) => setExternalConnectionForm((current) => ({ ...current, connectionName: e.target.value }))}
+                      placeholder="Warehouse analytics replica"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Host</label>
+                    <input
+                      className="input mt-1"
+                      value={externalConnectionForm.host}
+                      onChange={(e) => setExternalConnectionForm((current) => ({ ...current, host: e.target.value }))}
+                      placeholder="db.example.com"
+                      required
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Port</label>
+                      <input
+                        className="input mt-1"
+                        type="number"
+                        min="1"
+                        max="65535"
+                        value={externalConnectionForm.port}
+                        onChange={(e) => setExternalConnectionForm((current) => ({ ...current, port: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Schema</label>
+                      <input
+                        className="input mt-1"
+                        value={externalConnectionForm.schemaName}
+                        onChange={(e) => setExternalConnectionForm((current) => ({ ...current, schemaName: e.target.value }))}
+                        placeholder="public"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Database Name</label>
+                    <input
+                      className="input mt-1"
+                      value={externalConnectionForm.databaseName}
+                      onChange={(e) => setExternalConnectionForm((current) => ({ ...current, databaseName: e.target.value }))}
+                      placeholder="stockpilot_reporting"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Read-only Username</label>
+                    <input
+                      className="input mt-1"
+                      value={externalConnectionForm.username}
+                      onChange={(e) => setExternalConnectionForm((current) => ({ ...current, username: e.target.value }))}
+                      placeholder={externalDataSummary?.hasStoredCredentials ? 'Leave blank to keep current username' : 'reporting_reader'}
+                      required={!externalDataSummary?.hasStoredCredentials}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Password</label>
+                    <input
+                      className="input mt-1"
+                      type="password"
+                      value={externalConnectionForm.password}
+                      onChange={(e) => setExternalConnectionForm((current) => ({ ...current, password: e.target.value }))}
+                      placeholder={externalDataSummary?.hasStoredCredentials ? 'Leave blank to keep stored password' : 'Required'}
+                      required={!externalDataSummary?.hasStoredCredentials}
+                    />
+                  </div>
+                  <label className="flex items-start gap-3 rounded-lg border border-gray-200 bg-white px-3 py-3 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      checked={externalConnectionForm.sslRequired}
+                      onChange={(e) => setExternalConnectionForm((current) => ({ ...current, sslRequired: e.target.checked }))}
+                    />
+                    <span>Require SSL/TLS for the connector session.</span>
+                  </label>
+                  <div className="flex flex-wrap gap-3">
+                    <button className="btn-primary" type="submit" disabled={externalDataMutating}>
+                      <Save className={`w-4 h-4 ${externalDataMutating ? 'animate-pulse' : ''}`} />
+                      {externalDataSummary ? 'Update Connection' : 'Save Connection'}
+                    </button>
+                    <button className="btn-secondary" type="button" onClick={() => setExternalConnectionForm(buildExternalConnectionForm(externalDataSummary))} disabled={externalDataMutating}>
+                      <RotateCcw className="w-4 h-4" /> Reset
+                    </button>
+                    {externalDataSummary && (
+                      <button className="btn-secondary text-rose-700 border-rose-200 hover:bg-rose-50" type="button" onClick={() => { void disableExternalConnection() }} disabled={externalDataMutating}>
+                        <Trash2 className="w-4 h-4" /> Disable Connection
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </form>
+
+              {externalDataSummary && (
+                <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">Schema discovery and contract validation</p>
+                      <p className="text-sm text-gray-600">Discover tables from the connected database, map the required entities, then validate before turning on grounding.</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button className="btn-secondary" type="button" onClick={() => { void discoverExternalSchema() }} disabled={externalDataMutating}>
+                        <Search className="w-4 h-4" /> Discover Schema
+                      </button>
+                      <button className="btn-secondary" type="button" onClick={applyAllExternalMappingSuggestions} disabled={externalDataMutating || availableExternalTables.length === 0}>
+                        <Sparkles className="w-4 h-4" /> Auto-Fill Suggestions
+                      </button>
+                      <button className="btn-secondary" type="button" onClick={() => { void saveExternalMappings(false) }} disabled={externalDataMutating}>
+                        <Save className="w-4 h-4" /> Save Mappings
+                      </button>
+                      <button className="btn-secondary" type="button" onClick={() => { void validateExternalMappings() }} disabled={externalDataMutating}>
+                        <ClipboardCheck className="w-4 h-4" /> Validate
+                      </button>
+                      <button
+                        className={`btn-primary ${externalDataSummary.groundingEnabled ? 'bg-slate-700 hover:bg-slate-800' : ''}`}
+                        type="button"
+                        onClick={() => { void toggleExternalGrounding(!externalDataSummary.groundingEnabled) }}
+                        disabled={externalDataMutating || currentExternalContractIssues.length > 0}
+                      >
+                        {externalDataSummary.groundingEnabled ? <XCircle className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
+                        {externalDataSummary.groundingEnabled ? 'Disable Grounding' : 'Enable Grounding'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.2fr,0.8fr]">
+                    <div className="space-y-4">
+                      {EXTERNAL_MAPPING_REQUIREMENTS.map((entity) => {
+                        const mapping = externalMappingDraft[entity.key]
+                        const selectedTable = mapping?.table?.trim()
+                          ? availableExternalTableLookup.get(mapping.table.trim().toLowerCase()) || null
+                          : null
+                        const entityIssue = currentExternalContractIssueByEntity.get(entity.key)
+                        const candidateTables = externalEntityCandidateTables[entity.key]
+                        const mappedCount = entity.requiredColumns.filter((columnKey) => Boolean(mapping?.columns?.[columnKey]?.trim())).length
+                        const optionalMappedCount = (entity.optionalColumns || []).filter((columnKey) => Boolean(mapping?.columns?.[columnKey]?.trim())).length
+                        const columnOptionsId = `external-column-options-${entity.key}`
+                        return (
+                          <div key={entity.key} className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                              <div>
+                                <p className="text-sm font-semibold text-gray-900">{entity.label}</p>
+                                <p className="text-xs text-gray-600">{entity.description}</p>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-600">{mappedCount}/{entity.requiredColumns.length} mapped</span>
+                                <span className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-600">{entity.requiredColumns.length} required fields</span>
+                                {entity.optionalColumns && entity.optionalColumns.length > 0 && (
+                                  <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-700">{optionalMappedCount}/{entity.optionalColumns.length} optional provenance fields</span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="mt-3">
+                              <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500">Table</label>
+                              <input
+                                className="input mt-1"
+                                list="external-table-options"
+                                value={mapping?.table || ''}
+                                onChange={(e) => updateExternalMappingTable(entity.key, e.target.value)}
+                                placeholder="Choose or type a table name"
+                              />
+                              {candidateTables.length > 0 && (
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {candidateTables.map((table) => (
+                                    <button
+                                      key={`${entity.key}-candidate-${table.name}`}
+                                      type="button"
+                                      className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${mapping?.table === table.name ? 'border-sky-300 bg-sky-50 text-sky-700' : 'border-gray-200 bg-white text-gray-600 hover:border-sky-200 hover:text-sky-700'}`}
+                                      onClick={() => updateExternalMappingTable(entity.key, table.name)}
+                                    >
+                                      {table.name}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                              {selectedTable ? (
+                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-600">
+                                  <span>{selectedTable.columns.length} discovered columns available for this mapping.</span>
+                                  <button type="button" className="font-semibold text-sky-700 hover:text-sky-800" onClick={() => autofillExternalEntityMapping(entity.key)}>
+                                    Auto-fill columns
+                                  </button>
+                                </div>
+                              ) : mapping?.table ? (
+                                <p className="mt-2 text-xs text-amber-700">This table is not in the latest discovery snapshot. Re-run discovery or correct the table name.</p>
+                              ) : null}
+                              {entityIssue && (
+                                <div className="mt-2 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-900">
+                                  {entityIssue.missingMappings.length > 0 && (
+                                    <p>Missing mapped fields: {entityIssue.missingMappings.join(', ')}</p>
+                                  )}
+                                  {entityIssue.missingSchemaColumns.length > 0 && (
+                                    <p>Mapped columns missing from schema: {entityIssue.missingSchemaColumns.join(', ')}</p>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                              {entity.requiredColumns.map((columnKey) => (
+                                <div key={`${entity.key}-${columnKey}`}>
+                                  <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500">{columnKey}</label>
+                                  <input
+                                    className="input mt-1"
+                                    list={columnOptionsId}
+                                    value={mapping?.columns?.[columnKey] || ''}
+                                    onChange={(e) => updateExternalMappingColumn(entity.key, columnKey, e.target.value)}
+                                    placeholder={selectedTable ? `Mapped column from ${selectedTable.name}` : `Mapped column for ${columnKey}`}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                            {entity.optionalColumns && entity.optionalColumns.length > 0 && (
+                              <div className="mt-4">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div>
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">Optional provenance fields</p>
+                                    <p className="mt-1 text-xs text-gray-600">Map these if your external products table stores original purchase dates or original unit cost.</p>
+                                  </div>
+                                </div>
+                                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                                  {entity.optionalColumns.map((columnKey) => (
+                                    <div key={`${entity.key}-${columnKey}`}>
+                                      <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500">{columnKey}</label>
+                                      <input
+                                        className="input mt-1"
+                                        list={columnOptionsId}
+                                        value={mapping?.columns?.[columnKey] || ''}
+                                        onChange={(e) => updateExternalMappingColumn(entity.key, columnKey, e.target.value)}
+                                        placeholder={selectedTable ? `Optional column from ${selectedTable.name}` : `Optional column for ${columnKey}`}
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            <datalist id={columnOptionsId}>
+                              {(selectedTable?.columns || []).map((column) => (
+                                <option key={`${entity.key}-${selectedTable?.name || 'table'}-${column.name}`} value={column.name} />
+                              ))}
+                            </datalist>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                        <p className="text-sm font-semibold text-gray-900">Discovered schema</p>
+                        <p className="mt-1 text-xs text-gray-600">{availableExternalTables.length > 0 ? `${availableExternalTables.length} table${availableExternalTables.length === 1 ? '' : 's'} available for mapping.` : 'Run discovery after saving the connection to pull the schema snapshot.'}</p>
+                        {externalDiscovery && (
+                          <p className={`mt-2 text-xs font-semibold ${externalDiscovery.defaultTransactionReadOnly ? 'text-emerald-700' : 'text-rose-700'}`}>
+                            default_transaction_read_only: {externalDiscovery.defaultTransactionReadOnly ? 'on' : 'off'}
+                          </p>
+                        )}
+                        <div className="mt-3 max-h-72 space-y-2 overflow-auto pr-1">
+                          {availableExternalTables.map((table) => (
+                            <div key={table.name} className="rounded-lg border border-gray-200 bg-white p-3">
+                              <p className="text-sm font-semibold text-gray-900">{table.name}</p>
+                              <p className="mt-1 text-xs text-gray-500">{table.columns.map((column) => column.name).join(', ') || 'No columns discovered'}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {externalValidation && (
+                        <div className={`rounded-xl border p-4 ${externalValidation.ok ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+                          <p className={`text-sm font-semibold ${externalValidation.ok ? 'text-emerald-900' : 'text-amber-900'}`}>Validation {externalValidation.ok ? 'passed' : 'requires attention'}</p>
+                          {externalValidation.missingEntities.length > 0 && (
+                            <p className="mt-2 text-sm text-amber-900">Missing entities: {externalValidation.missingEntities.join(', ')}</p>
+                          )}
+                          <div className="mt-3 space-y-2">
+                            {externalValidation.entityResults.map((result) => (
+                              <div key={`validation-${result.entity}`} className="rounded-lg border border-white/80 bg-white/90 p-3 text-sm text-gray-700">
+                                <div className="flex items-center justify-between gap-2">
+                                  <p className="font-semibold text-gray-900">{result.entity}</p>
+                                  <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${result.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                                    {result.ok ? 'Ready' : 'Issue'}
+                                  </span>
+                                </div>
+                                {result.table && <p className="mt-1 text-xs text-gray-500">Table: {result.table}</p>}
+                                {typeof result.rowCount === 'number' && <p className="mt-1 text-xs text-gray-500">Sample rows checked: {result.rowCount}</p>}
+                                {result.error && <p className="mt-1 text-xs text-rose-700">{result.error}</p>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {currentExternalContractIssues.length > 0 ? (
+                        <div className="rounded-xl border border-orange-200 bg-orange-50 p-4">
+                          <p className="text-xs font-semibold uppercase tracking-wider text-orange-700">Blocking Contract Issues</p>
+                          <div className="mt-3 space-y-3">
+                            {currentExternalContractIssues.map((issue) => (
+                              <div key={`contract-issue-${issue.entity}`} className="rounded-lg border border-orange-200 bg-white p-3">
+                                <p className="text-sm font-semibold text-orange-900">{issue.entity}</p>
+                                {issue.missingMappings.length > 0 && (
+                                  <p className="mt-1 text-sm text-orange-900">Missing mapped fields: {issue.missingMappings.join(', ')}</p>
+                                )}
+                                {issue.missingSchemaColumns.length > 0 && (
+                                  <p className="mt-1 text-sm text-orange-900">Mapped columns missing from schema: {issue.missingSchemaColumns.join(', ')}</p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : externalDataSummary.groundingEnabled ? (
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                          External mapping contract is complete. Assistant requests can use external-grounded mode when the configured connector is reachable.
+                        </div>
+                      ) : (
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                          Contract checks are clear. Validate once, then enable grounding when you are ready for assistant requests to query this source.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <datalist id="external-table-options">
+                    {availableExternalTableNames.map((tableName) => (
+                      <option key={`table-option-${tableName}`} value={tableName} />
+                    ))}
+                  </datalist>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        )}
+
         <div className="card space-y-4">
           <div className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-indigo-600" />
@@ -1693,6 +3709,340 @@ export default function EnterpriseAIPage() {
             <button className="btn-primary" type="submit" disabled={loading}>Ask Assistant</button>
           </form>
 
+          <div className="rounded-xl border border-rose-200 bg-rose-50/40 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-rose-700">Human Approval Queue</p>
+                <p className="text-xs text-rose-800 mt-0.5">Order and stock-transfer decisions are high-priority and require explicit human approval.</p>
+              </div>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-md border border-rose-300 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={humanApprovalLoading}
+                onClick={() => { void loadHumanApprovalQueue() }}
+              >
+                <RefreshCw className={`w-4 h-4 ${humanApprovalLoading ? 'animate-spin' : ''}`} /> Refresh Queue
+              </button>
+            </div>
+
+            {humanApprovalQueue.length === 0 ? (
+              <p className="mt-3 text-sm text-rose-900">No pending human approvals right now.</p>
+            ) : (
+              <div className="mt-3 space-y-3">
+                {humanApprovalQueue.slice(0, 8).map((item) => (
+                  <div key={item.recommendationId} className="rounded-lg border border-rose-200 bg-white p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center rounded-full border border-rose-300 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">HIGH PRIORITY</span>
+                      <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-700">{item.status}</span>
+                      {item.provider && (
+                        <span className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">{item.provider}</span>
+                      )}
+                    </div>
+                    <p className="mt-2 text-sm text-gray-900"><span className="font-semibold">Prompt:</span> {item.prompt}</p>
+                    <ul className="mt-2 list-disc pl-5 text-sm text-gray-800 space-y-1">
+                      {item.highPriorityHumanActions.map((action, idx) => (
+                        <li key={`${item.recommendationId}-human-action-${idx}`}>{action}</li>
+                      ))}
+                    </ul>
+                    <p className="mt-2 text-[11px] text-gray-500">Detected: {new Date(item.createdAt).toLocaleString()}</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={humanApprovalDecisionPendingId === item.recommendationId || approvalHistoryLoading}
+                        onClick={() => { void openApprovalHistoryDrawer(item) }}
+                      >
+                        <FileText className="w-4 h-4" /> History
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={humanApprovalDecisionPendingId === item.recommendationId}
+                        onClick={() => { void applyHumanApprovalDecision(item.recommendationId, 'accept') }}
+                      >
+                        <CheckCircle2 className="w-4 h-4" /> Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1.5 rounded-md border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={humanApprovalDecisionPendingId === item.recommendationId}
+                        onClick={() => { void applyHumanApprovalDecision(item.recommendationId, 'reject') }}
+                      >
+                        <XCircle className="w-4 h-4" /> Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <div className="rounded-xl border border-sky-200 bg-sky-50/40 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-sky-700">Causal Diagnostics</p>
+                  <p className="text-xs text-sky-900 mt-0.5">Runs the econometric methods already embedded in the assistant against the current tenant context.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    className="rounded-md border border-sky-200 bg-white px-2 py-1 text-xs text-sky-900"
+                    value={causalMethod}
+                    onChange={(e) => setCausalMethod(e.target.value as 'granger' | 'did' | 'synthetic')}
+                  >
+                    <option value="granger">Granger</option>
+                    <option value="did">DiD</option>
+                    <option value="synthetic">Synthetic</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-sky-300 bg-white px-3 py-1.5 text-xs font-semibold text-sky-700 transition-colors hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={causalDiagnosticsLoading}
+                    onClick={() => { void loadCausalDiagnostics() }}
+                  >
+                    <RefreshCw className={`w-4 h-4 ${causalDiagnosticsLoading ? 'animate-spin' : ''}`} /> Run
+                  </button>
+                </div>
+              </div>
+
+              {causalDiagnostics ? (
+                <div className="mt-3 space-y-2 text-sm text-sky-950">
+                  <p><span className="font-semibold">Problem:</span> {causalDiagnostics.problem}</p>
+                  <p><span className="font-semibold">Interpretation:</span> {causalDiagnostics.interpretation}</p>
+                  <p><span className="font-semibold">Confidence:</span> {Math.round(causalDiagnostics.confidenceScore * 100)}%</p>
+                  {causalDiagnostics.selectedMethod && (
+                    <div className="rounded-md border border-sky-200 bg-white p-3 text-xs text-sky-900">
+                      <p className="font-semibold">Selected method</p>
+                      <p className="mt-1">{causalDiagnostics.selectedMethod.title}</p>
+                      <p className="mt-1">{causalDiagnostics.selectedMethod.signal}</p>
+                      <p className="mt-1">Confidence {Math.round(causalDiagnostics.selectedMethod.confidence * 100)}%{causalDiagnostics.selectedMethod.pValue !== undefined ? ` | p=${causalDiagnostics.selectedMethod.pValue.toFixed(3)}` : ''}</p>
+                    </div>
+                  )}
+                  {causalDiagnostics.topCauses.length > 0 && (
+                    <ul className="list-disc pl-5 text-xs text-sky-900 space-y-1">
+                      {causalDiagnostics.topCauses.slice(0, 4).map((cause, idx) => (
+                        <li key={`causal-top-cause-${idx}`}>{cause.cause} ({Math.round(cause.contribution * 100)}%)</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-sky-900">No causal diagnostics loaded yet.</p>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Calibrated Simulation</p>
+                  <p className="text-xs text-emerald-900 mt-0.5">Preview a single calibrated scenario with confidence intervals and historical accuracy.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    className="rounded-md border border-emerald-200 bg-white px-2 py-1 text-xs text-emerald-900"
+                    value={simulationType}
+                    onChange={(e) => setSimulationType(e.target.value as 'price_change' | 'marketing_spend' | 'inventory_change' | 'staffing_change' | 'expansion')}
+                  >
+                    <option value="price_change">Price Change</option>
+                    <option value="marketing_spend">Marketing Spend</option>
+                    <option value="inventory_change">Inventory Change</option>
+                    <option value="staffing_change">Staffing Change</option>
+                    <option value="expansion">Expansion</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={simulationPreviewLoading}
+                    onClick={() => { void loadSimulationPreview() }}
+                  >
+                    <RefreshCw className={`w-4 h-4 ${simulationPreviewLoading ? 'animate-spin' : ''}`} /> Simulate
+                  </button>
+                </div>
+              </div>
+
+              {simulationPreview ? (
+                <div className="mt-3 space-y-2 text-sm text-emerald-950">
+                  <p><span className="font-semibold">Scenario:</span> {simulationPreview.scenario}</p>
+                  <p><span className="font-semibold">Projected profit:</span> {simulationPreview.pointEstimate.toLocaleString()}</p>
+                  <p><span className="font-semibold">Profit interval:</span> {simulationPreview.confidenceInterval[0].toLocaleString()} to {simulationPreview.confidenceInterval[1].toLocaleString()}</p>
+                  <p><span className="font-semibold">Calibration:</span> {Math.round(simulationPreview.calibrationScore * 100)}% | Historical accuracy: {Math.round(simulationPreview.historicalAccuracy * 100)}%</p>
+                  <p><span className="font-semibold">Interpretation:</span> {simulationPreview.interpretation}</p>
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-emerald-900">No simulation preview loaded yet.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">Workflow Dashboard</p>
+                <p className="text-xs text-amber-900 mt-0.5">Review persisted workflow executions, pending approvals, and workflow coverage from assistant-generated plans.</p>
+              </div>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={workflowDashboardLoading}
+                onClick={() => { void loadWorkflowDashboard() }}
+              >
+                <RefreshCw className={`w-4 h-4 ${workflowDashboardLoading ? 'animate-spin' : ''}`} /> Refresh Workflows
+              </button>
+            </div>
+
+            {workflowDashboard ? (
+              <div className="mt-3 space-y-3">
+                <p className="text-sm text-amber-950">
+                  Workflows: {workflowDashboard.stats.totalWorkflows} total | Active: {workflowDashboard.stats.activeWorkflows} | Pending approvals: {workflowDashboard.stats.pendingApprovalsCount} | Success rate: {Math.round(workflowDashboard.stats.successRate * 100)}%
+                </p>
+
+                {workflowDashboard.pendingApprovals.length > 0 ? (
+                  <div className="space-y-2">
+                    {workflowDashboard.pendingApprovals.slice(0, 6).map((item) => (
+                      <div key={item.id} className="rounded-md border border-amber-200 bg-white p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-semibold text-amber-950">{item.ruleName}</p>
+                            <p className="text-xs text-amber-800">Trigger: {item.trigger} | Status: {item.status} | Approval: {item.approvalStatus}</p>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                              disabled={workflowDecisionPendingId === item.id || workflowRollbackPendingId === item.id}
+                              onClick={() => { void reviewWorkflowExecution(item.id, true) }}
+                            >
+                              <CheckCircle2 className="w-4 h-4" /> Approve
+                            </button>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 rounded-md border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                              disabled={workflowDecisionPendingId === item.id || workflowRollbackPendingId === item.id}
+                              onClick={() => { void reviewWorkflowExecution(item.id, false) }}
+                            >
+                              <XCircle className="w-4 h-4" /> Reject
+                            </button>
+                          </div>
+                        </div>
+                        <p className="mt-2 text-xs text-amber-900">Created {new Date(item.createdAt).toLocaleString()}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-amber-900">No pending workflow approvals right now.</p>
+                )}
+
+                <div className="rounded-lg border border-amber-200 bg-white/80 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">Recent Executions</p>
+                      <p className="text-xs text-amber-900 mt-0.5">Execution outcomes, realized impact capture, and rollback availability for the latest workflows.</p>
+                    </div>
+                    <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                      {workflowDashboard.recentExecutions.length} records
+                    </span>
+                  </div>
+
+                  {workflowDashboard.recentExecutions.length === 0 ? (
+                    <p className="mt-3 text-sm text-amber-900">No workflow executions recorded yet.</p>
+                  ) : (
+                    <div className="mt-3 space-y-3">
+                      {workflowDashboard.recentExecutions.slice(0, 8).map((item) => {
+                        const outcome = summarizeWorkflowOutcome(item.result)
+                        const statusUi = getWorkflowStatusUi(item.status)
+                        const canRollback = outcome.rollbackReady && (item.status === 'executed' || item.status === 'handoff_required')
+
+                        return (
+                          <div key={`workflow-execution-${item.id}`} className="rounded-md border border-amber-200 bg-white p-3">
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="text-sm font-semibold text-amber-950">{item.ruleName}</p>
+                                  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusUi.classes}`}>
+                                    {statusUi.label}
+                                  </span>
+                                  <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-700">
+                                    Approval: {item.approvalStatus}
+                                  </span>
+                                </div>
+                                <p className="mt-1 text-xs text-amber-800">Trigger: {item.trigger} | Action: {item.action}</p>
+                                <p className="mt-1 text-[11px] text-gray-500">Created {new Date(item.createdAt).toLocaleString()}{item.approvedAt ? ` | Approved ${new Date(item.approvedAt).toLocaleString()}` : ''}</p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1 rounded-md border border-sky-300 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700"
+                                  onClick={() => openWorkflowExecutionDetail(item)}
+                                >
+                                  <FileText className="w-4 h-4" /> Details
+                                </button>
+                                {canRollback && (
+                                  <button
+                                    type="button"
+                                    className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                    disabled={workflowRollbackPendingId === item.id || workflowDecisionPendingId === item.id}
+                                    onClick={() => { void rollbackWorkflowExecution(item.id) }}
+                                  >
+                                    <RotateCcw className="w-4 h-4" /> {workflowRollbackPendingId === item.id ? 'Rolling back...' : 'Rollback'}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4 text-xs text-amber-950">
+                              <div className="rounded-md border border-amber-100 bg-amber-50/50 p-2">
+                                <p className="font-semibold text-amber-700">Operation</p>
+                                <p className="mt-1">{outcome.operation || 'workflow'}</p>
+                              </div>
+                              <div className="rounded-md border border-amber-100 bg-amber-50/50 p-2">
+                                <p className="font-semibold text-amber-700">Actual Impact</p>
+                                <p className="mt-1">{outcome.actualImpact === null ? 'Not measured' : `${outcome.actualImpact.toLocaleString()}%`}</p>
+                              </div>
+                              <div className="rounded-md border border-amber-100 bg-amber-50/50 p-2">
+                                <p className="font-semibold text-amber-700">Measured</p>
+                                <p className="mt-1">{outcome.measuredAt ? new Date(outcome.measuredAt).toLocaleString() : 'Pending'}</p>
+                              </div>
+                              <div className="rounded-md border border-amber-100 bg-amber-50/50 p-2">
+                                <p className="font-semibold text-amber-700">Rollback</p>
+                                <p className="mt-1">{outcome.rolledBackAt ? `Completed ${new Date(outcome.rolledBackAt).toLocaleString()}` : outcome.rollbackReady ? 'Available' : 'Not available'}</p>
+                              </div>
+                            </div>
+
+                            {outcome.handoffRequired && (
+                              <div className="mt-3 rounded-md border border-violet-200 bg-violet-50 p-2 text-xs text-violet-900">
+                                This execution produced a governed handoff instead of direct mutation because the underlying business operation is not implemented in the current domain model.
+                              </div>
+                            )}
+
+                            {outcome.message && (
+                              <p className="mt-3 text-sm text-amber-950"><span className="font-semibold">Outcome:</span> {outcome.message}</p>
+                            )}
+
+                            {outcome.detailLines.length > 0 && (
+                              <ul className="mt-2 list-disc pl-5 text-xs text-amber-900 space-y-1">
+                                {outcome.detailLines.map((detail, idx) => (
+                                  <li key={`${item.id}-workflow-detail-${idx}`}>{detail}</li>
+                                ))}
+                              </ul>
+                            )}
+
+                            {item.errorMessage && (
+                              <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 p-2 text-xs text-rose-900">
+                                <span className="font-semibold">Execution error:</span> {item.errorMessage}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-amber-900">No workflow dashboard data loaded yet.</p>
+            )}
+          </div>
+
           <div className="space-y-3 max-h-[420px] lg:max-h-[520px] overflow-auto pr-1">
             {assistantReplies.length === 0 ? (
               <div className="rounded-xl border border-dashed border-gray-200 bg-gradient-to-br from-white to-gray-50 p-5 text-center">
@@ -1714,6 +4064,11 @@ export default function EnterpriseAIPage() {
                         {reply.provider}
                       </span>
                     )}
+                    {reply.groundingSource && (
+                      <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${reply.groundingSource === 'external' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                        {reply.groundingSource === 'external' ? 'External Grounding' : 'Internal Grounding'}
+                      </span>
+                    )}
                   </div>
 
                   <div className="mt-3 rounded-lg border border-gray-100 bg-white p-3">
@@ -1725,7 +4080,7 @@ export default function EnterpriseAIPage() {
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Response</p>
                   {reply.brief ? (
                     <div className="mt-2 space-y-3">
-                      {reply.incomeBreakdown && (
+                      {reply.incomeBreakdown && shouldShowIncomeBreakdownForPrompt(reply.prompt, reply.incomeBreakdown) && (
                         <div className="rounded-md border border-cyan-100 bg-cyan-50 p-3">
                           <p className="text-xs font-semibold text-cyan-700">Income Streams (30d)</p>
                           <div className={`mt-2 grid grid-cols-1 ${shouldShowSubscriptionIncomeRow(reply.incomeBreakdown) ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-2 text-xs`}>
@@ -1750,6 +4105,29 @@ export default function EnterpriseAIPage() {
                         <p className="text-xs font-semibold text-gray-600">Summary</p>
                         <p className="text-sm text-gray-800 mt-1 leading-relaxed">{reply.brief.summary}</p>
                       </div>
+                      {reply.brief.businessGuidance && (() => {
+                        const tone = getBusinessGuidanceTone(reply.brief.businessGuidance.operatingMode)
+                        return (
+                          <div className={`rounded-md border p-3 ${tone.card}`}>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tone.badge}`}>
+                                {reply.brief.businessGuidance.confidenceLabel}
+                              </span>
+                              <span className="text-[11px] font-medium text-slate-600">Audience: {reply.brief.businessGuidance.audience}</span>
+                            </div>
+                            <p className="text-sm text-slate-900 mt-2"><span className="font-semibold">Best next move:</span> {reply.brief.businessGuidance.primaryRecommendation}</p>
+                            <p className="text-xs text-slate-700 mt-1"><span className="font-semibold">Why:</span> {reply.brief.businessGuidance.why}</p>
+                            <p className="text-xs text-slate-700 mt-1"><span className="font-semibold">Expected impact:</span> {reply.brief.businessGuidance.expectedImpact}</p>
+                            <p className="text-xs text-slate-700 mt-1"><span className="font-semibold">Next review:</span> {reply.brief.businessGuidance.nextReview}</p>
+                          </div>
+                        )
+                      })()}
+                      {reply.brief.responseMode === 'clarify' && reply.brief.clarificationPrompt && (
+                        <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+                          <p className="text-xs font-semibold text-amber-700">Clarification Mode</p>
+                          <p className="text-xs text-amber-900 mt-1">The original prompt was too broad, so the assistant narrowed the next-step options instead of forcing a mixed answer.</p>
+                        </div>
+                      )}
                       <div>
                         <p className="text-xs font-semibold text-gray-600">Comparative Insights</p>
                         <ul className="list-disc pl-5 text-sm text-gray-800 mt-1 space-y-1">
@@ -1774,6 +4152,108 @@ export default function EnterpriseAIPage() {
                           ))}
                         </ul>
                       </div>
+                      {reply.brief.factBasis && reply.brief.factBasis.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-gray-600">Fact Basis</p>
+                          <ul className="list-disc pl-5 text-sm text-gray-800 mt-1 space-y-1">
+                            {reply.brief.factBasis.map((item, idx) => (
+                              <li key={`${reply.id}-fact-${idx}`}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {reply.brief.groundingNotes && reply.brief.groundingNotes.length > 0 && (
+                        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                          <p className="text-xs font-semibold text-slate-700">Grounding Notes</p>
+                          <ul className="list-disc pl-5 text-xs text-slate-700 mt-1 space-y-1">
+                            {reply.brief.groundingNotes.map((item, idx) => (
+                              <li key={`${reply.id}-grounding-note-${idx}`}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {reply.brief.scenarioAnalysis && (
+                        <div className="rounded-md border border-indigo-100 bg-indigo-50 p-3">
+                          <p className="text-xs font-semibold text-indigo-700">Scenario Analysis</p>
+                          <p className="text-sm text-indigo-900 mt-1">
+                            Best: {reply.brief.scenarioAnalysis.bestScenario || 'N/A'} | Worst: {reply.brief.scenarioAnalysis.worstScenario || 'N/A'}
+                          </p>
+                          <p className="text-xs text-indigo-800 mt-1">
+                            Profit spread: {reply.brief.scenarioAnalysis.profitSpread.toLocaleString()} | ROI spread: {reply.brief.scenarioAnalysis.roiSpread.toLocaleString()}
+                          </p>
+                          {(reply.brief.scenarioAnalysis.calibrationScore !== undefined || reply.brief.scenarioAnalysis.historicalAccuracy !== undefined) && (
+                            <p className="text-xs text-indigo-800 mt-1">
+                              Calibration: {Math.round((reply.brief.scenarioAnalysis.calibrationScore || 0) * 100)}% | Historical accuracy: {Math.round((reply.brief.scenarioAnalysis.historicalAccuracy || 0) * 100)}%
+                            </p>
+                          )}
+                          {reply.brief.scenarioAnalysis.profitConfidenceInterval && (
+                            <p className="text-xs text-indigo-800 mt-1">
+                              Profit interval: {reply.brief.scenarioAnalysis.profitConfidenceInterval.low.toLocaleString()} to {reply.brief.scenarioAnalysis.profitConfidenceInterval.high.toLocaleString()}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      {reply.brief.causalAnalysis && (
+                        <div>
+                          <p className="text-xs font-semibold text-gray-600">Root Cause Analysis ({reply.brief.causalAnalysis.problem})</p>
+                          <ul className="list-disc pl-5 text-sm text-gray-800 mt-1 space-y-1">
+                            {reply.brief.causalAnalysis.topCauses.map((cause, idx) => (
+                              <li key={`${reply.id}-cause-${idx}`}>{cause.cause} ({Math.round(cause.contribution * 100)}%)</li>
+                            ))}
+                          </ul>
+                          {reply.brief.causalAnalysis.methods && reply.brief.causalAnalysis.methods.length > 0 && (
+                            <ul className="list-disc pl-5 text-xs text-gray-600 mt-2 space-y-1">
+                              {reply.brief.causalAnalysis.methods.map((method, idx) => (
+                                <li key={`${reply.id}-method-${idx}`}>
+                                  {method.title} | confidence {Math.round(method.confidence * 100)}%{method.pValue !== undefined ? ` | p=${method.pValue.toFixed(3)}` : ''}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
+                      {reply.brief.strategicInsights && reply.brief.strategicInsights.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-gray-600">Strategic Insights</p>
+                          <ul className="list-disc pl-5 text-sm text-gray-800 mt-1 space-y-1">
+                            {reply.brief.strategicInsights.map((item, idx) => (
+                              <li key={`${reply.id}-strategy-${idx}`}>[{item.level}] {item.insight} (ROI {item.estimatedROI}%, {item.timeHorizon})</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {reply.brief.explanation && (
+                        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                          <p className="text-xs font-semibold text-slate-700">Explainability</p>
+                          <p className="text-sm text-slate-800 mt-1">{reply.brief.explanation.summary}</p>
+                          <p className="text-xs text-slate-600 mt-1">Confidence: {(reply.brief.explanation.confidence * 100).toFixed(0)}%</p>
+                        </div>
+                      )}
+                      {reply.brief.executionPlan && (
+                        <div className="rounded-md border border-rose-200 bg-rose-50 p-3">
+                          <p className="text-xs font-semibold text-rose-700">Execution Governance</p>
+                          <p className="text-sm text-rose-900 mt-1">Auto-executable: {reply.brief.executionPlan.autoExecutableCount} | Human approval required: {reply.brief.executionPlan.approvalRequiredCount}</p>
+                          {reply.brief.executionPlan.workflowCoverageScore !== undefined && (
+                            <p className="text-xs text-rose-800 mt-1">Workflow coverage: {Math.round(reply.brief.executionPlan.workflowCoverageScore * 100)}%</p>
+                          )}
+                          {reply.brief.executionPlan.highPriorityHumanActions && reply.brief.executionPlan.highPriorityHumanActions.length > 0 && (
+                            <ul className="list-disc pl-5 text-sm text-rose-900 mt-1 space-y-1">
+                              {reply.brief.executionPlan.highPriorityHumanActions.map((item, idx) => (
+                                <li key={`${reply.id}-human-approval-${idx}`}>HIGH RECOMMENDATION: {item}</li>
+                              ))}
+                            </ul>
+                          )}
+                          {reply.brief.executionPlan.workflowStages && reply.brief.executionPlan.workflowStages.length > 0 && (
+                            <ul className="list-disc pl-5 text-xs text-rose-800 mt-2 space-y-1">
+                              {reply.brief.executionPlan.workflowStages.map((item, idx) => (
+                                <li key={`${reply.id}-workflow-stage-${idx}`}>
+                                  {item.actionType}: {item.stageCount} stages, {item.matchedRules} matching rules{item.executionId ? `, execution ${item.executionId}` : ''}{item.approvalStatus ? `, ${item.approvalStatus}` : ''}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
                       {reply.brief.alerts && reply.brief.alerts.length > 0 && (
                         <div>
                           <p className="text-xs font-semibold text-gray-600">Auto-Detected Issues</p>
@@ -1797,14 +4277,41 @@ export default function EnterpriseAIPage() {
                       )}
                       <div>
                         <p className="text-xs font-semibold text-gray-600">Follow-up Questions</p>
-                        <ul className="list-disc pl-5 text-sm text-gray-800 mt-1 space-y-1">
+                        <ul className="list-disc pl-5 text-sm text-gray-800 mt-1 space-y-2">
                           {reply.brief.followUpQuestions.map((item, idx) => (
-                            <li key={`${reply.id}-followup-${idx}`}>{item}</li>
+                            <li key={`${reply.id}-followup-${idx}`}>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span>{item}</span>
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center rounded-full border border-cyan-300 bg-cyan-50 px-2.5 py-1 text-[11px] font-semibold text-cyan-700 transition-colors hover:bg-cyan-100"
+                                  onClick={() => { void runReplyFollowUp(reply, item) }}
+                                >
+                                  Ask now
+                                </button>
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                                  onClick={() => {
+                                    setLoadedSavedReply(reply)
+                                    setAssistantPrompt(item)
+                                  }}
+                                >
+                                  Load to prompt
+                                </button>
+                              </div>
+                            </li>
                           ))}
                         </ul>
                       </div>
                       {reply.provider && (
-                        <p className="text-[11px] text-gray-500">Generated via: {reply.provider}</p>
+                        <p className="text-[11px] text-gray-500">Generated via: {reply.provider}{reply.groundingSource ? ` | Grounding: ${reply.groundingSource}` : ''}</p>
+                      )}
+                      {reply.externalData && reply.externalData.contractIssues.length > 0 && (
+                        <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+                          <p className="text-xs font-semibold text-amber-700">External grounding fallback</p>
+                          <p className="text-xs text-amber-900 mt-1">This reply used internal grounding because the external mapping contract is still incomplete.</p>
+                        </div>
                       )}
                     </div>
                   ) : (
@@ -1874,12 +4381,26 @@ export default function EnterpriseAIPage() {
                     <div className="flex flex-wrap items-center gap-2 mb-2">
                       <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-600">Saved Reply</span>
                       {reply.provider && <span className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">{reply.provider}</span>}
+                      {reply.groundingSource && (
+                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${reply.groundingSource === 'external' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                          {reply.groundingSource === 'external' ? 'External Grounding' : 'Internal Grounding'}
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-gray-700 line-clamp-2"><span className="font-semibold">Prompt:</span> {reply.prompt}</p>
                     <p className="text-[11px] text-gray-500 mt-1 line-clamp-2"><span className="font-semibold">Response:</span> {reply.response}</p>
+                    {buildGroundingMetaText(reply) && (
+                      <p className="text-[11px] text-gray-500 mt-1">{buildGroundingMetaText(reply)}</p>
+                    )}
                     {reply.brief?.alerts && reply.brief.alerts.length > 0 && (
                       <p className="text-[11px] text-amber-700 mt-1 font-medium">Auto-detected issues: {reply.brief.alerts.length}</p>
                     )}
+                    {reply.externalData?.contractIssues.length ? (
+                      <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-2">
+                        <p className="text-[11px] font-semibold text-amber-700">Fallback persisted with contract issues</p>
+                        <p className="mt-1 text-[11px] text-amber-900 line-clamp-3">{buildContractIssueSummary(reply)}</p>
+                      </div>
+                    ) : null}
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                       <p className="text-[11px] text-gray-400">{new Date(reply.createdAt).toLocaleString()}</p>
                       <div className="flex flex-wrap items-center gap-2">
@@ -1969,6 +4490,206 @@ export default function EnterpriseAIPage() {
                 disabled={assistantDeletePendingIds[deleteConfirmReply.id]}
               >
                 {assistantDeletePendingIds[deleteConfirmReply.id] ? 'Deleting...' : 'Yes, Delete Entry'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {approvalHistoryQueueItem && (
+        <div
+          className={`fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 transition-opacity duration-200 ${approvalHistoryVisible ? 'opacity-100' : 'opacity-0'}`}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              closeApprovalHistoryDrawer()
+            }
+          }}
+        >
+          <div
+            className={`w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-2xl transition-all duration-200 ${approvalHistoryVisible ? 'translate-y-0 scale-100' : 'translate-y-2 scale-95'}`}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Approval history"
+          >
+            <div className="border-b border-slate-100 px-5 py-4">
+              <p className="text-lg font-semibold text-slate-900">Approval Audit History</p>
+              <p className="text-sm text-slate-500 mt-1">Review who approved or rejected this high-priority human action and when.</p>
+            </div>
+
+            <div className="px-5 py-4 space-y-3 max-h-[70vh] overflow-auto">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Prompt Preview</p>
+                <p className="text-sm text-slate-800 mt-1">{approvalHistoryQueueItem.prompt}</p>
+              </div>
+
+              {approvalHistoryLoading ? (
+                <p className="text-sm text-slate-600">Loading approval history...</p>
+              ) : approvalHistoryData ? (
+                <>
+                  <div className="rounded-lg border border-slate-200 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Current Status</p>
+                    <p className="text-sm text-slate-900 mt-1">{approvalHistoryData.status}</p>
+                    <p className="text-xs text-slate-500 mt-1">{approvalHistoryData.summary}</p>
+                  </div>
+
+                  {approvalHistoryData.history.length === 0 ? (
+                    <p className="text-sm text-slate-600">No approval decisions have been recorded yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {approvalHistoryData.history.map((entry) => (
+                        <div key={entry.id} className="rounded-lg border border-slate-200 bg-white p-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="inline-flex items-center rounded-full border border-slate-300 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700">{entry.action.toUpperCase()}</span>
+                            <span className="text-[11px] text-slate-500">{new Date(entry.createdAt).toLocaleString()}</span>
+                          </div>
+                          <p className="text-sm text-slate-900 mt-2">
+                            {entry.actor
+                              ? `${entry.actor.firstName} ${entry.actor.lastName} (${entry.actor.role})`
+                              : 'Unknown actor'}
+                          </p>
+                          {entry.actor?.email && <p className="text-xs text-slate-500 mt-1">{entry.actor.email}</p>}
+                          {entry.note && <p className="text-sm text-slate-700 mt-2"><span className="font-semibold">Note:</span> {entry.note}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-slate-600">History unavailable.</p>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-5 py-4">
+              <button
+                type="button"
+                className="btn-secondary"
+                ref={approvalHistoryCloseButtonRef}
+                onClick={closeApprovalHistoryDrawer}
+                disabled={approvalHistoryLoading}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedWorkflowExecution && (
+        <div
+          className={`fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 transition-opacity duration-200 ${workflowExecutionDetailVisible ? 'opacity-100' : 'opacity-0'}`}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              closeWorkflowExecutionDetail()
+            }
+          }}
+        >
+          <div
+            className={`w-full max-w-3xl rounded-2xl border border-slate-200 bg-white shadow-2xl transition-all duration-200 ${workflowExecutionDetailVisible ? 'translate-y-0 scale-100' : 'translate-y-2 scale-95'}`}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Workflow execution detail"
+          >
+            <div className="border-b border-slate-100 px-5 py-4">
+              <p className="text-lg font-semibold text-slate-900">Workflow Execution Detail</p>
+              <p className="text-sm text-slate-500 mt-1">Inspect workflow inputs, execution payloads, and rollback metadata for this run.</p>
+            </div>
+
+            <div className="px-5 py-4 space-y-4 max-h-[70vh] overflow-auto">
+              {(() => {
+                const outcome = summarizeWorkflowOutcome(selectedWorkflowExecution.result)
+                const statusUi = getWorkflowStatusUi(selectedWorkflowExecution.status)
+                return (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusUi.classes}`}>
+                        {statusUi.label}
+                      </span>
+                      <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-700">
+                        Approval: {selectedWorkflowExecution.approvalStatus}
+                      </span>
+                      <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                        Rule: {selectedWorkflowExecution.ruleName}
+                      </span>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Execution Id</p>
+                        <p className="mt-1 break-all text-sm text-slate-900">{selectedWorkflowExecution.id}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Operation</p>
+                        <p className="mt-1 text-sm text-slate-900">{outcome.operation || 'workflow'}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Actual Impact</p>
+                        <p className="mt-1 text-sm text-slate-900">{outcome.actualImpact === null ? 'Not measured' : `${outcome.actualImpact.toLocaleString()}%`}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Rollback State</p>
+                        <p className="mt-1 text-sm text-slate-900">{outcome.rolledBackAt ? `Rolled back ${new Date(outcome.rolledBackAt).toLocaleString()}` : outcome.rollbackReady ? 'Available' : 'Not available'}</p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-slate-200 bg-white p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Lifecycle</p>
+                      <p className="mt-1 text-sm text-slate-900">Created: {new Date(selectedWorkflowExecution.createdAt).toLocaleString()}</p>
+                      <p className="mt-1 text-sm text-slate-900">Approved: {selectedWorkflowExecution.approvedAt ? new Date(selectedWorkflowExecution.approvedAt).toLocaleString() : 'Not approved yet'}</p>
+                      <p className="mt-1 text-sm text-slate-900">Measured: {outcome.measuredAt ? new Date(outcome.measuredAt).toLocaleString() : 'Pending outcome capture'}</p>
+                    </div>
+
+                    {outcome.message && (
+                      <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">Outcome Summary</p>
+                        <p className="mt-1 text-sm text-indigo-950">{outcome.message}</p>
+                      </div>
+                    )}
+
+                    {outcome.detailLines.length > 0 && (
+                      <div className="rounded-lg border border-slate-200 bg-white p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Parsed Details</p>
+                        <ul className="mt-2 list-disc pl-5 text-sm text-slate-800 space-y-1">
+                          {outcome.detailLines.map((line, idx) => (
+                            <li key={`${selectedWorkflowExecution.id}-detail-line-${idx}`}>{line}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {selectedWorkflowExecution.errorMessage && (
+                      <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-rose-600">Execution Error</p>
+                        <p className="mt-1 text-sm text-rose-950">{selectedWorkflowExecution.errorMessage}</p>
+                      </div>
+                    )}
+
+                    <div className="grid gap-3 lg:grid-cols-3">
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Trigger Data</p>
+                        <pre className="mt-2 overflow-auto rounded-md bg-slate-900 p-3 text-[11px] leading-5 text-slate-100">{stringifyWorkflowPayload(selectedWorkflowExecution.triggerData)}</pre>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Action Payload</p>
+                        <pre className="mt-2 overflow-auto rounded-md bg-slate-900 p-3 text-[11px] leading-5 text-slate-100">{stringifyWorkflowPayload(selectedWorkflowExecution.actionTaken)}</pre>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Result Payload</p>
+                        <pre className="mt-2 overflow-auto rounded-md bg-slate-900 p-3 text-[11px] leading-5 text-slate-100">{stringifyWorkflowPayload(selectedWorkflowExecution.result)}</pre>
+                      </div>
+                    </div>
+                  </>
+                )
+              })()}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 px-5 py-4">
+              <button
+                type="button"
+                className="btn-secondary"
+                ref={workflowExecutionDetailCloseButtonRef}
+                onClick={closeWorkflowExecutionDetail}
+              >
+                Close
               </button>
             </div>
           </div>

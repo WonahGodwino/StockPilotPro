@@ -14,6 +14,7 @@ import {
   resolveAlertPolicyFromSignals,
   shouldPrecomputeForSnapshot,
 } from '@/lib/enterprise-ai-jobs-logic'
+import { capturePendingRecommendationOutcomes } from '@/lib/enterprise-ai-outcome-tracker'
 
 export type EnterpriseAiRefreshJobOptions = {
   tenantLimit?: number
@@ -29,6 +30,7 @@ export type EnterpriseAiRefreshTenantResult = {
   precomputedRecommendations: number
   staleContextsInvalidated: number
   adaptiveAlertsEmitted: number
+  recommendationOutcomesCaptured: number
   externalSignalsUsed: number
   durationMs: number
   error?: string
@@ -44,6 +46,7 @@ export type EnterpriseAiRefreshJobResult = {
   precomputedRecommendations: number
   staleContextsInvalidated: number
   adaptiveAlertsEmitted: number
+  recommendationOutcomesCaptured: number
   failedTenants: number
   tenantResults: EnterpriseAiRefreshTenantResult[]
 }
@@ -94,6 +97,7 @@ export async function runEnterpriseAiRefreshJob(options: EnterpriseAiRefreshJobO
   let precomputedRecommendations = 0
   let staleContextsInvalidated = 0
   let adaptiveAlertsEmitted = 0
+  let recommendationOutcomesCaptured = 0
   let failedTenants = 0
 
   for (const tenantId of tenantIds) {
@@ -263,6 +267,13 @@ export async function runEnterpriseAiRefreshJob(options: EnterpriseAiRefreshJobO
       }
       adaptiveAlertsEmitted += alertCount
 
+      let capturedOutcomes = 0
+      if (!dryRun) {
+        const captureResult = await capturePendingRecommendationOutcomes({ tenantId, olderThanDays: 30, limit: 25 })
+        capturedOutcomes = captureResult.captured
+      }
+      recommendationOutcomesCaptured += capturedOutcomes
+
       let invalidatedCount = 0
       if (!dryRun) {
         const staleUpdate = await prisma.enterpriseAiRecommendation.updateMany({
@@ -341,6 +352,12 @@ export async function runEnterpriseAiRefreshJob(options: EnterpriseAiRefreshJobO
               metricValue: recentSignals.length,
               dimensions: { lookbackDays: 21 },
             },
+            {
+              tenantId,
+              metricKey: 'enterprise_ai_refresh_outcomes_captured_count',
+              metricValue: capturedOutcomes,
+              dimensions: { olderThanDays: 30 },
+            },
           ],
         })
 
@@ -353,6 +370,7 @@ export async function runEnterpriseAiRefreshJob(options: EnterpriseAiRefreshJobO
             precomputedRecommendations: createdCount,
             staleContextsInvalidated: invalidatedCount,
             adaptiveAlertsEmitted: alertCount,
+            recommendationOutcomesCaptured: capturedOutcomes,
             alertsSuppressed: suppressedCounts,
             alertPolicy,
             externalSignalsUsed: recentSignals.length,
@@ -370,6 +388,7 @@ export async function runEnterpriseAiRefreshJob(options: EnterpriseAiRefreshJobO
         precomputedRecommendations: createdCount,
         staleContextsInvalidated: invalidatedCount,
         adaptiveAlertsEmitted: alertCount,
+        recommendationOutcomesCaptured: capturedOutcomes,
         externalSignalsUsed: recentSignals.length,
         durationMs,
       })
@@ -390,6 +409,7 @@ export async function runEnterpriseAiRefreshJob(options: EnterpriseAiRefreshJobO
         precomputedRecommendations: 0,
         staleContextsInvalidated: 0,
         adaptiveAlertsEmitted: 0,
+        recommendationOutcomesCaptured: 0,
         externalSignalsUsed: 0,
         durationMs,
         error,
@@ -412,6 +432,7 @@ export async function runEnterpriseAiRefreshJob(options: EnterpriseAiRefreshJobO
           precomputedRecommendations,
           staleContextsInvalidated,
           adaptiveAlertsEmitted,
+          recommendationOutcomesCaptured,
           failedTenants,
           staleMinutes,
           staleContextHours,
@@ -431,6 +452,7 @@ export async function runEnterpriseAiRefreshJob(options: EnterpriseAiRefreshJobO
     precomputedRecommendations,
     staleContextsInvalidated,
     adaptiveAlertsEmitted,
+    recommendationOutcomesCaptured,
     failedTenants,
     tenantResults,
   }

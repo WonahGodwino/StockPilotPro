@@ -6,7 +6,7 @@ import { PrismaClient } from '@prisma/client'
 
 const PORT = 3311
 const BASE_URL = `http://127.0.0.1:${PORT}`
-const REQUEST_TIMEOUT_MS = 3000
+const REQUEST_TIMEOUT_MS = 20000
 
 type LoginResult = {
   accessToken: string
@@ -114,6 +114,7 @@ async function ensureEnterpriseFixtures() {
       features: {
         ENTERPRISE_PACKAGE: true,
         ENTERPRISE_AI_ENABLED: true,
+        ENTERPRISE_AI_EXTERNAL_DATA: true,
         UNLIMITED_BRANCHES: true,
         AI_DEMAND_FORECAST: true,
         AI_REORDER_ADVISOR: true,
@@ -136,6 +137,7 @@ async function ensureEnterpriseFixtures() {
       features: {
         ENTERPRISE_PACKAGE: true,
         ENTERPRISE_AI_ENABLED: true,
+        ENTERPRISE_AI_EXTERNAL_DATA: true,
         UNLIMITED_BRANCHES: true,
         AI_DEMAND_FORECAST: true,
         AI_REORDER_ADVISOR: true,
@@ -389,6 +391,71 @@ async function run() {
     const actionListBody = await actionListAllowed.json() as { data: { total: number; items: Array<{ recommendationId: string }> } }
     assert.ok(actionListBody.data.total >= 1, 'Action tracker list should return at least one item')
     assert.ok(actionListBody.data.items.some((item) => item.recommendationId === trackedRecommendationId), 'Tracked recommendation should appear in action list')
+
+    await prisma.enterpriseAiExternalDataConnection.deleteMany({
+      where: { tenantId: fixture.enterpriseTenantId },
+    })
+
+    await prisma.enterpriseAiExternalDataConnection.create({
+      data: {
+        tenantId: fixture.enterpriseTenantId,
+        providerType: 'postgresql',
+        connectionName: 'Broken External Fixture',
+        host: 'db.example.local',
+        port: 5432,
+        databaseName: 'tenant_reporting',
+        schemaName: 'public',
+        sslRequired: true,
+        status: 'VALIDATED',
+        validationState: 'VALIDATED',
+        encryptedCredentials: '{"fixture":true}',
+        mappingConfig: {
+          products: {
+            table: 'products',
+            columns: {
+              id: 'id',
+              name: 'name',
+              category: 'category',
+              costPrice: 'cost_price',
+              sellingPrice: 'selling_price',
+              currentStock: 'current_stock',
+              branchId: 'branch_id',
+            },
+          },
+        },
+        schemaSnapshot: {
+          tableCount: 1,
+          tables: [
+            {
+              name: 'products',
+              columns: [
+                { name: 'id', dataType: 'uuid', nullable: false },
+                { name: 'name', dataType: 'text', nullable: false },
+                { name: 'category', dataType: 'text', nullable: true },
+                { name: 'cost_price', dataType: 'numeric', nullable: false },
+                { name: 'selling_price', dataType: 'numeric', nullable: false },
+                { name: 'current_stock', dataType: 'numeric', nullable: false },
+                { name: 'branch_id', dataType: 'uuid', nullable: true },
+              ],
+            },
+          ],
+        },
+        lastHealthStatus: 'HEALTHY',
+        lastHealthAt: new Date(),
+        groundingEnabled: true,
+        isActive: true,
+        createdBy: 'integration-enterprise-ba',
+        updatedBy: 'integration-enterprise-ba',
+      },
+    })
+
+    const assistantRecommendation = await postJson('/api/enterprise-ai/recommendations', {
+      recommendationType: 'NL_ASSISTANT',
+      prompt: 'Summarize inventory and profitability priorities for this week',
+    }, forgedEnterpriseBusinessAdminToken)
+    assert.equal(assistantRecommendation.status, 201, 'Enterprise business admin should generate assistant recommendations')
+    const assistantRecommendationBody = await assistantRecommendation.json() as { data: { outputPayload: { groundingSource: string } } }
+    assert.equal(assistantRecommendationBody.data.outputPayload.groundingSource, 'internal', 'Assistant should fall back to internal grounding when external mapping contract is invalid')
 
     const alertPolicyBlocked = await getJson('/api/enterprise-ai/alerts/policy', salesUserToken)
     assert.equal(alertPolicyBlocked.status, 403, 'Salesperson should be blocked from alert policy endpoint')

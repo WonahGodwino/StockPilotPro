@@ -5,6 +5,7 @@ import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { EnterpriseAccessError, requireEnterpriseAiAccess } from '@/lib/enterprise-ai'
 import { logAudit } from '@/lib/audit'
 import { generateEnterpriseAssistantResponse } from '@/lib/enterprise-ai-assistant'
+import { resolveEnterpriseAiDataProviderContext } from '@/lib/enterprise-ai-external-data'
 import { isUnsafeAssistantPrompt } from '@/lib/enterprise-ai-policy'
 import { detectAndStoreBusinessType } from '@/lib/enterprise-ai-cognitive'
 
@@ -45,7 +46,11 @@ export async function POST(req: NextRequest) {
       tenantId: access.tenantId,
       prompt,
       conversationId,
+      userId: access.userId,
+      userRole: user.role,
     })
+    const providerContext = await resolveEnterpriseAiDataProviderContext(access.tenantId)
+    const actualGroundingSource = assistantResult.grounding.groundingSource
     
     const isRestockIntent = assistantResult.brief.actions.some(
       (a) => a.toLowerCase().includes('reorder') || a.toLowerCase().includes('restock')
@@ -58,6 +63,9 @@ export async function POST(req: NextRequest) {
         metricValue: Date.now() - startTime,
         dimensions: {
           provider: assistantResult.provider,
+          groundingSource: actualGroundingSource,
+          configuredGroundingSource: providerContext.source,
+          externalGroundingReady: providerContext.externalGroundingReady,
           intent: isRestockIntent ? 'RESTOCK' : 'GENERAL',
         },
       },
@@ -71,6 +79,9 @@ export async function POST(req: NextRequest) {
       newValues: {
         promptPreview: prompt.slice(0, 100),
         provider: assistantResult.provider,
+        groundingSource: actualGroundingSource,
+        configuredGroundingSource: providerContext.source,
+        externalGroundingReady: providerContext.externalGroundingReady,
       },
       req,
     })
@@ -84,6 +95,18 @@ export async function POST(req: NextRequest) {
           : [],
         intent: isRestockIntent ? 'RESTOCK' : 'GENERAL',
         provider: assistantResult.provider,
+        brief: assistantResult.brief,
+        groundingSource: actualGroundingSource,
+        externalData: providerContext.externalConnection
+          ? {
+              providerType: providerContext.externalConnection.providerType,
+              status: providerContext.externalConnection.status,
+              validationState: providerContext.externalConnection.validationState,
+              groundingEnabled: providerContext.externalConnection.groundingEnabled,
+              externalGroundingReady: providerContext.externalGroundingReady,
+              contractIssues: providerContext.externalConnection.contractIssues,
+            }
+          : null,
         reliability: assistantResult.reliability,
       },
     })

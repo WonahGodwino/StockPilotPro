@@ -92,14 +92,14 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const baseCurrency = tenant?.baseCurrency || 'USD'
 
     const nextCurrency = data.currency ?? expense.currency
-    let nextFxRate = Number(data.fxRate ?? expense.fxRate)
+    let nextFxRate: number
     if (nextCurrency === baseCurrency) {
       nextFxRate = 1
-    } else if (nextFxRate === 1) {
+    } else {
       const savedRate = await resolveSavedFxRate(expense.tenantId, baseCurrency, nextCurrency)
       if (!savedRate) {
         return apiError(
-          `No saved exchange rate found for ${baseCurrency}/${nextCurrency}. Load or enter a valid FX rate before saving.`,
+          `No saved exchange rate found for ${baseCurrency}/${nextCurrency}. Save the rate in Exchange Rate Settings before updating this expense.`,
           422
         )
       }

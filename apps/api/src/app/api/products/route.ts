@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { isSuperAdmin, assertSubsidiaryAccess } from '@/lib/rbac'
 import { logAudit } from '@/lib/audit'
+import { syncProductReceiptHistory } from '@/lib/product-receipts'
 
 const createSchema = z.object({
   name: z.string().min(1),
@@ -14,8 +15,13 @@ const createSchema = z.object({
   quantity: z.number().min(0).default(0),
   costPrice: z.number().min(0),
   sellingPrice: z.number().min(0),
+  originalCurrency: z.string().length(3).transform((v) => v.toUpperCase()).optional(),
+  originalCostPrice: z.number().min(0).optional(),
+  originalSellingPrice: z.number().min(0).optional(),
   barcode: z.string().optional(),
   lowStockThreshold: z.number().min(0).default(10),
+  purchaseDate: z.coerce.date().optional(),
+  expiryDate: z.coerce.date().nullable().optional(),
   status: z.enum(['ACTIVE', 'DRAFT', 'ARCHIVED']).default('ACTIVE'),
   subsidiaryId: z.string().trim().min(1, 'subsidiaryId is required'),
 })
@@ -92,12 +98,31 @@ export async function POST(req: NextRequest) {
       return apiError('Invalid subsidiary selected', 422)
     }
 
-    const product = await prisma.product.create({
-      data: {
-        ...data,
-        tenantId: user.tenantId!,
-        createdBy: user.userId,
-      },
+    const product = await prisma.$transaction(async (tx) => {
+      const created = await tx.product.create({
+        data: {
+          ...data,
+          tenantId: user.tenantId!,
+          createdBy: user.userId,
+        },
+      })
+
+      await syncProductReceiptHistory({
+        tx,
+        previousProduct: null,
+        nextProduct: {
+          id: created.id,
+          tenantId: created.tenantId,
+          subsidiaryId: created.subsidiaryId,
+          type: created.type,
+          quantity: created.quantity,
+          costPrice: created.costPrice,
+          purchaseDate: created.purchaseDate,
+        },
+        userId: user.userId,
+      })
+
+      return created
     })
 
     await logAudit({
@@ -111,6 +136,7 @@ export async function POST(req: NextRequest) {
         category: product.category,
         type: product.type,
         quantity: product.quantity,
+        purchaseDate: product.purchaseDate,
         sellingPrice: product.sellingPrice,
         status: product.status,
         subsidiaryId: product.subsidiaryId,

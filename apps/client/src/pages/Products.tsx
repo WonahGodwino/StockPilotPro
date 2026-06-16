@@ -58,6 +58,8 @@ export default function Products() {
   const [damageModalOpen, setDamageModalOpen] = useState(false)
   const [damagingProduct, setDamagingProduct] = useState<Product | null>(null)
   const [reloadError, setReloadError] = useState<string | null>(null)
+  // Map of originalCurrency → base-currency rate (1 unit of original = rate units of base)
+  const [fxRates, setFxRates] = useState<Record<string, number>>({})
 
   const canManage = user?.role !== 'SALESPERSON'
   const canDelete = user?.role === 'BUSINESS_ADMIN' || user?.role === 'SUPER_ADMIN'
@@ -117,8 +119,10 @@ export default function Products() {
         const filtered = applyFilters(visible)
         const start = (p - 1) * PAGE_SIZE
         const end = start + PAGE_SIZE
-        setProducts(filtered.slice(start, end))
+        const pageRows = filtered.slice(start, end)
+        setProducts(pageRows)
         setTotal(filtered.length)
+        void loadFxRates(pageRows)
         return
       }
 
@@ -129,8 +133,10 @@ export default function Products() {
       params.set('page', String(p))
       params.set('limit', String(PAGE_SIZE))
       const { data } = await api.get(`/products?${params}`)
-      setProducts(applyRoleFilter(data.data))
+      const pageRows = applyRoleFilter(data.data)
+      setProducts(pageRows)
       setTotal(data.total ?? data.data.length)
+      void loadFxRates(pageRows)
       // Keep UI responsive even if offline cache refresh is slow/fails.
       void refreshOfflineProductCache().catch(() => undefined)
     } catch {
@@ -138,6 +144,28 @@ export default function Products() {
       toast.error('Failed to load products')
     }
     finally { setLoading(false) }
+  }
+
+  // Fetch one FX rate per unique originalCurrency found on this page.
+  // Rate = 1 originalCurrency → X baseCurrency (used to compute bracket values).
+  const loadFxRates = async (rows: Product[]) => {
+    const currencies = [...new Set(
+      rows
+        .map((r) => r.originalCurrency)
+        .filter((c): c is string => !!c && c !== baseCurrency)
+    )]
+    if (currencies.length === 0) return
+    const fetched: Record<string, number> = {}
+    await Promise.all(currencies.map(async (orig) => {
+      try {
+        // Ask for fromCurrency=baseCurrency toCurrency=orig
+        // rate = how many orig per 1 base, so 1 orig = 1/rate base
+        const { data } = await api.get(`/currency-rates?fromCurrency=${baseCurrency}&toCurrency=${orig}`)
+        const r = Number(data?.data?.rate)
+        if (Number.isFinite(r) && r > 0) fetched[orig] = r
+      } catch { /* no rate saved – bracket will be suppressed */ }
+    }))
+    setFxRates((prev) => ({ ...prev, ...fetched }))
   }
 
   useEffect(() => { setPage(1); load(1) }, [search, statusFilter, typeFilter])
@@ -251,6 +279,14 @@ export default function Products() {
                   const sell = Number(p.sellingPrice)
                   const marginPct = cost > 0 ? ((sell - cost) / cost) * 100 : 0
                   const isLow = p.type === 'GOODS' && p.quantity <= p.lowStockThreshold
+
+                  // Show original entry currency + live-converted base-currency bracket
+                  const origCurrency = p.originalCurrency && p.originalCurrency !== baseCurrency ? p.originalCurrency : null
+                  const origRate = origCurrency ? fxRates[origCurrency] : null // baseCurrency→origCurrency rate
+                  // 1 origCurrency = 1/origRate baseCurrency
+                  const origCostBase  = origCurrency && origRate && p.originalCostPrice    != null ? Number(p.originalCostPrice)    / origRate : null
+                  const origSellBase  = origCurrency && origRate && p.originalSellingPrice != null ? Number(p.originalSellingPrice)  / origRate : null
+                  const fmtOrig = origCurrency ? makeCurrencyFormatter(origCurrency) : null
                   return (
                     <tr key={p.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-3">
@@ -268,8 +304,16 @@ export default function Products() {
                           <span className="ml-1.5 badge bg-danger-50 text-danger-600">Low</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-600">{fmt(cost)}</td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-900">{fmt(sell)}</td>
+                      <td className="px-4 py-3 text-right text-gray-600">
+                        {fmtOrig && p.originalCostPrice != null
+                          ? <>{fmtOrig(Number(p.originalCostPrice))}{origCostBase != null && <span className="text-gray-400 text-xs ml-1">({fmt(origCostBase)})</span>}</>
+                          : fmt(cost)}
+                      </td>
+                      <td className="px-4 py-3 text-right font-medium text-gray-900">
+                        {fmtOrig && p.originalSellingPrice != null
+                          ? <>{fmtOrig(Number(p.originalSellingPrice))}{origSellBase != null && <span className="text-gray-400 text-xs ml-1">({fmt(origSellBase)})</span>}</>
+                          : fmt(sell)}
+                      </td>
                       <td className="px-4 py-3 text-right">
                         <span className={`font-medium ${marginColor(marginPct)}`}>
                           {marginPct.toFixed(1)}%

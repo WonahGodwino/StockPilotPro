@@ -64,6 +64,12 @@ enum ProductStatus {
   ARCHIVED
 }
 
+enum ProductReceiptSource {
+  INITIAL_STOCK
+  RESTOCK
+  LEGACY_IMPORT
+}
+
 enum PaymentMethod {
   CASH
   CARD
@@ -185,6 +191,8 @@ model Tenant {
   syncTelemetry   SyncTelemetry[]
   subscriptionTransactions SubscriptionTransaction[]
   customers        Customer[]
+  productReceipts  ProductReceipt[]
+  externalDataConnections EnterpriseAiExternalDataConnection[]
 
   @@index([acquisitionAgentId])
 }
@@ -414,6 +422,7 @@ model Subsidiary {
   tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   users           User[]
   products        Product[]
+  productReceipts ProductReceipt[]
   sales           Sale[]
   expenses        Expense[]
   damageRecords   DamageRecord[]
@@ -436,10 +445,14 @@ model Product {
   type                ProductType   @default(GOODS)
   unit                String        @default("pcs")
   quantity            Decimal       @db.Decimal(12, 3) @default(0)
-  costPrice           Decimal       @db.Decimal(12, 2)
-  sellingPrice        Decimal       @db.Decimal(12, 2)
+  costPrice              Decimal       @db.Decimal(12, 2)
+  sellingPrice           Decimal       @db.Decimal(12, 2)
+  originalCurrency       String?
+  originalCostPrice      Decimal?      @db.Decimal(12, 2)
+  originalSellingPrice   Decimal?      @db.Decimal(12, 2)
   barcode             String?
   lowStockThreshold   Decimal       @db.Decimal(12, 3) @default(10)
+  purchaseDate        DateTime?
   expiryDate          DateTime?
   status              ProductStatus @default(ACTIVE)
   createdAt           DateTime      @default(now())
@@ -451,6 +464,7 @@ model Product {
   tenant              Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   subsidiary          Subsidiary    @relation(fields: [subsidiaryId], references: [id])
   saleItems           SaleItem[]
+  productReceipts     ProductReceipt[]
   damageRecords       DamageRecord[]
   notifications       Notification[]
 
@@ -690,6 +704,31 @@ model DamageRecord {
   @@index([date])
 }
 
+model ProductReceipt {
+  id              String               @id @default(cuid())
+  tenantId        String
+  subsidiaryId    String
+  productId       String
+  quantity        Decimal              @db.Decimal(12, 3)
+  unitCost        Decimal              @db.Decimal(12, 2)
+  purchaseDate    DateTime
+  source          ProductReceiptSource @default(INITIAL_STOCK)
+  isEstimated     Boolean              @default(false)
+  notes           String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  createdBy       String?
+  updatedBy       String?
+
+  tenant          Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subsidiary      Subsidiary           @relation(fields: [subsidiaryId], references: [id])
+  product         Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([subsidiaryId])
+  @@index([productId, purchaseDate])
+}
+
 // ──────────────────────────────────────────────
 // NOTIFICATIONS
 // ──────────────────────────────────────────────
@@ -840,6 +879,39 @@ model EnterpriseAiMetric {
 
   @@index([tenantId, metricKey, measuredAt])
   @@index([metricKey, measuredAt])
+}
+
+model EnterpriseAiExternalDataConnection {
+  id                     String   @id @default(cuid())
+  tenantId               String
+  providerType           String
+  connectionName         String?
+  host                   String
+  port                   Int      @default(5432)
+  databaseName           String
+  schemaName             String   @default("public")
+  sslRequired            Boolean  @default(true)
+  status                 String   @default("PENDING")
+  validationState        String   @default("DRAFT")
+  encryptedCredentials   String
+  mappingConfig          Json?    @default("{}")
+  schemaSnapshot         Json?    @default("{}")
+  lastValidatedAt        DateTime?
+  lastValidationError    String?
+  lastHealthStatus       String?
+  lastHealthAt           DateTime?
+  groundingEnabled       Boolean  @default(false)
+  isActive               Boolean  @default(true)
+  createdBy              String?
+  updatedBy              String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  tenant                 Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, providerType])
+  @@index([tenantId, status])
+  @@index([tenantId, groundingEnabled])
 }
 
 // ============================================================

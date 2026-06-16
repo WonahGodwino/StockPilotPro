@@ -5,7 +5,7 @@ import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/auth.store'
 import { useAppStore } from '@/store/app.store'
 import { getApiErrorMessage } from '@/lib/apiError'
-import { makeCurrencyFormatter } from '@/lib/currency'
+import { makeCurrencyFormatter, SUPPORTED_CURRENCIES } from '@/lib/currency'
 import { X, Loader2 } from 'lucide-react'
 
 interface Props {
@@ -29,8 +29,75 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
   const subsidiaries = useAppStore((s) => s.subsidiaries)
   const isSalesperson = user?.role === 'SALESPERSON'
   const [loading, setLoading] = useState(false)
+
+  // Currency conversion state
+  const [priceCurrency, setPriceCurrency] = useState(
+    product?.originalCurrency || baseCurrency
+  )
+  const [resolvedFxRate, setResolvedFxRate] = useState(1)
+  const [fxLoading, setFxLoading] = useState(false)
+  const [fxError, setFxError] = useState<string | null>(null)
+  // Raw amounts as entered by the user in priceCurrency
+  const [rawCostPrice, setRawCostPrice] = useState(
+    product?.originalCostPrice != null ? Number(product.originalCostPrice) : Number(product?.costPrice ?? 0)
+  )
+  const [rawSellingPrice, setRawSellingPrice] = useState(
+    product?.originalSellingPrice != null ? Number(product.originalSellingPrice) : Number(product?.sellingPrice ?? 0)
+  )
+
+  const isConverting = priceCurrency !== baseCurrency
+
+  // Fetch saved FX rate whenever priceCurrency changes
+  useEffect(() => {
+    if (!isConverting) {
+      setResolvedFxRate(1)
+      setFxError(null)
+      return
+    }
+    let cancelled = false
+    setFxLoading(true)
+    setFxError(null)
+    api
+      .get(`/currency-rates?fromCurrency=${baseCurrency}&toCurrency=${priceCurrency}`)
+      .then(({ data }) => {
+        if (cancelled) return
+        const rate = Number(data?.data?.rate)
+        if (!rate || !Number.isFinite(rate) || rate <= 0) {
+          setFxError(`No saved rate for ${priceCurrency}/${baseCurrency}. Go to Settings → Exchange Rates.`)
+          setResolvedFxRate(1)
+        } else {
+          // rate is baseCurrency→priceCurrency, so 1 priceCurrency = 1/rate baseCurrency
+          setResolvedFxRate(rate)
+          setFxError(null)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFxError(`Could not load rate for ${priceCurrency}/${baseCurrency}.`)
+          setResolvedFxRate(1)
+        }
+      })
+      .finally(() => { if (!cancelled) setFxLoading(false) })
+    return () => { cancelled = true }
+  }, [priceCurrency, baseCurrency, isConverting])
+
+  // When switching currency back to base, reset raw values to current form values
+  const handleCurrencyChange = (newCurrency: string) => {
+    setPriceCurrency(newCurrency)
+    if (newCurrency === baseCurrency) {
+      // show stored base-currency values unchanged
+      setRawCostPrice(form.costPrice)
+      setRawSellingPrice(form.sellingPrice)
+    }
+  }
+
+  // Derived base-currency prices (what gets saved)
+  const baseCostPrice = isConverting ? rawCostPrice / resolvedFxRate : rawCostPrice
+  const baseSellingPrice = isConverting ? rawSellingPrice / resolvedFxRate : rawSellingPrice
+
   const [form, setForm] = useState({
     name: product?.name || '',
+    category: product?.category || 'Uncategorized',
     description: product?.description || '',
     type: product?.type || 'GOODS',
     unit: product?.unit || 'pcs',
@@ -39,6 +106,7 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
     sellingPrice: product?.sellingPrice ?? 0,
     barcode: product?.barcode || '',
     lowStockThreshold: product?.lowStockThreshold ?? 10,
+    purchaseDate: toDateInputValue(product?.purchaseDate as string | Date | undefined) || toDateInputValue(new Date()),
     expiryDate: toDateInputValue(product?.expiryDate as string | Date | undefined),
     status: product?.status || 'ACTIVE',
     subsidiaryId: product?.subsidiaryId || selectedSubsidiaryId || user?.subsidiaryId || '',
@@ -64,10 +132,22 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
       return
     }
 
+    if (isConverting && fxError) {
+      toast.error('Cannot save: FX rate for selected currency is unavailable.')
+      return
+    }
+
     setLoading(true)
     try {
       const payload = {
         ...form,
+        costPrice: baseCostPrice,
+        sellingPrice: baseSellingPrice,
+        // Persist original-entry currency provenance so the list can always
+        // show the entered price alongside the current base-currency equivalent.
+        originalCurrency: isConverting ? priceCurrency : undefined,
+        originalCostPrice: isConverting ? rawCostPrice : null,
+        originalSellingPrice: isConverting ? rawSellingPrice : null,
         subsidiaryId: resolvedSubsidiaryId,
       }
 
@@ -111,20 +191,88 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
               </select>
             </div>
             <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+              <input className="input" value={form.category} placeholder="Uncategorized" onChange={(e) => setForm({ ...form, category: e.target.value })} />
+            </div>
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
               <input className="input" value={form.unit} placeholder="pcs, kg, hr..." onChange={(e) => setForm({ ...form, unit: e.target.value })} />
             </div>
+
+            {/* ── Price Currency Selector ── */}
+            <div className="col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Price Currency</label>
+              <select
+                className="input"
+                value={priceCurrency}
+                onChange={(e) => handleCurrencyChange(e.target.value)}
+              >
+                {SUPPORTED_CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>{c.code} — {c.name}</option>
+                ))}
+              </select>
+              {isConverting && fxLoading && (
+                <p className="mt-1 text-xs text-gray-400 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Loading exchange rate…</p>
+              )}
+              {isConverting && fxError && !fxLoading && (
+                <p className="mt-1 text-xs text-danger-600">{fxError}</p>
+              )}
+              {isConverting && !fxError && !fxLoading && resolvedFxRate > 0 && (
+                <p className="mt-1 text-xs text-gray-500">
+                  1 {priceCurrency} = {fmt(1 / resolvedFxRate)}
+                </p>
+              )}
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Cost Price *</label>
-              <input className="input" type="number" step="0.01" min="0" value={form.costPrice} onChange={(e) => setForm({ ...form, costPrice: parseFloat(e.target.value) || 0 })} required />
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                min="0"
+                value={rawCostPrice}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value) || 0
+                  setRawCostPrice(v)
+                  if (!isConverting) setForm({ ...form, costPrice: v })
+                }}
+                required
+              />
+              {isConverting && !fxError && rawCostPrice > 0 && (
+                <p className="mt-1 text-xs text-gray-500">
+                  ≈ {fmt(baseCostPrice)}
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Selling Price *</label>
-              <input className="input" type="number" step="0.01" min="0" value={form.sellingPrice} onChange={(e) => setForm({ ...form, sellingPrice: parseFloat(e.target.value) || 0 })} required />
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                min="0"
+                value={rawSellingPrice}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value) || 0
+                  setRawSellingPrice(v)
+                  if (!isConverting) setForm({ ...form, sellingPrice: v })
+                }}
+                required
+              />
+              {isConverting && !fxError && rawSellingPrice > 0 && (
+                <p className="mt-1 text-xs text-gray-500">
+                  ≈ {fmt(baseSellingPrice)}
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
               <input className="input" type="number" step="0.001" min="0" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: parseFloat(e.target.value) || 0 })} />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Date</label>
+              <input className="input" type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Low Stock Alert</label>
@@ -173,15 +321,21 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
           </div>
 
           {/* Margin indicator */}
-          {form.costPrice > 0 && form.sellingPrice > 0 && (() => {
-            const marginPct = ((form.sellingPrice - form.costPrice) / form.costPrice) * 100
+          {baseCostPrice > 0 && baseSellingPrice > 0 && (() => {
+            const marginPct = ((baseSellingPrice - baseCostPrice) / baseCostPrice) * 100
             const color = marginPct >= 30 ? 'text-success-600' : marginPct >= 15 ? 'text-warning-600' : 'text-danger-600'
+            const profit = baseSellingPrice - baseCostPrice
             return (
               <div className="bg-gray-50 rounded-lg p-3 text-sm">
                 <span className="text-gray-500">Margin: </span>
                 <span className={`font-semibold ${color}`}>
-                  {fmt(form.sellingPrice - form.costPrice)} ({marginPct.toFixed(1)}%)
+                  {fmt(profit)} ({marginPct.toFixed(1)}%)
                 </span>
+                {isConverting && rawCostPrice > 0 && rawSellingPrice > 0 && (
+                  <span className="ml-2 text-gray-400 text-xs">
+                    ({makeCurrencyFormatter(priceCurrency)(rawSellingPrice - rawCostPrice)})
+                  </span>
+                )}
               </div>
             )
           })()}

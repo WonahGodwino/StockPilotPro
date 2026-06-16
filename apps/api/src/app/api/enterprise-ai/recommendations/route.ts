@@ -127,6 +127,7 @@ function computePriorityScore(confidence: number, riskScore: number, outcomeMult
 async function createRecommendationFromType(args: {
   tenantId: string
   userId: string
+  userRole?: string
   recommendationType: z.infer<typeof recommendationTypeSchema>
   subsidiaryId?: string
   productId?: string
@@ -467,6 +468,8 @@ async function createRecommendationFromType(args: {
       tenantId,
       prompt: safePrompt,
       conversationId,
+      userId: args.userId,
+      userRole: args.userRole,
     })
 
     const confidence = clamp(
@@ -485,7 +488,7 @@ async function createRecommendationFromType(args: {
 
     return {
       title: 'Enterprise assistant response',
-      summary: `Assistant generated a grounded response (${assistant.provider}) with comparative branch and product insights.`,
+      summary: `Assistant generated a grounded response (${assistant.provider}, ${assistant.grounding.groundingSource} grounding) with comparative branch and product insights.`,
       confidence,
       riskScore,
       reasonCodes: ['TENANT_SCOPED_ANALYTICS_QUERY', 'PERIOD_COMPARISON', 'BRANCH_PRODUCT_ANALYSIS', 'ADAPTIVE_CONFIDENCE_CALIBRATION', 'GROUNDING_QUALITY_SCORING'],
@@ -494,6 +497,7 @@ async function createRecommendationFromType(args: {
         prompt: safePrompt,
         conversationId: conversationId || null,
         provider: assistant.provider,
+        groundingSource: assistant.grounding.groundingSource,
         currencyCode: assistant.grounding.tenantInfo.baseCurrency,
         incomeBreakdown: assistant.grounding.incomeBreakdown,
         reliability: assistant.reliability,
@@ -608,6 +612,7 @@ export async function POST(req: NextRequest) {
     const generated = await createRecommendationFromType({
       tenantId: access.tenantId,
       userId: access.userId,
+      userRole: user.role,
       recommendationType: payload.recommendationType,
       subsidiaryId: payload.subsidiaryId,
       productId: payload.productId,

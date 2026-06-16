@@ -1,13 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import api from '@/lib/api'
 import type { Expense } from '@/types'
 import toast from 'react-hot-toast'
-import { X, Loader2, RefreshCw } from 'lucide-react'
+import { X, Loader2 } from 'lucide-react'
 import { useAuthStore } from '@/store/auth.store'
 import { useAppStore } from '@/store/app.store'
 import { getApiErrorMessage } from '@/lib/apiError'
 import { addPendingExpense, updatePendingExpense } from '@/lib/db'
-import { SUPPORTED_CURRENCIES } from '@/lib/currency'
+import { SUPPORTED_CURRENCIES, makeCurrencyFormatter } from '@/lib/currency'
 
 const CATEGORIES = ['Rent', 'Utilities', 'Salaries', 'Marketing', 'Transportation', 'Maintenance', 'Supplies', 'Other']
 
@@ -18,12 +18,12 @@ export default function ExpenseModal({ expense, pendingLocalId = null, onClose, 
   const selectedSubsidiaryId = useAppStore((s) => s.selectedSubsidiaryId)
   const subsidiaries = useAppStore((s) => s.subsidiaries)
   const baseCurrency = user?.tenant?.baseCurrency || 'USD'
+  const fmt = makeCurrencyFormatter(baseCurrency)
   const isSalesperson = user?.role === 'SALESPERSON'
-  const initialEditCurrencyRef = useRef(expense?.currency || baseCurrency)
   const [loading, setLoading] = useState(false)
   const [rateLoading, setRateLoading] = useState(false)
-  const [rateSource, setRateSource] = useState<'live' | 'snapshot' | 'manual' | 'same-currency' | null>(null)
-  const [fxRateEditedManually, setFxRateEditedManually] = useState(false)
+  const [resolvedFxRate, setResolvedFxRate] = useState<number | null>(null)
+  const [fxError, setFxError] = useState<string | null>(null)
   const [currencySearch, setCurrencySearch] = useState('')
   const [form, setForm] = useState({
     title: expense?.title || '',
@@ -31,7 +31,6 @@ export default function ExpenseModal({ expense, pendingLocalId = null, onClose, 
     category: expense?.category || 'Other',
     date: expense?.date ? expense.date.slice(0, 10) : new Date().toISOString().slice(0, 10),
     currency: expense?.currency || baseCurrency,
-    fxRate: Number(expense?.fxRate ?? 1),
     notes: expense?.notes || '',
     subsidiaryId: expense?.subsidiaryId ?? selectedSubsidiaryId ?? user?.subsidiaryId ?? '',
   })
@@ -43,34 +42,34 @@ export default function ExpenseModal({ expense, pendingLocalId = null, onClose, 
   }, [isSalesperson, user?.subsidiaryId, form.subsidiaryId])
 
   const showFxRate = form.currency !== baseCurrency
-  const filteredCurrencies = SUPPORTED_CURRENCIES.filter((currency) => {
+  const filteredCurrencies = SUPPORTED_CURRENCIES.filter((c) => {
     const q = currencySearch.trim().toLowerCase()
     if (!q) return true
-    return currency.code.toLowerCase().includes(q) || currency.name.toLowerCase().includes(q)
+    return c.code.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)
   })
 
-  const loadLiveRate = async (currency: string) => {
+  // Load saved-only rate whenever currency changes — same pattern as ProductModal.
+  const loadSavedRate = async (currency: string) => {
     if (currency === baseCurrency) {
-      setForm((current) => ({ ...current, fxRate: 1 }))
-      setRateSource('same-currency')
+      setResolvedFxRate(1)
+      setFxError(null)
       return
     }
-
-    if (!navigator.onLine) {
-      setRateSource('manual')
-      return
-    }
-
     setRateLoading(true)
+    setFxError(null)
     try {
-      const { data } = await api.get(`/currency-rates?fromCurrency=${baseCurrency}&toCurrency=${currency}&live=true`)
-      const rate = Number(data.data.rate)
-      setForm((current) => ({ ...current, fxRate: rate }))
-      setFxRateEditedManually(false)
-      setRateSource(data.data.source === 'snapshot' ? 'snapshot' : 'live')
+      const { data } = await api.get(`/currency-rates?fromCurrency=${baseCurrency}&toCurrency=${currency}`)
+      const rate = Number(data?.data?.rate)
+      if (!Number.isFinite(rate) || rate <= 0) {
+        setResolvedFxRate(null)
+        setFxError(`No saved rate for ${currency}/${baseCurrency}. Go to Settings → Exchange Rates.`)
+      } else {
+        setResolvedFxRate(rate)
+        setFxError(null)
+      }
     } catch {
-      setRateSource('manual')
-      toast.error('Unable to load live FX rate. You can still enter it manually.')
+      setResolvedFxRate(null)
+      setFxError(`No saved rate for ${currency}/${baseCurrency}. Go to Settings → Exchange Rates.`)
     } finally {
       setRateLoading(false)
     }
@@ -78,24 +77,15 @@ export default function ExpenseModal({ expense, pendingLocalId = null, onClose, 
 
   useEffect(() => {
     if (!showFxRate) {
-      setRateSource('same-currency')
+      setResolvedFxRate(1)
+      setFxError(null)
       return
     }
+    void loadSavedRate(form.currency)
+  }, [form.currency, baseCurrency, showFxRate])
 
-    const isInitialEditCurrency = !!expense && form.currency === initialEditCurrencyRef.current
-    if (isInitialEditCurrency) {
-      // Existing legacy records might carry placeholder rate=1 for non-base currency.
-      // Attempt auto-refresh once so editing can self-heal stale FX metadata.
-      if (Number(form.fxRate) === 1) {
-        void loadLiveRate(form.currency)
-      } else {
-        setRateSource('manual')
-      }
-      return
-    }
-
-    void loadLiveRate(form.currency)
-  }, [baseCurrency, expense, form.currency, showFxRate])
+  // Base-currency equivalent shown as a hint below the amount field.
+  const baseAmount = showFxRate && resolvedFxRate && resolvedFxRate > 0 ? form.amount / resolvedFxRate : null
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -105,13 +95,12 @@ export default function ExpenseModal({ expense, pendingLocalId = null, onClose, 
       return
     }
     if (showFxRate) {
-      const normalizedFxRate = Number(form.fxRate)
-      if (!Number.isFinite(normalizedFxRate) || normalizedFxRate <= 0) {
-        toast.error('FX rate must be greater than 0 for non-base currency expenses')
+      if (fxError) {
+        toast.error('Cannot save: no saved FX rate for the selected currency. Go to Settings → Exchange Rates.')
         return
       }
-      if (normalizedFxRate === 1 && rateSource === 'manual' && !fxRateEditedManually) {
-        toast.error('No exchange rate loaded yet. Refresh live rate or enter FX rate manually before saving.')
+      if (!resolvedFxRate || !Number.isFinite(resolvedFxRate) || resolvedFxRate <= 0) {
+        toast.error('Cannot save: FX rate is missing. Save the rate in Exchange Rate Settings first.')
         return
       }
     }
@@ -122,12 +111,11 @@ export default function ExpenseModal({ expense, pendingLocalId = null, onClose, 
     setLoading(true)
     try {
       const normalizedAmount = Number(form.amount)
-      const normalizedFxRate = Number(form.fxRate)
       const payload = {
         ...form,
         amount: normalizedAmount,
         date: new Date(form.date).toISOString(),
-        fxRate: normalizedFxRate,
+        fxRate: showFxRate && resolvedFxRate ? resolvedFxRate : 1,
         subsidiaryId: resolvedSubsidiaryId || null,
       }
       if (expense) {
@@ -171,6 +159,9 @@ export default function ExpenseModal({ expense, pendingLocalId = null, onClose, 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Amount *</label>
               <input className="input" type="number" step="0.01" min="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: parseFloat(e.target.value) || 0 })} required />
+              {showFxRate && !fxError && baseAmount != null && baseAmount > 0 && (
+                <p className="mt-1 text-xs text-gray-500">≈ {fmt(baseAmount)}</p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>
@@ -190,7 +181,7 @@ export default function ExpenseModal({ expense, pendingLocalId = null, onClose, 
               <select
                 className="input"
                 value={form.currency}
-                onChange={(e) => setForm({ ...form, currency: e.target.value, fxRate: e.target.value === baseCurrency ? 1 : form.fxRate })}
+                onChange={(e) => setForm({ ...form, currency: e.target.value })}
               >
                 {filteredCurrencies.map((c) => (
                   <option key={c.code} value={c.code}>{c.code} — {c.name}</option>
@@ -201,39 +192,20 @@ export default function ExpenseModal({ expense, pendingLocalId = null, onClose, 
               </select>
             </div>
             {showFxRate && (
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-sm font-medium text-gray-700">
-                    FX Rate <span className="text-gray-400 text-xs">({form.currency}/{baseCurrency})</span>
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => void loadLiveRate(form.currency)}
-                    disabled={rateLoading}
-                    className="inline-flex items-center gap-1 text-xs text-primary-600 hover:underline disabled:opacity-60"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${rateLoading ? 'animate-spin' : ''}`} />
-                    Refresh live rate
-                  </button>
-                </div>
-                <input
-                  className="input"
-                  type="number"
-                  step="0.000001"
-                  min="0.000001"
-                  value={form.fxRate}
-                  onChange={(e) => {
-                    setFxRateEditedManually(true)
-                    setForm({ ...form, fxRate: parseFloat(e.target.value) || 1 })
-                  }}
-                  required={showFxRate}
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  {rateSource === 'live' && 'Using live market rate.'}
-                  {rateSource === 'snapshot' && 'Live rate unavailable. Using latest saved snapshot.'}
-                  {rateSource === 'manual' && 'Enter the rate manually if needed.'}
-                  {rateSource === 'same-currency' && 'No conversion needed.'}
-                </p>
+              <div className="flex flex-col justify-end">
+                {rateLoading && (
+                  <p className="text-xs text-gray-400 flex items-center gap-1">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Loading saved rate…
+                  </p>
+                )}
+                {fxError && !rateLoading && (
+                  <p className="text-xs text-danger-600">{fxError}</p>
+                )}
+                {resolvedFxRate && !fxError && !rateLoading && (
+                  <p className="text-xs text-gray-500">
+                    1 {form.currency} = {fmt(1 / resolvedFxRate)}
+                  </p>
+                )}
               </div>
             )}
           </div>

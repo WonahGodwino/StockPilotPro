@@ -181,14 +181,14 @@ export async function POST(req: NextRequest) {
     })
     const baseCurrency = tenant?.baseCurrency || 'USD'
 
-    let normalizedFxRate = Number(data.fxRate)
+    let normalizedFxRate: number
     if (data.currency === baseCurrency) {
       normalizedFxRate = 1
-    } else if (normalizedFxRate === 1) {
+    } else {
       const savedRate = await resolveSavedFxRate(user.tenantId!, baseCurrency, data.currency)
       if (!savedRate) {
         return apiError(
-          `No saved exchange rate found for ${baseCurrency}/${data.currency}. Load or enter a valid FX rate before saving.`,
+          `No saved exchange rate found for ${baseCurrency}/${data.currency}. Save the rate in Exchange Rate Settings before recording this expense.`,
           422
         )
       }

@@ -5,7 +5,6 @@ import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { isSuperAdmin, assertTenantAccess } from '@/lib/rbac'
 import { logAudit } from '@/lib/audit'
 import { isAgent, isTenantAssignedToAgent } from '@/lib/agent-access'
-import { fetchLiveFxRate } from '@/lib/fx'
 
 async function resolveSavedFxRate(tenantId: string, fromCurrency: string, toCurrency: string): Promise<number | null> {
   if (fromCurrency === toCurrency) return 1
@@ -43,37 +42,7 @@ async function resolveSavedFxRate(tenantId: string, fromCurrency: string, toCurr
   return null
 }
 
-async function resolveSavedOrLiveFxRate(
-  tenantId: string,
-  fromCurrency: string,
-  toCurrency: string,
-  userId: string
-): Promise<number | null> {
-  const saved = await resolveSavedFxRate(tenantId, fromCurrency, toCurrency)
-  if (saved) return saved
-
-  try {
-    const live = await fetchLiveFxRate(fromCurrency, toCurrency)
-    if (!Number.isFinite(live) || live <= 0) return null
-
-    await prisma.currencyRate.create({
-      data: {
-        tenantId,
-        fromCurrency,
-        toCurrency,
-        rate: live,
-        date: new Date(),
-        createdBy: userId,
-      },
-    })
-
-    return live
-  } catch {
-    return null
-  }
-}
-
-async function rebaseTenantProductPrices(tenantId: string, multiplier: number): Promise<number> {
+async function rebaseTenantProductPrices(tenantId: string, multiplier: number, newBaseCurrency: string): Promise<number> {
   if (!Number.isFinite(multiplier) || multiplier <= 0) return 0
 
   const products = await prisma.product.findMany({
@@ -85,6 +54,9 @@ async function rebaseTenantProductPrices(tenantId: string, multiplier: number): 
       id: true,
       costPrice: true,
       sellingPrice: true,
+      originalCurrency: true,
+      originalCostPrice: true,
+      originalSellingPrice: true,
     },
   })
 
@@ -94,12 +66,19 @@ async function rebaseTenantProductPrices(tenantId: string, multiplier: number): 
     const nextCost = Math.round(Number(product.costPrice) * multiplier * 100) / 100
     const nextSelling = Math.round(Number(product.sellingPrice) * multiplier * 100) / 100
 
+    // When the new base currency matches the original entry currency the bracket
+    // display is redundant — clear the provenance fields so the list shows a clean price.
+    const clearOriginal = product.originalCurrency === newBaseCurrency
+
     try {
       await prisma.product.update({
         where: { id: product.id },
         data: {
           costPrice: nextCost,
           sellingPrice: nextSelling,
+          ...(clearOriginal
+            ? { originalCurrency: null, originalCostPrice: null, originalSellingPrice: null }
+            : {}),
         },
       })
     } catch (err) {
@@ -293,13 +272,58 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     let appliedFxRate: number | null = null
 
     if (data.baseCurrency && data.baseCurrency !== before.baseCurrency) {
-      const fxRate = await resolveSavedOrLiveFxRate(params.id, before.baseCurrency, data.baseCurrency, user.userId)
+      // Only saved rates are accepted — no live fallback.
+      const fxRate = await resolveSavedFxRate(params.id, before.baseCurrency, data.baseCurrency)
       if (!fxRate) {
         return apiError(
-          `Unable to resolve exchange rate for ${before.baseCurrency}/${data.baseCurrency}. Save it in Exchange Rate Settings before changing base currency.`,
+          `No saved exchange rate found for ${before.baseCurrency} → ${data.baseCurrency}. Please save the rate in Exchange Rate Settings before changing the base currency.`,
           422
         )
       }
+
+      // Ensure every product originalCurrency also has a saved rate with the new base.
+      const productOrigRows = await prisma.product.findMany({
+        where: {
+          tenantId: params.id,
+          archived: false,
+          originalCurrency: { not: null },
+          NOT: { originalCurrency: data.baseCurrency },
+        },
+        select: { originalCurrency: true },
+        distinct: ['originalCurrency'],
+      })
+
+      const missingPairs: string[] = []
+      for (const { originalCurrency } of productOrigRows) {
+        if (!originalCurrency) continue
+        const saved = await resolveSavedFxRate(params.id, data.baseCurrency, originalCurrency)
+        if (!saved) missingPairs.push(`${data.baseCurrency}/${originalCurrency}`)
+      }
+
+      // Also check every unique expense currency so rebasing won't silently skip records.
+      const expenseCurrencyRows = await prisma.expense.findMany({
+        where: {
+          tenantId: params.id,
+          archived: false,
+          NOT: { currency: data.baseCurrency },
+        },
+        select: { currency: true },
+        distinct: ['currency'],
+      })
+      for (const { currency } of expenseCurrencyRows) {
+        const key = `${data.baseCurrency}/${currency}`
+        if (missingPairs.includes(key)) continue
+        const saved = await resolveSavedFxRate(params.id, data.baseCurrency, currency)
+        if (!saved) missingPairs.push(key)
+      }
+
+      if (missingPairs.length > 0) {
+        return apiError(
+          `Cannot change base currency to ${data.baseCurrency}: no saved exchange rate for ${missingPairs.join(', ')}. Please save ${missingPairs.length === 1 ? 'this rate' : 'these rates'} in Exchange Rate Settings before proceeding.`,
+          422
+        )
+      }
+
       appliedFxRate = fxRate
     }
 
@@ -309,7 +333,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     })
 
     if (appliedFxRate) {
-      rebasedProducts = await rebaseTenantProductPrices(params.id, appliedFxRate)
+      rebasedProducts = await rebaseTenantProductPrices(params.id, appliedFxRate, tenant.baseCurrency)
       const rebasedTransactions = await rebaseTenantTransactionFxRates(
         params.id,
         before.baseCurrency,
@@ -421,10 +445,54 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       return NextResponse.json({ data: before })
     }
 
-    const fxRate = await resolveSavedOrLiveFxRate(params.id, before.baseCurrency, data.baseCurrency, user.userId)
+    // Only saved rates are accepted — no live fallback.
+    const fxRate = await resolveSavedFxRate(params.id, before.baseCurrency, data.baseCurrency)
     if (!fxRate) {
       return apiError(
-        `Unable to resolve exchange rate for ${before.baseCurrency}/${data.baseCurrency}. Save it in Exchange Rate Settings before changing base currency.`,
+        `No saved exchange rate found for ${before.baseCurrency} → ${data.baseCurrency}. Please save the rate in Exchange Rate Settings before changing the base currency.`,
+        422
+      )
+    }
+
+    // Ensure every product originalCurrency also has a saved rate with the new base.
+    const productOrigRows = await prisma.product.findMany({
+      where: {
+        tenantId: params.id,
+        archived: false,
+        originalCurrency: { not: null },
+        NOT: { originalCurrency: data.baseCurrency },
+      },
+      select: { originalCurrency: true },
+      distinct: ['originalCurrency'],
+    })
+
+    const missingPairs: string[] = []
+    for (const { originalCurrency } of productOrigRows) {
+      if (!originalCurrency) continue
+      const saved = await resolveSavedFxRate(params.id, data.baseCurrency, originalCurrency)
+      if (!saved) missingPairs.push(`${data.baseCurrency}/${originalCurrency}`)
+    }
+
+    // Also check every unique expense currency so rebasing won't silently skip records.
+    const expenseCurrencyRows = await prisma.expense.findMany({
+      where: {
+        tenantId: params.id,
+        archived: false,
+        NOT: { currency: data.baseCurrency },
+      },
+      select: { currency: true },
+      distinct: ['currency'],
+    })
+    for (const { currency } of expenseCurrencyRows) {
+      const key = `${data.baseCurrency}/${currency}`
+      if (missingPairs.includes(key)) continue
+      const saved = await resolveSavedFxRate(params.id, data.baseCurrency, currency)
+      if (!saved) missingPairs.push(key)
+    }
+
+    if (missingPairs.length > 0) {
+      return apiError(
+        `Cannot change base currency to ${data.baseCurrency}: no saved exchange rate for ${missingPairs.join(', ')}. Please save ${missingPairs.length === 1 ? 'this rate' : 'these rates'} in Exchange Rate Settings before proceeding.`,
         422
       )
     }
@@ -434,7 +502,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       data: { baseCurrency: data.baseCurrency, updatedBy: user.userId },
     })
 
-    const rebasedProducts = await rebaseTenantProductPrices(params.id, fxRate)
+    const rebasedProducts = await rebaseTenantProductPrices(params.id, fxRate, tenant.baseCurrency)
     const rebasedTransactions = await rebaseTenantTransactionFxRates(
       params.id,
       before.baseCurrency,
