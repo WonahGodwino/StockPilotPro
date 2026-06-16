@@ -329,9 +329,12 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between p-6 border-b">
-          <h2 className="text-lg font-semibold">{product ? 'Edit Product' : 'Add Product'}</h2>
+      <div className={`bg-white rounded-2xl shadow-2xl w-full max-h-[90vh] overflow-y-auto ${form.type === 'GOODS' ? 'max-w-2xl' : 'max-w-lg'}`}>
+        <div className="flex items-center justify-between px-6 py-4 border-b bg-gradient-to-r from-gray-50 to-white">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">{product ? 'Edit Product' : 'New Product'}</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Fill in the details below to {product ? 'update' : 'create'} a product record</p>
+          </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
             <X className="w-5 h-5" />
           </button>
