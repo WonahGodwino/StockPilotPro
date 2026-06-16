@@ -357,8 +357,8 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
         costPrice: baseCostPrice,
         sellingPrice: baseSellingPrice,
         originalCurrency: isConverting ? priceCurrency : undefined,
-        originalCostPrice: isConverting ? rawCostPrice : null,
-        originalSellingPrice: isConverting ? rawSellingPrice : null,
+        originalCostPrice: isConverting ? rawCostPrice : undefined,
+        originalSellingPrice: isConverting ? rawSellingPrice : undefined,
         salesUnits: salesUnits.length > 0 ? salesUnits : undefined,
         subsidiaryId: resolvedSubsidiaryId,
       }
