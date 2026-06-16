@@ -447,53 +447,74 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-gray-100 flex flex-col">
+    <div className="fixed inset-0 z-50 bg-gradient-to-br from-slate-50 via-gray-50 to-indigo-50 flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 bg-white border-b shadow-sm">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900">{product ? 'Edit Product' : 'New Product'}</h2>
-          <p className="text-xs text-gray-500 mt-0.5">{product ? 'Update' : 'Create'} product record and manage setup items</p>
+      <div className="flex items-center justify-between px-8 py-5 bg-white/95 backdrop-blur-sm border-b border-gray-200/80 shadow-sm">
+        <div className="flex items-center gap-4">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-md shadow-indigo-200">
+            <Package className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-900 tracking-tight">{product ? 'Edit Product' : 'New Product'}</h2>
+            <p className="text-sm text-gray-500 mt-0.5">{product ? 'Update product details' : 'Add a new product to your inventory'} and manage categories & brands</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={handleSubmit} disabled={loading} className="btn-primary">
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 hover:border-gray-300 transition-all duration-200 shadow-sm">
+            Cancel
+          </button>
+          <button type="button" onClick={handleSubmit} disabled={loading}
+            className="px-6 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl hover:from-indigo-700 hover:to-indigo-800 transition-all duration-200 shadow-md shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
             {product ? 'Save Changes' : 'Create Product'}
-          </button>
-          <button onClick={onClose} className="p-2 rounded-lg hover:bg-gray-100 text-gray-400">
-            <X className="w-5 h-5" />
           </button>
         </div>
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex border-b bg-white px-6 gap-1">
+      <div className="flex border-b border-gray-200/80 bg-white/90 backdrop-blur-sm px-8 gap-0">
         {(['details', 'categories', 'brands'] as const).map((tab) => (
           <button
             key={tab}
             type="button"
             onClick={() => setActiveTab(tab)}
-            className={`px-5 py-3 text-sm font-semibold border-b-2 transition-colors ${
+            className={`relative px-6 py-3.5 text-sm font-semibold transition-all duration-200 border-b-2 ${
               activeTab === tab
-                ? 'border-indigo-600 text-indigo-700 bg-indigo-50/50'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                ? 'border-indigo-600 text-indigo-700 bg-indigo-50/30'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 hover:bg-gray-50/50'
             }`}
           >
-            {tab === 'details' && '📋 Product Details'}
-            {tab === 'categories' && `📁 Categories (${categories.length})`}
-            {tab === 'brands' && `🏷 Brands (${brands.length})`}
+            <span className="flex items-center gap-2">
+              {tab === 'details' && <Package className="w-4 h-4" />}
+              {tab === 'categories' && <Tag className="w-4 h-4" />}
+              {tab === 'brands' && '🏷'}
+              {tab === 'details' && 'Product Details'}
+              {tab === 'categories' && 'Categories'}
+              {tab === 'brands' && 'Brands'}
+              {(tab === 'categories' || tab === 'brands') && (
+                <span className={`ml-1.5 inline-flex items-center justify-center min-w-[22px] h-5 px-1.5 rounded-full text-[11px] font-bold ${
+                  activeTab === tab ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'
+                }`}>
+                  {tab === 'categories' ? categories.length : brands.length}
+                </span>
+              )}
+            </span>
           </button>
         ))}
       </div>
 
       {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-8">
         {activeTab === 'details' && (
           <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-6">
             {/* Basic Info Section */}
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                <Package className="w-4 h-4 text-indigo-500" /> Basic Information
-              </h3>
+            <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
+                <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
+                  <Package className="w-4 h-4 text-indigo-600" />
+                </div>
+                <h3 className="text-base font-semibold text-gray-900">Basic Information</h3>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
@@ -532,47 +553,66 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
             </div>
 
             {/* Pricing Section */}
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                <Tag className="w-4 h-4 text-emerald-500" /> Pricing & Currency
-              </h3>
-              <div className="space-y-4">
+            <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center">
+                  <Tag className="w-4 h-4 text-emerald-600" />
+                </div>
+                <h3 className="text-base font-semibold text-gray-900">Pricing & Currency</h3>
+              </div>
+              <div className="space-y-5">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Price Currency</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Price Currency</label>
                   <select className="input" value={priceCurrency} onChange={(e) => handleCurrencyChange(e.target.value)}>
                     {SUPPORTED_CURRENCIES.map((c) => (
                       <option key={c.code} value={c.code}>{c.code} — {c.name}</option>
                     ))}
                   </select>
                   {isConverting && fxLoading && (
-                    <p className="mt-1 text-xs text-gray-400 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Loading exchange rate…</p>
+                    <p className="mt-1.5 text-xs text-gray-400 flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> Loading exchange rate…</p>
                   )}
-                  {isConverting && fxError && !fxLoading && <p className="mt-1 text-xs text-danger-600">{fxError}</p>}
+                  {isConverting && fxError && !fxLoading && <p className="mt-1.5 text-xs text-rose-600 font-medium">{fxError}</p>}
                   {isConverting && !fxError && !fxLoading && resolvedFxRate > 0 && (
-                    <p className="mt-1 text-xs text-gray-500">1 {priceCurrency} = {fmt(1 / resolvedFxRate)}</p>
+                    <p className="mt-1.5 text-xs text-gray-500 font-medium">1 {priceCurrency} = {fmt(1 / resolvedFxRate)}</p>
                   )}
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Cost Price *</label>
-                    <input className="input" type="number" step="0.01" min="0" value={rawCostPrice}
-                      onChange={(e) => { const v = parseFloat(e.target.value) || 0; setRawCostPrice(v); if (!isConverting) setForm({ ...form, costPrice: v }) }} required />
-                    {isConverting && !fxError && rawCostPrice > 0 && <p className="mt-1 text-xs text-gray-500">≈ {fmt(baseCostPrice)}</p>}
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Cost Price *</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">{priceCurrency === baseCurrency ? baseCurrency : priceCurrency}</span>
+                      <input className="input pl-16" type="number" step="0.01" min="0" value={rawCostPrice}
+                        onChange={(e) => { const v = parseFloat(e.target.value) || 0; setRawCostPrice(v); if (!isConverting) setForm({ ...form, costPrice: v }) }} required />
+                    </div>
+                    {isConverting && !fxError && rawCostPrice > 0 && <p className="mt-1.5 text-xs text-gray-500">≈ {fmt(baseCostPrice)}</p>}
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Selling Price *</label>
-                    <input className="input" type="number" step="0.01" min="0" value={rawSellingPrice}
-                      onChange={(e) => { const v = parseFloat(e.target.value) || 0; setRawSellingPrice(v); if (!isConverting) setForm({ ...form, sellingPrice: v }) }} required />
-                    {isConverting && !fxError && rawSellingPrice > 0 && <p className="mt-1 text-xs text-gray-500">≈ {fmt(baseSellingPrice)}</p>}
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Selling Price *</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">{priceCurrency === baseCurrency ? baseCurrency : priceCurrency}</span>
+                      <input className="input pl-16" type="number" step="0.01" min="0" value={rawSellingPrice}
+                        onChange={(e) => { const v = parseFloat(e.target.value) || 0; setRawSellingPrice(v); if (!isConverting) setForm({ ...form, sellingPrice: v }) }} required />
+                    </div>
+                    {isConverting && !fxError && rawSellingPrice > 0 && <p className="mt-1.5 text-xs text-gray-500">≈ {fmt(baseSellingPrice)}</p>}
                   </div>
                 </div>
                 {baseCostPrice > 0 && baseSellingPrice > 0 && (() => {
                   const marginPct = ((baseSellingPrice - baseCostPrice) / baseCostPrice) * 100
-                  const color = marginPct >= 30 ? 'text-emerald-600' : marginPct >= 15 ? 'text-amber-600' : 'text-rose-600'
+                  const bgColor = marginPct >= 30 ? 'bg-emerald-50 border-emerald-200' : marginPct >= 15 ? 'bg-amber-50 border-amber-200' : 'bg-rose-50 border-rose-200'
+                  const textColor = marginPct >= 30 ? 'text-emerald-700' : marginPct >= 15 ? 'text-amber-700' : 'text-rose-700'
+                  const profit = baseSellingPrice - baseCostPrice
                   return (
-                    <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
-                      <p className="text-xs text-gray-500">Margin</p>
-                      <p className={`text-lg font-bold ${color}`}>{fmt(baseSellingPrice - baseCostPrice)} ({marginPct.toFixed(1)}%)</p>
+                    <div className={`rounded-xl border ${bgColor} p-4`}>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1">Profit Margin</p>
+                          <p className={`text-xl font-bold ${textColor}`}>{fmt(profit)}</p>
+                        </div>
+                        <div className={`text-3xl font-bold ${textColor} tabular-nums`}>{marginPct.toFixed(1)}%</div>
+                      </div>
+                      <div className="mt-2 h-2 bg-white/60 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all duration-500 ${marginPct >= 30 ? 'bg-emerald-500' : marginPct >= 15 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ width: `${Math.min(100, Math.max(0, marginPct))}%` }} />
+                      </div>
                     </div>
                   )
                 })()}
@@ -580,33 +620,38 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
             </div>
 
             {/* Inventory Section */}
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h3 className="text-sm font-semibold text-gray-900 mb-4">📦 Inventory & Tracking</h3>
+            <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
+                <div className="w-8 h-8 rounded-lg bg-cyan-100 flex items-center justify-center">
+                  <Package className="w-4 h-4 text-cyan-600" />
+                </div>
+                <h3 className="text-base font-semibold text-gray-900">Inventory & Tracking</h3>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Quantity</label>
                   <input className="input" type="number" step="0.001" min="0" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: parseFloat(e.target.value) || 0 })} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Low Stock Alert</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Low Stock Alert</label>
                   <input className="input" type="number" step="1" min="0" value={form.lowStockThreshold} onChange={(e) => setForm({ ...form, lowStockThreshold: parseInt(e.target.value) || 0 })} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Date</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Purchase Date</label>
                   <input className="input" type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Barcode</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Barcode</label>
                   <input className="input" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} placeholder="Optional" />
                 </div>
                 {form.type === 'GOODS' && (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Expiry Date</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Expiry Date</label>
                     <input className="input" type="date" value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })} />
                   </div>
                 )}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Status</label>
                   <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as 'ACTIVE' | 'DRAFT' | 'ARCHIVED' })}>
                     <option value="ACTIVE">Active</option>
                     <option value="DRAFT">Draft</option>
@@ -617,19 +662,24 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
             </div>
 
             {/* Organization Section */}
-            <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h3 className="text-sm font-semibold text-gray-900 mb-4">🏢 Organization</h3>
+            <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
+                <div className="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center">
+                  <span className="text-lg">🏢</span>
+                </div>
+                <h3 className="text-base font-semibold text-gray-900">Organization</h3>
+              </div>
               <div className="grid grid-cols-1 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Subsidiary *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Subsidiary *</label>
                   <select className="input" value={form.subsidiaryId} onChange={(e) => setForm({ ...form, subsidiaryId: e.target.value })} disabled={isSalesperson} required>
                     {!isSalesperson && <option value="">Select a subsidiary</option>}
                     {subsidiaries.map((s) => (<option key={s.id} value={s.id}>{s.name}</option>))}
                   </select>
-                  {isSalesperson && <p className="mt-1 text-xs text-gray-500">Products are created under your assigned subsidiary.</p>}
+                  {isSalesperson && <p className="mt-1.5 text-xs text-gray-500">Products are created under your assigned subsidiary.</p>}
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Description</label>
                   <textarea className="input resize-none" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
                 </div>
               </div>
@@ -637,8 +687,13 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
 
             {/* Sales Units Section (GOODS only) */}
             {form.type === 'GOODS' && (
-              <div className="bg-white rounded-xl border border-gray-200 p-6">
-                <h3 className="text-sm font-semibold text-gray-900 mb-4">📐 Sales Units (Retail & Wholesale)</h3>
+              <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
+                <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
+                  <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center">
+                    <span className="text-lg">📐</span>
+                  </div>
+                  <h3 className="text-base font-semibold text-gray-900">Sales Units (Retail & Wholesale)</h3>
+                </div>
                 <SalesUnitsEditor value={salesUnits} baseUnit={form.unit} basePrice={baseSellingPrice} onChange={(units) => setSalesUnits(units)} />
               </div>
             )}
