@@ -41,13 +41,33 @@ function SalesUnitsEditor({
   basePrice: number
   onChange: (units: ProductSalesUnit[]) => void
 }) {
-  const addUnit = () => {
+  const retailUnit = value.find((u) => u.isRetail === true)
+  const wholesaleUnits = value.filter((u) => u.isRetail !== true)
+  const hasRetail = Boolean(retailUnit)
+
+  const addRetailUnit = () => {
+    if (hasRetail) return
     const newUnit: ProductSalesUnit = {
       id: generateSalesUnitId(),
       label: 'pcs',
       abbreviation: 'pcs',
       unitsPerBase: 1,
       sellingPrice: basePrice,
+      isRetail: true,
+    }
+    onChange([newUnit, ...value])
+  }
+
+  const addWholesaleUnit = () => {
+    const retailUnitsPerWholesale = 12
+    const newUnit: ProductSalesUnit = {
+      id: generateSalesUnitId(),
+      label: 'carton',
+      abbreviation: 'ctn',
+      unitsPerBase: retailUnitsPerWholesale,
+      sellingPrice: Number((basePrice * retailUnitsPerWholesale * 0.9).toFixed(2)),
+      isRetail: false,
+      retailUnitsPerWholesale,
     }
     onChange([...value, newUnit])
   }
@@ -68,13 +88,14 @@ function SalesUnitsEditor({
       label: newLabel as SalesUnitLabel,
       abbreviation: preset?.abbreviation || unit.abbreviation,
     }
-    if (newLabel !== 'custom') {
+    if (newLabel !== 'custom' && unit.isRetail !== true) {
       const defaultMultipliers: Partial<Record<SalesUnitLabel, number>> = {
         carton: 12, packet: 1, bag: 50, box: 24, dozen: 12, kg: 1, litre: 1, pcs: 1,
       }
       const multiplier = defaultMultipliers[newLabel as SalesUnitLabel] || 1
       patch.unitsPerBase = multiplier
-      patch.sellingPrice = Number((basePrice * multiplier).toFixed(2))
+      patch.retailUnitsPerWholesale = multiplier
+      patch.sellingPrice = Number((basePrice * multiplier * 0.9).toFixed(2))
     }
     onChange(value.map((u) => (u.id === id ? { ...u, ...patch } : u)))
   }
@@ -157,16 +178,47 @@ function SalesUnitsEditor({
           </div>
         )
       })}
-      <button
-        type="button"
-        className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-indigo-300 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-100 transition-colors"
-        onClick={addUnit}
-      >
-        <Plus className="w-4 h-4" /> Add Sales Unit
-      </button>
+      <div className="flex flex-wrap gap-2">
+        {!hasRetail && (
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition-colors"
+            onClick={addRetailUnit}
+          >
+            <Plus className="w-4 h-4" /> Add Retail Unit
+          </button>
+        )}
+        <button
+          type="button"
+          className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-sky-300 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100 transition-colors"
+          onClick={addWholesaleUnit}
+        >
+          <Plus className="w-4 h-4" /> Add Wholesale Unit
+        </button>
+      </div>
+
+      {hasRetail && wholesaleUnits.length > 0 && (() => {
+        const wholesaleDiscount = wholesaleUnits.map((wu) => {
+          const expectedRetailTotal = basePrice * (wu.retailUnitsPerWholesale || wu.unitsPerBase)
+          const actualWholesalePrice = wu.sellingPrice
+          const discountPct = expectedRetailTotal > 0 ? ((expectedRetailTotal - actualWholesalePrice) / expectedRetailTotal) * 100 : 0
+          return { id: wu.id, discountPct }
+        })
+        return (
+          <div className="mt-2 rounded-md border border-sky-100 bg-sky-50 p-2 text-[10px]">
+            <p className="font-semibold text-sky-700 mb-1">Wholesale Discount Summary</p>
+            {wholesaleDiscount.map((wd) => (
+              <p key={wd.id} className="text-sky-800">
+                Wholesale discount: <strong>{wd.discountPct.toFixed(0)}%</strong> off equivalent retail price
+              </p>
+            ))}
+          </div>
+        )
+      })()}
+
       {value.length > 0 && (
-        <p className="text-[10px] text-gray-400">
-          Base unit: <strong>{baseUnit}</strong>. Inventory is tracked in base units. Sales automatically convert from bundle sizes.
+        <p className="text-[10px] text-gray-400 mt-1">
+          Base unit: <strong>{baseUnit}</strong>. Inventory tracked in base units. Retail is the smallest saleable unit; wholesale bundles multiple retail units with a volume discount.
         </p>
       )}
     </div>

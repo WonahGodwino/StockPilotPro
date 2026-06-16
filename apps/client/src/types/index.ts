@@ -34,6 +34,8 @@ export interface ProductSalesUnit {
   unitsPerBase: number
   sellingPrice: number
   internalDescription?: string
+  isRetail?: boolean
+  retailUnitsPerWholesale?: number
 }
 
 export interface Product {
