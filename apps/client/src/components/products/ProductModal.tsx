@@ -529,21 +529,57 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                  <select className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-                    <option value="Uncategorized">Uncategorized</option>
+                  <div className="relative">
+                    <input
+                      className="input pr-8"
+                      list="category-options"
+                      value={form.category}
+                      onChange={(e) => setForm({ ...form, category: e.target.value })}
+                      placeholder="Search or select..."
+                    />
+                    {form.category && form.category !== 'Uncategorized' && (
+                      <button
+                        type="button"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                        onClick={() => setForm({ ...form, category: 'Uncategorized' })}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <datalist id="category-options">
+                    <option value="Uncategorized" />
                     {categories.map((cat) => (
-                      <option key={cat.id} value={cat.name}>{cat.name}</option>
+                      <option key={cat.id} value={cat.name} />
                     ))}
-                  </select>
+                  </datalist>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
-                  <select className="input" value={brand} onChange={(e) => setBrand(e.target.value)}>
-                    <option value="">No brand</option>
+                  <div className="relative">
+                    <input
+                      className="input pr-8"
+                      list="brand-options"
+                      value={brand}
+                      onChange={(e) => setBrand(e.target.value)}
+                      placeholder="Search or select..."
+                    />
+                    {brand && (
+                      <button
+                        type="button"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                        onClick={() => setBrand('')}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <datalist id="brand-options">
+                    <option value="" />
                     {brands.map((b) => (
-                      <option key={b.id} value={b.name}>{b.name}</option>
+                      <option key={b.id} value={b.name} />
                     ))}
-                  </select>
+                  </datalist>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
