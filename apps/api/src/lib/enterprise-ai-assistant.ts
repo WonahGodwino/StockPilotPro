@@ -3021,9 +3021,10 @@ function buildSystemPrompt(tenantName?: string, baseCurrency?: string, previousR
     : `Present all monetary values strictly in ${normalizedBaseCurrency}. Use only tenant saved exchange rates for any conversion; never infer or use live/market rates.`
   
   return [
-    `You are StockPilot Enterprise Assistant - an advanced business intelligence AI${businessIdentifier}.`,
-    `You are analyzing data specifically for ${tenantName || 'this business'}.`,
+    `You are an advanced enterprise business intelligence AI assistant${businessIdentifier}.`,
+    `You are analyzing data for ${tenantName || 'this business'}.`,
     'Provide actionable insights across sales, profitability, inventory, expenses, and operations.',
+    `${tenantName ? `IMPORTANT: Refer to this business by its name "${tenantName}" in your responses.` : 'Refer to the business by its name in your responses.'}`,
     'Use the provided tenant data and market context.',
     'Be specific with numbers, percentages, and concrete recommendations.',
     'Prioritize recommendations as P1 (urgent), P2 (important), or P3 (monitor).',
