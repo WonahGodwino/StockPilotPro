@@ -390,222 +390,317 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
     }
   }
 
+  const [activeTab, setActiveTab] = useState<'details' | 'categories' | 'brands'>('details')
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [newBrandName, setNewBrandName] = useState('')
+  const [brands, setBrands] = useState<Array<{ id: string; name: string }>>([])
+  const [setupSaving, setSetupSaving] = useState(false)
+
+  const loadCategories = () => {
+    let cancelled = false
+    api.get('/product-setup').then(({ data }) => {
+      if (!cancelled) setCategories(data.data || [])
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }
+
+  const loadBrands = () => {
+    let cancelled = false
+    api.get('/product-setup?type=brands').then(({ data }) => {
+      if (!cancelled) setBrands(data.data || [])
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }
+
+  useEffect(() => {
+    const cancelCategories = loadCategories()
+    const cancelBrands = loadBrands()
+    return () => { cancelCategories(); cancelBrands() }
+  }, [])
+
+  const addCategory = async () => {
+    const name = newCategoryName.trim()
+    if (!name) return
+    setSetupSaving(true)
+    try {
+      await api.post('/product-setup', { name, type: 'category' })
+      toast.success(`Category "${name}" added`)
+      setNewCategoryName('')
+      loadCategories()
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, 'Failed to add category'))
+    } finally { setSetupSaving(false) }
+  }
+
+  const addBrand = async () => {
+    const name = newBrandName.trim()
+    if (!name) return
+    setSetupSaving(true)
+    try {
+      await api.post('/product-setup', { name, type: 'brand' })
+      toast.success(`Brand "${name}" added`)
+      setNewBrandName('')
+      loadBrands()
+    } catch (err: unknown) {
+      toast.error(getApiErrorMessage(err, 'Failed to add brand'))
+    } finally { setSetupSaving(false) }
+  }
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className={`bg-white rounded-2xl shadow-2xl w-full max-h-[90vh] overflow-y-auto ${form.type === 'GOODS' ? 'max-w-2xl' : 'max-w-lg'}`}>
-        <div className="flex items-center justify-between px-6 py-4 border-b bg-gradient-to-r from-gray-50 to-white">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">{product ? 'Edit Product' : 'New Product'}</h2>
-            <p className="text-xs text-gray-500 mt-0.5">Fill in the details below to {product ? 'update' : 'create'} a product record</p>
-          </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400">
+    <div className="fixed inset-0 z-50 bg-gray-100 flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 bg-white border-b shadow-sm">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">{product ? 'Edit Product' : 'New Product'}</h2>
+          <p className="text-xs text-gray-500 mt-0.5">{product ? 'Update' : 'Create'} product record and manage setup items</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={handleSubmit} disabled={loading} className="btn-primary">
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+            {product ? 'Save Changes' : 'Create Product'}
+          </button>
+          <button onClick={onClose} className="p-2 rounded-lg hover:bg-gray-100 text-gray-400">
             <X className="w-5 h-5" />
           </button>
         </div>
+      </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-              <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-              <select className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as 'GOODS' | 'SERVICE' })}>
-                <option value="GOODS">Goods</option>
-                <option value="SERVICE">Service</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-              <select
-                className="input"
-                value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
-              >
-                <option value="Uncategorized">Uncategorized</option>
-                {categories.map((cat) => (
-                  <option key={cat.id} value={cat.name}>{cat.name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
-              <input className="input" value={brand} placeholder="e.g. Coca-Cola" onChange={(e) => setBrand(e.target.value)} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
-              <input className="input" value={form.unit} placeholder="pcs, kg, hr..." onChange={(e) => setForm({ ...form, unit: e.target.value })} />
-            </div>
+      {/* Tab Navigation */}
+      <div className="flex border-b bg-white px-6 gap-1">
+        {(['details', 'categories', 'brands'] as const).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            onClick={() => setActiveTab(tab)}
+            className={`px-5 py-3 text-sm font-semibold border-b-2 transition-colors ${
+              activeTab === tab
+                ? 'border-indigo-600 text-indigo-700 bg-indigo-50/50'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            {tab === 'details' && '📋 Product Details'}
+            {tab === 'categories' && `📁 Categories (${categories.length})`}
+            {tab === 'brands' && `🏷 Brands (${brands.length})`}
+          </button>
+        ))}
+      </div>
 
-            {/* ── Price Currency Selector ── */}
-            <div className="col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Price Currency</label>
-              <select
-                className="input"
-                value={priceCurrency}
-                onChange={(e) => handleCurrencyChange(e.target.value)}
-              >
-                {SUPPORTED_CURRENCIES.map((c) => (
-                  <option key={c.code} value={c.code}>{c.code} — {c.name}</option>
-                ))}
-              </select>
-              {isConverting && fxLoading && (
-                <p className="mt-1 text-xs text-gray-400 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Loading exchange rate…</p>
-              )}
-              {isConverting && fxError && !fxLoading && (
-                <p className="mt-1 text-xs text-danger-600">{fxError}</p>
-              )}
-              {isConverting && !fxError && !fxLoading && resolvedFxRate > 0 && (
-                <p className="mt-1 text-xs text-gray-500">
-                  1 {priceCurrency} = {fmt(1 / resolvedFxRate)}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Cost Price *</label>
-              <input
-                className="input"
-                type="number"
-                step="0.01"
-                min="0"
-                value={rawCostPrice}
-                onChange={(e) => {
-                  const v = parseFloat(e.target.value) || 0
-                  setRawCostPrice(v)
-                  if (!isConverting) setForm({ ...form, costPrice: v })
-                }}
-                required
-              />
-              {isConverting && !fxError && rawCostPrice > 0 && (
-                <p className="mt-1 text-xs text-gray-500">
-                  ≈ {fmt(baseCostPrice)}
-                </p>
-              )}
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Selling Price *</label>
-              <input
-                className="input"
-                type="number"
-                step="0.01"
-                min="0"
-                value={rawSellingPrice}
-                onChange={(e) => {
-                  const v = parseFloat(e.target.value) || 0
-                  setRawSellingPrice(v)
-                  if (!isConverting) setForm({ ...form, sellingPrice: v })
-                }}
-                required
-              />
-              {isConverting && !fxError && rawSellingPrice > 0 && (
-                <p className="mt-1 text-xs text-gray-500">
-                  ≈ {fmt(baseSellingPrice)}
-                </p>
-              )}
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
-              <input className="input" type="number" step="0.001" min="0" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: parseFloat(e.target.value) || 0 })} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Date</label>
-              <input className="input" type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Low Stock Alert</label>
-              <input className="input" type="number" step="1" min="0" value={form.lowStockThreshold} onChange={(e) => setForm({ ...form, lowStockThreshold: parseInt(e.target.value) || 0 })} />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Barcode</label>
-              <input className="input" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} placeholder="Optional" />
-            </div>
-            {form.type === 'GOODS' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Expiry Date (Optional)</label>
-                <input className="input" type="date" value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })} />
+      {/* Tab Content */}
+      <div className="flex-1 overflow-y-auto p-6">
+        {activeTab === 'details' && (
+          <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-6">
+            {/* Basic Info Section */}
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
+              <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <Package className="w-4 h-4 text-indigo-500" /> Basic Information
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                  <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                  <select className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as 'GOODS' | 'SERVICE' })}>
+                    <option value="GOODS">Goods</option>
+                    <option value="SERVICE">Service</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
+                  <select className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+                    <option value="Uncategorized">Uncategorized</option>
+                    {categories.map((cat) => (
+                      <option key={cat.id} value={cat.name}>{cat.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
+                  <select className="input" value={brand} onChange={(e) => setBrand(e.target.value)}>
+                    <option value="">No brand</option>
+                    {brands.map((b) => (
+                      <option key={b.id} value={b.name}>{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
+                  <input className="input" value={form.unit} placeholder="pcs, kg, hr..." onChange={(e) => setForm({ ...form, unit: e.target.value })} />
+                </div>
               </div>
-            )}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-              <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as 'ACTIVE' | 'DRAFT' | 'ARCHIVED' })}>
-                <option value="ACTIVE">Active</option>
-                <option value="DRAFT">Draft</option>
-                <option value="ARCHIVED">Archived</option>
-              </select>
-            </div>
-            <div className="col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Subsidiary *</label>
-              <select
-                className="input"
-                value={form.subsidiaryId}
-                onChange={(e) => setForm({ ...form, subsidiaryId: e.target.value })}
-                disabled={isSalesperson}
-                required
-              >
-                {!isSalesperson && <option value="">Select a subsidiary</option>}
-                {subsidiaries.map((subsidiary) => (
-                  <option key={subsidiary.id} value={subsidiary.id}>{subsidiary.name}</option>
-                ))}
-              </select>
-              {isSalesperson && (
-                <p className="mt-1 text-xs text-gray-500">Products are created under your assigned subsidiary.</p>
-              )}
-            </div>
-            <div className="col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-              <textarea className="input resize-none" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
             </div>
 
-            {/* ── Multi-Unit Sales Configuration ── */}
-            {form.type === 'GOODS' && (
-              <div className="col-span-2 rounded-lg border border-gray-200 bg-gray-50 p-4">
-                <div className="flex items-center justify-between mb-3">
+            {/* Pricing Section */}
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
+              <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <Tag className="w-4 h-4 text-emerald-500" /> Pricing & Currency
+              </h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Price Currency</label>
+                  <select className="input" value={priceCurrency} onChange={(e) => handleCurrencyChange(e.target.value)}>
+                    {SUPPORTED_CURRENCIES.map((c) => (
+                      <option key={c.code} value={c.code}>{c.code} — {c.name}</option>
+                    ))}
+                  </select>
+                  {isConverting && fxLoading && (
+                    <p className="mt-1 text-xs text-gray-400 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Loading exchange rate…</p>
+                  )}
+                  {isConverting && fxError && !fxLoading && <p className="mt-1 text-xs text-danger-600">{fxError}</p>}
+                  {isConverting && !fxError && !fxLoading && resolvedFxRate > 0 && (
+                    <p className="mt-1 text-xs text-gray-500">1 {priceCurrency} = {fmt(1 / resolvedFxRate)}</p>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <p className="text-sm font-semibold text-gray-700">Sales Units</p>
-                    <p className="text-xs text-gray-500 mt-0.5">Define how this product is sold in different bundle sizes (e.g. carton, packet, bag)</p>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Cost Price *</label>
+                    <input className="input" type="number" step="0.01" min="0" value={rawCostPrice}
+                      onChange={(e) => { const v = parseFloat(e.target.value) || 0; setRawCostPrice(v); if (!isConverting) setForm({ ...form, costPrice: v }) }} required />
+                    {isConverting && !fxError && rawCostPrice > 0 && <p className="mt-1 text-xs text-gray-500">≈ {fmt(baseCostPrice)}</p>}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Selling Price *</label>
+                    <input className="input" type="number" step="0.01" min="0" value={rawSellingPrice}
+                      onChange={(e) => { const v = parseFloat(e.target.value) || 0; setRawSellingPrice(v); if (!isConverting) setForm({ ...form, sellingPrice: v }) }} required />
+                    {isConverting && !fxError && rawSellingPrice > 0 && <p className="mt-1 text-xs text-gray-500">≈ {fmt(baseSellingPrice)}</p>}
                   </div>
                 </div>
+                {baseCostPrice > 0 && baseSellingPrice > 0 && (() => {
+                  const marginPct = ((baseSellingPrice - baseCostPrice) / baseCostPrice) * 100
+                  const color = marginPct >= 30 ? 'text-emerald-600' : marginPct >= 15 ? 'text-amber-600' : 'text-rose-600'
+                  return (
+                    <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                      <p className="text-xs text-gray-500">Margin</p>
+                      <p className={`text-lg font-bold ${color}`}>{fmt(baseSellingPrice - baseCostPrice)} ({marginPct.toFixed(1)}%)</p>
+                    </div>
+                  )
+                })()}
+              </div>
+            </div>
 
-                <SalesUnitsEditor
-                  value={salesUnits}
-                  baseUnit={form.unit}
-                  basePrice={baseSellingPrice}
-                  onChange={(units) => setSalesUnits(units)}
-                />
+            {/* Inventory Section */}
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
+              <h3 className="text-sm font-semibold text-gray-900 mb-4">📦 Inventory & Tracking</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+                  <input className="input" type="number" step="0.001" min="0" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: parseFloat(e.target.value) || 0 })} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Low Stock Alert</label>
+                  <input className="input" type="number" step="1" min="0" value={form.lowStockThreshold} onChange={(e) => setForm({ ...form, lowStockThreshold: parseInt(e.target.value) || 0 })} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Date</label>
+                  <input className="input" type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Barcode</label>
+                  <input className="input" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} placeholder="Optional" />
+                </div>
+                {form.type === 'GOODS' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Expiry Date</label>
+                    <input className="input" type="date" value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })} />
+                  </div>
+                )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                  <select className="input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as 'ACTIVE' | 'DRAFT' | 'ARCHIVED' })}>
+                    <option value="ACTIVE">Active</option>
+                    <option value="DRAFT">Draft</option>
+                    <option value="ARCHIVED">Archived</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Organization Section */}
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
+              <h3 className="text-sm font-semibold text-gray-900 mb-4">🏢 Organization</h3>
+              <div className="grid grid-cols-1 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Subsidiary *</label>
+                  <select className="input" value={form.subsidiaryId} onChange={(e) => setForm({ ...form, subsidiaryId: e.target.value })} disabled={isSalesperson} required>
+                    {!isSalesperson && <option value="">Select a subsidiary</option>}
+                    {subsidiaries.map((s) => (<option key={s.id} value={s.id}>{s.name}</option>))}
+                  </select>
+                  {isSalesperson && <p className="mt-1 text-xs text-gray-500">Products are created under your assigned subsidiary.</p>}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                  <textarea className="input resize-none" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+                </div>
+              </div>
+            </div>
+
+            {/* Sales Units Section (GOODS only) */}
+            {form.type === 'GOODS' && (
+              <div className="bg-white rounded-xl border border-gray-200 p-6">
+                <h3 className="text-sm font-semibold text-gray-900 mb-4">📐 Sales Units (Retail & Wholesale)</h3>
+                <SalesUnitsEditor value={salesUnits} baseUnit={form.unit} basePrice={baseSellingPrice} onChange={(units) => setSalesUnits(units)} />
               </div>
             )}
-          </div>
 
-          {/* Margin indicator */}
-          {baseCostPrice > 0 && baseSellingPrice > 0 && (() => {
-            const marginPct = ((baseSellingPrice - baseCostPrice) / baseCostPrice) * 100
-            const color = marginPct >= 30 ? 'text-success-600' : marginPct >= 15 ? 'text-warning-600' : 'text-danger-600'
-            const profit = baseSellingPrice - baseCostPrice
-            return (
-              <div className="bg-gray-50 rounded-lg p-3 text-sm">
-                <span className="text-gray-500">Margin: </span>
-                <span className={`font-semibold ${color}`}>
-                  {fmt(profit)} ({marginPct.toFixed(1)}%)
-                </span>
-                {isConverting && rawCostPrice > 0 && rawSellingPrice > 0 && (
-                  <span className="ml-2 text-gray-400 text-xs">
-                    ({makeCurrencyFormatter(priceCurrency)(rawSellingPrice - rawCostPrice)})
-                  </span>
+            {/* Hidden submit for the form */}
+            <button type="submit" className="hidden" />
+          </form>
+        )}
+
+        {activeTab === 'categories' && (
+          <div className="max-w-2xl mx-auto space-y-6">
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
+              <h3 className="text-sm font-semibold text-gray-900 mb-4">📁 Product Categories</h3>
+              <p className="text-xs text-gray-500 mb-4">Manage categories for organizing your products. Each business manages its own categories.</p>
+              <div className="flex gap-2 mb-4">
+                <input className="input flex-1" value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)}
+                  placeholder="Enter category name..." onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void addCategory() } }} />
+                <button type="button" className="btn-primary" onClick={() => { void addCategory() }} disabled={setupSaving || !newCategoryName.trim()}>
+                  <Plus className="w-4 h-4" /> Add
+                </button>
+              </div>
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {categories.length === 0 ? (
+                  <p className="text-sm text-gray-400 italic">No categories yet. Add your first category above.</p>
+                ) : (
+                  categories.map((cat) => (
+                    <div key={cat.id} className="flex items-center justify-between rounded-md border border-gray-100 bg-gray-50 px-4 py-2.5">
+                      <span className="text-sm font-medium text-gray-700">{cat.name}</span>
+                    </div>
+                  ))
                 )}
               </div>
-            )
-          })()}
-
-          <div className="flex gap-3 pt-2">
-            <button type="button" onClick={onClose} className="btn-secondary flex-1">Cancel</button>
-            <button type="submit" disabled={loading} className="btn-primary flex-1">
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-              {product ? 'Save Changes' : 'Create Product'}
-            </button>
+            </div>
           </div>
-        </form>
+        )}
+
+        {activeTab === 'brands' && (
+          <div className="max-w-2xl mx-auto space-y-6">
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
+              <h3 className="text-sm font-semibold text-gray-900 mb-4">🏷 Product Brands</h3>
+              <p className="text-xs text-gray-500 mb-4">Manage brands for your products. Each business manages its own brands independently.</p>
+              <div className="flex gap-2 mb-4">
+                <input className="input flex-1" value={newBrandName} onChange={(e) => setNewBrandName(e.target.value)}
+                  placeholder="Enter brand name..." onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void addBrand() } }} />
+                <button type="button" className="btn-primary" onClick={() => { void addBrand() }} disabled={setupSaving || !newBrandName.trim()}>
+                  <Plus className="w-4 h-4" /> Add
+                </button>
+              </div>
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {brands.length === 0 ? (
+                  <p className="text-sm text-gray-400 italic">No brands yet. Add your first brand above.</p>
+                ) : (
+                  brands.map((b) => (
+                    <div key={b.id} className="flex items-center justify-between rounded-md border border-gray-100 bg-gray-50 px-4 py-2.5">
+                      <span className="text-sm font-medium text-gray-700">{b.name}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
