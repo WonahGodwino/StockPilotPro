@@ -6,7 +6,7 @@ import { useAuthStore } from '@/store/auth.store'
 import { useAppStore } from '@/store/app.store'
 import { getApiErrorMessage } from '@/lib/apiError'
 import { makeCurrencyFormatter, SUPPORTED_CURRENCIES } from '@/lib/currency'
-import { X, Loader2, Plus, Trash2, Tag, Package, Check, ChevronDown } from 'lucide-react'
+import { X, Loader2, Plus, Trash2, Tag, Package, Check, ChevronDown, Minus } from 'lucide-react'
 
 interface Props {
   product: Product | null
@@ -221,6 +221,83 @@ function SalesUnitsEditor({
           Base unit: <strong>{baseUnit}</strong>. Inventory tracked in base units. Retail is the smallest saleable unit; wholesale bundles multiple retail units with a volume discount.
         </p>
       )}
+    </div>
+  )
+}
+
+function NumberInput({
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+  required = false,
+  disabled = false,
+  precision = 2,
+  placeholder,
+}: {
+  value: number
+  onChange: (val: number) => void
+  min?: number
+  max?: number
+  step?: number
+  required?: boolean
+  disabled?: boolean
+  precision?: number
+  placeholder?: string
+}) {
+  const increment = () => {
+    const next = parseFloat((value + step).toFixed(precision))
+    if (max !== undefined && next > max) return
+    onChange(next)
+  }
+
+  const decrement = () => {
+    const next = parseFloat((value - step).toFixed(precision))
+    if (min !== undefined && next < min) return
+    onChange(Math.max(0, next))
+  }
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const parsed = parseFloat(e.target.value)
+    if (!Number.isNaN(parsed)) {
+      const clamped = min !== undefined ? Math.max(min, parsed) : parsed
+      onChange(max !== undefined ? Math.min(max, clamped) : clamped)
+    } else if (e.target.value === '' || e.target.value === '-') {
+      onChange(0)
+    }
+  }
+
+  return (
+    <div className="flex">
+      <button
+        type="button"
+        disabled={disabled || (min !== undefined && value <= min)}
+        className="flex-shrink-0 w-9 flex items-center justify-center rounded-l-lg border border-r-0 border-gray-300 bg-gray-50 text-gray-500 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        onClick={decrement}
+      >
+        <Minus className="w-3.5 h-3.5" />
+      </button>
+      <input
+        className="input rounded-none text-center"
+        type="number"
+        step={step}
+        min={min}
+        max={max}
+        value={value}
+        onChange={handleChange}
+        required={required}
+        disabled={disabled}
+        placeholder={placeholder}
+      />
+      <button
+        type="button"
+        disabled={disabled || (max !== undefined && value >= max)}
+        className="flex-shrink-0 w-9 flex items-center justify-center rounded-r-lg border border-l-0 border-gray-300 bg-gray-50 text-gray-500 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        onClick={increment}
+      >
+        <Plus className="w-3.5 h-3.5" />
+      </button>
     </div>
   )
 }
@@ -769,11 +846,23 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Quantity</label>
-                  <input className="input" type="number" step="0.001" min="0" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: parseFloat(e.target.value) || 0 })} />
+                  <NumberInput
+                    value={form.quantity}
+                    onChange={(v) => setForm({ ...form, quantity: v })}
+                    min={0}
+                    step={0.1}
+                    precision={3}
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Low Stock Alert</label>
-                  <input className="input" type="number" step="1" min="0" value={form.lowStockThreshold} onChange={(e) => setForm({ ...form, lowStockThreshold: parseInt(e.target.value) || 0 })} />
+                  <NumberInput
+                    value={form.lowStockThreshold}
+                    onChange={(v) => setForm({ ...form, lowStockThreshold: v })}
+                    min={0}
+                    step={1}
+                    precision={0}
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Purchase Date</label>
