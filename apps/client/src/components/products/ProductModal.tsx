@@ -304,11 +304,10 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
         ...form,
         costPrice: baseCostPrice,
         sellingPrice: baseSellingPrice,
-        // Persist original-entry currency provenance so the list can always
-        // show the entered price alongside the current base-currency equivalent.
         originalCurrency: isConverting ? priceCurrency : undefined,
         originalCostPrice: isConverting ? rawCostPrice : null,
         originalSellingPrice: isConverting ? rawSellingPrice : null,
+        salesUnits: salesUnits.length > 0 ? salesUnits : undefined,
         subsidiaryId: resolvedSubsidiaryId,
       }
 
@@ -491,7 +490,7 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
                 </div>
 
                 <SalesUnitsEditor
-                  value={product?.salesUnits || []}
+                  value={salesUnits}
                   baseUnit={form.unit}
                   basePrice={baseSellingPrice}
                   onChange={(units) => setSalesUnits(units)}
