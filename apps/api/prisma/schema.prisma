@@ -450,6 +450,7 @@ model Product {
   originalCurrency       String?
   originalCostPrice      Decimal?      @db.Decimal(12, 2)
   originalSellingPrice   Decimal?      @db.Decimal(12, 2)
+  salesUnits           Json?         @default("[]")
   barcode             String?
   lowStockThreshold   Decimal       @db.Decimal(12, 3) @default(10)
   purchaseDate        DateTime?

@@ -1,17 +1,176 @@
 import { useEffect, useState } from 'react'
 import api from '@/lib/api'
-import type { Product } from '@/types'
+import type { Product, ProductSalesUnit, SalesUnitLabel } from '@/types'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/auth.store'
 import { useAppStore } from '@/store/app.store'
 import { getApiErrorMessage } from '@/lib/apiError'
 import { makeCurrencyFormatter, SUPPORTED_CURRENCIES } from '@/lib/currency'
-import { X, Loader2 } from 'lucide-react'
+import { X, Loader2, Plus, Trash2 } from 'lucide-react'
 
 interface Props {
   product: Product | null
   onClose: () => void
   onSaved: () => void
+}
+
+const SALES_UNIT_PRESETS: Array<{ label: SalesUnitLabel; abbreviation: string; description: string }> = [
+  { label: 'pcs', abbreviation: 'pcs', description: 'Single piece / unit' },
+  { label: 'carton', abbreviation: 'ctn', description: 'Carton (e.g. 12 pcs)' },
+  { label: 'packet', abbreviation: 'pkt', description: 'Packet / sachet' },
+  { label: 'bag', abbreviation: 'bag', description: 'Bag (e.g. 50 kg)' },
+  { label: 'box', abbreviation: 'box', description: 'Box' },
+  { label: 'dozen', abbreviation: 'doz', description: 'Dozen (12 pcs)' },
+  { label: 'kg', abbreviation: 'kg', description: 'Kilogram' },
+  { label: 'litre', abbreviation: 'L', description: 'Litre' },
+  { label: 'custom', abbreviation: 'unit', description: 'Custom unit' },
+]
+
+function generateSalesUnitId(): string {
+  return `su_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+}
+
+function SalesUnitsEditor({
+  value,
+  baseUnit,
+  basePrice,
+  onChange,
+}: {
+  value: ProductSalesUnit[]
+  baseUnit: string
+  basePrice: number
+  onChange: (units: ProductSalesUnit[]) => void
+}) {
+  const addUnit = () => {
+    const newUnit: ProductSalesUnit = {
+      id: generateSalesUnitId(),
+      label: 'pcs',
+      abbreviation: 'pcs',
+      unitsPerBase: 1,
+      sellingPrice: basePrice,
+    }
+    onChange([...value, newUnit])
+  }
+
+  const removeUnit = (id: string) => {
+    onChange(value.filter((unit) => unit.id !== id))
+  }
+
+  const updateUnit = (id: string, patch: Partial<ProductSalesUnit>) => {
+    onChange(value.map((unit) => (unit.id === id ? { ...unit, ...patch } : unit)))
+  }
+
+  const handleLabelChange = (id: string, newLabel: SalesUnitLabel | string) => {
+    const unit = value.find((u) => u.id === id)
+    if (!unit) return
+    const preset = SALES_UNIT_PRESETS.find((p) => p.label === newLabel)
+    const patch: Partial<ProductSalesUnit> = {
+      label: newLabel as SalesUnitLabel,
+      abbreviation: preset?.abbreviation || unit.abbreviation,
+    }
+    if (newLabel !== 'custom') {
+      const defaultMultipliers: Partial<Record<SalesUnitLabel, number>> = {
+        carton: 12, packet: 1, bag: 50, box: 24, dozen: 12, kg: 1, litre: 1, pcs: 1,
+      }
+      const multiplier = defaultMultipliers[newLabel as SalesUnitLabel] || 1
+      patch.unitsPerBase = multiplier
+      patch.sellingPrice = Number((basePrice * multiplier).toFixed(2))
+    }
+    onChange(value.map((u) => (u.id === id ? { ...u, ...patch } : u)))
+  }
+
+  return (
+    <div className="space-y-3">
+      {value.length === 0 && (
+        <p className="text-xs text-gray-400 italic">No sales units defined. Add units below to enable selling in different bundle sizes.</p>
+      )}
+      {value.map((unit) => {
+        const isCustom = unit.label === 'custom' || !SALES_UNIT_PRESETS.some((p) => p.label === unit.label)
+        return (
+          <div key={unit.id} className="flex flex-wrap items-end gap-2 rounded-md border border-gray-200 bg-white p-3">
+            <div className="min-w-[100px]">
+              <label className="block text-[10px] font-semibold uppercase text-gray-500">Unit</label>
+              <select
+                className="input mt-0.5 text-xs"
+                value={isCustom ? 'custom' : unit.label}
+                onChange={(e) => handleLabelChange(unit.id, e.target.value)}
+              >
+                {SALES_UNIT_PRESETS.map((preset) => (
+                  <option key={preset.label} value={preset.label}>
+                    {preset.description}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {isCustom && (
+              <div className="min-w-[80px]">
+                <label className="block text-[10px] font-semibold uppercase text-gray-500">Name</label>
+                <input
+                  className="input mt-0.5 text-xs"
+                  value={unit.customName || ''}
+                  onChange={(e) => updateUnit(unit.id, { customName: e.target.value, abbreviation: e.target.value.slice(0, 4) || 'unit' })}
+                  placeholder="Custom"
+                />
+              </div>
+            )}
+            <div className="min-w-[60px]">
+              <label className="block text-[10px] font-semibold uppercase text-gray-500">Abbr</label>
+              <input
+                className="input mt-0.5 text-xs"
+                value={unit.abbreviation}
+                onChange={(e) => updateUnit(unit.id, { abbreviation: e.target.value })}
+                maxLength={6}
+              />
+            </div>
+            <div className="min-w-[70px]">
+              <label className="block text-[10px] font-semibold uppercase text-gray-500">Qty={baseUnit}</label>
+              <input
+                className="input mt-0.5 text-xs"
+                type="number"
+                step="0.001"
+                min="0.001"
+                value={unit.unitsPerBase}
+                onChange={(e) => {
+                  const qty = parseFloat(e.target.value) || 1
+                  updateUnit(unit.id, { unitsPerBase: qty, sellingPrice: Number((basePrice * qty).toFixed(2)) })
+                }}
+              />
+            </div>
+            <div className="min-w-[90px]">
+              <label className="block text-[10px] font-semibold uppercase text-gray-500">Price</label>
+              <input
+                className="input mt-0.5 text-xs"
+                type="number"
+                step="0.01"
+                min="0"
+                value={unit.sellingPrice}
+                onChange={(e) => updateUnit(unit.id, { sellingPrice: parseFloat(e.target.value) || 0 })}
+              />
+            </div>
+            <button
+              type="button"
+              className="mb-0.5 inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-100 transition-colors"
+              onClick={() => removeUnit(unit.id)}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )
+      })}
+      <button
+        type="button"
+        className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-indigo-300 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-600 hover:bg-indigo-100 transition-colors"
+        onClick={addUnit}
+      >
+        <Plus className="w-4 h-4" /> Add Sales Unit
+      </button>
+      {value.length > 0 && (
+        <p className="text-[10px] text-gray-400">
+          Base unit: <strong>{baseUnit}</strong>. Inventory is tracked in base units. Sales automatically convert from bundle sizes.
+        </p>
+      )}
+    </div>
+  )
 }
 
 function toDateInputValue(value?: string | Date): string {
@@ -44,6 +203,8 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
   const [rawSellingPrice, setRawSellingPrice] = useState(
     product?.originalSellingPrice != null ? Number(product.originalSellingPrice) : Number(product?.sellingPrice ?? 0)
   )
+
+  const [salesUnits, setSalesUnits] = useState<ProductSalesUnit[]>(product?.salesUnits || [])
 
   const isConverting = priceCurrency !== baseCurrency
 
@@ -318,6 +479,25 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
               <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
               <textarea className="input resize-none" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
             </div>
+
+            {/* ── Multi-Unit Sales Configuration ── */}
+            {form.type === 'GOODS' && (
+              <div className="col-span-2 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-700">Sales Units</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Define how this product is sold in different bundle sizes (e.g. carton, packet, bag)</p>
+                  </div>
+                </div>
+
+                <SalesUnitsEditor
+                  value={product?.salesUnits || []}
+                  baseUnit={form.unit}
+                  basePrice={baseSellingPrice}
+                  onChange={(units) => setSalesUnits(units)}
+                />
+              </div>
+            )}
           </div>
 
           {/* Margin indicator */}

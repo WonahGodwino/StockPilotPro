@@ -24,6 +24,18 @@ export interface AuthUser {
 export type ProductType = 'GOODS' | 'SERVICE'
 export type ProductStatus = 'ACTIVE' | 'DRAFT' | 'ARCHIVED'
 
+export type SalesUnitLabel = 'pcs' | 'carton' | 'packet' | 'bag' | 'box' | 'dozen' | 'kg' | 'litre' | 'custom'
+
+export interface ProductSalesUnit {
+  id: string
+  label: SalesUnitLabel | (string & {})
+  customName?: string
+  abbreviation: string
+  unitsPerBase: number
+  sellingPrice: number
+  internalDescription?: string
+}
+
 export interface Product {
   id: string
   tenantId: string
@@ -39,6 +51,7 @@ export interface Product {
   originalCurrency?: string
   originalCostPrice?: number
   originalSellingPrice?: number
+  salesUnits?: ProductSalesUnit[]
   barcode?: string
   lowStockThreshold: number
   purchaseDate?: string
