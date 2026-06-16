@@ -838,6 +838,59 @@ const EXTERNAL_PROVISIONING_PROFILES: Array<{
   },
 ]
 
+function ConfidenceGauge({ value, max = 100, label, size = 'md' }: { value: number; max?: number; label?: string; size?: 'sm' | 'md' | 'lg' }) {
+  const pct = Math.min(100, Math.max(0, (value / max) * 100))
+  const colorClass = pct >= 85 ? 'from-emerald-500 to-emerald-400' : pct >= 60 ? 'from-amber-400 to-amber-300' : 'from-rose-500 to-rose-400'
+  const textColor = pct >= 85 ? 'text-emerald-700' : pct >= 60 ? 'text-amber-700' : 'text-rose-700'
+  const height = size === 'sm' ? 'h-2' : size === 'lg' ? 'h-4' : 'h-2.5'
+
+  return (
+    <div className="space-y-1">
+      {label && <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">{label}</p>}
+      <div className="flex items-center gap-2">
+        <div className={`flex-1 rounded-full bg-gray-200 ${height} overflow-hidden`}>
+          <div
+            className={`${height} rounded-full bg-gradient-to-r ${colorClass} transition-all duration-500 ease-out`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <span className={`text-${size === 'sm' ? 'xs' : 'sm'} font-bold tabular-nums ${textColor} min-w-[3.5rem] text-right`}>
+          {value.toFixed(size === 'sm' ? 0 : 1)}{max === 100 ? '%' : ''}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function SkeletonCard({ lines = 3, className = '' }: { lines?: number; className?: string }) {
+  return (
+    <div className={`rounded-xl border border-gray-100 bg-white p-4 space-y-3 animate-pulse ${className}`}>
+      {Array.from({ length: lines }).map((_, i) => (
+        <div key={`skel-${i}`} className="flex items-center gap-3">
+          <div className="h-3 bg-gray-200 rounded flex-1" style={{ width: `${60 + Math.random() * 40}%` }} />
+          {i === 0 && <div className="h-3 bg-gray-200 rounded w-16" />}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+const PRESET_PROMPTS = [
+  { label: '🔍 Stock Risks', prompt: 'Which products are at risk of stockout in the next 14 days? Prioritize by urgency.' },
+  { label: '📊 Branch Revenue', prompt: 'Compare branch revenue trends this month versus last month. Highlight top and bottom performers.' },
+  { label: '💰 Cash Flow', prompt: 'Analyze cash runway based on current burn rate and provide 90-day forecast.' },
+  { label: '📦 Reorder Plan', prompt: 'Generate a reorder plan for low-stock items with suggested quantities and timing.' },
+  { label: '⚠️ High Expenses', prompt: 'Identify expense categories with the biggest increase this month and recommend cost controls.' },
+  { label: '🎯 Pricing Review', prompt: 'Review product pricing against margins and recommend adjustments for top 10 products.' },
+]
+
+function getConfidenceBadge(score: number | null | undefined): { label: string; classes: string; icon: string } {
+  if (score === null || score === undefined) return { label: 'Pending', classes: 'border-gray-200 bg-gray-50 text-gray-600', icon: '⏳' }
+  if (score >= 0.85) return { label: 'High Confidence', classes: 'border-emerald-200 bg-emerald-50 text-emerald-700', icon: '🟢' }
+  if (score >= 0.60) return { label: 'Moderate Confidence', classes: 'border-amber-200 bg-amber-50 text-amber-700', icon: '🟡' }
+  return { label: 'Low Confidence — Verify', classes: 'border-rose-200 bg-rose-50 text-rose-700', icon: '🔴' }
+}
+
 function getApiErrorMessage(err: unknown, fallback: string): string {
   const errorPayload = (err as { response?: { data?: { error?: unknown } } })?.response?.data?.error
   if (typeof errorPayload === 'string' && errorPayload.trim()) {
@@ -3706,6 +3759,18 @@ export default function EnterpriseAIPage() {
               onChange={(e) => setAssistantPrompt(e.target.value)}
               placeholder="Ask for scoped recommendations, e.g. Which branch should reduce discount leakage this week?"
             />
+            <div className="flex flex-wrap gap-2">
+              {PRESET_PROMPTS.map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  className="inline-flex items-center rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition-all hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 hover:shadow-sm"
+                  onClick={() => setAssistantPrompt(preset.prompt)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
             <button className="btn-primary" type="submit" disabled={loading}>Ask Assistant</button>
           </form>
 
@@ -4713,32 +4778,33 @@ export default function EnterpriseAIPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
           <div className="rounded-lg border border-gray-100 p-3 bg-gray-50">
-            <p className="text-xs text-gray-500">Grounding Quality (avg)</p>
-            <p className="text-lg font-semibold text-gray-900">
-              {reliability.groundingQualityAvg === null ? 'n/a' : reliability.groundingQualityAvg.toFixed(2)}
-            </p>
+            <ConfidenceGauge
+              value={reliability.groundingQualityAvg === null ? 0 : reliability.groundingQualityAvg * 100}
+              label="Grounding Quality"
+              size="sm"
+            />
           </div>
           <div className="rounded-lg border border-gray-100 p-3 bg-gray-50">
-            <p className="text-xs text-gray-500">Fallback Rate</p>
-            <p className="text-lg font-semibold text-gray-900">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Fallback Rate</p>
+            <p className={`text-lg font-bold tabular-nums ${reliability.fallbackRate === null ? 'text-gray-600' : (reliability.fallbackRate > 0.2 ? 'text-rose-700' : reliability.fallbackRate > 0.05 ? 'text-amber-700' : 'text-emerald-700')}`}>
               {reliability.fallbackRate === null ? 'n/a' : `${(reliability.fallbackRate * 100).toFixed(1)}%`}
             </p>
           </div>
           <div className="rounded-lg border border-gray-100 p-3 bg-gray-50">
-            <p className="text-xs text-gray-500">Assistant Latency (p95)</p>
-            <p className="text-lg font-semibold text-gray-900">
-              {reliability.responseP95LatencyMs === null ? 'n/a' : `${Math.round(reliability.responseP95LatencyMs)}ms`}
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Latency P95</p>
+            <p className={`text-lg font-bold tabular-nums ${reliability.responseP95LatencyMs === null ? 'text-gray-600' : reliability.responseP95LatencyMs > 5000 ? 'text-rose-700' : reliability.responseP95LatencyMs > 2000 ? 'text-amber-700' : 'text-emerald-700'}`}>
+              {reliability.responseP95LatencyMs === null ? 'n/a' : `${Math.round(reliability.responseP95LatencyMs / 1000)}s`}
             </p>
           </div>
           <div className="rounded-lg border border-gray-100 p-3 bg-gray-50">
-            <p className="text-xs text-gray-500">External LLM Latency (avg)</p>
-            <p className="text-lg font-semibold text-gray-900">
-              {reliability.externalProviderAvgLatencyMs === null ? 'n/a' : `${Math.round(reliability.externalProviderAvgLatencyMs)}ms`}
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">External LLM Latency</p>
+            <p className={`text-lg font-bold tabular-nums ${reliability.externalProviderAvgLatencyMs === null ? 'text-gray-600' : reliability.externalProviderAvgLatencyMs > 5000 ? 'text-rose-700' : reliability.externalProviderAvgLatencyMs > 2000 ? 'text-amber-700' : 'text-emerald-700'}`}>
+              {reliability.externalProviderAvgLatencyMs === null ? 'n/a' : `${(reliability.externalProviderAvgLatencyMs / 1000).toFixed(1)}s`}
             </p>
           </div>
           <div className="rounded-lg border border-gray-100 p-3 bg-gray-50">
-            <p className="text-xs text-gray-500">Data Freshness</p>
-            <p className="text-lg font-semibold text-gray-900">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">Data Freshness</p>
+            <p className={`text-lg font-bold tabular-nums ${reliability.freshnessHours === null ? 'text-gray-600' : reliability.freshnessHours > 24 ? 'text-rose-700' : reliability.freshnessHours > 6 ? 'text-amber-700' : 'text-emerald-700'}`}>
               {reliability.freshnessHours === null ? 'n/a' : `${reliability.freshnessHours.toFixed(1)}h`}
             </p>
           </div>
