@@ -39,6 +39,9 @@ coverage/
 .DS_Store
 Thumbs.db
 
+# Credentials (do not commit)
+CREDENTIALS.txt
+
 # Prisma
 prisma/migrations/
 

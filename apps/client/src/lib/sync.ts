@@ -51,7 +51,7 @@ function getSyncDeviceId() {
   const key = 'stockpilot:sync-device-id'
   const existing = window.localStorage.getItem(key)
   if (existing) return existing
-  const next = `device_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+  const next = `device_${crypto.randomUUID()}`
   window.localStorage.setItem(key, next)
   return next
 }

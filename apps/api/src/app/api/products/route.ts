@@ -12,6 +12,11 @@ const createSchema = z.object({
   description: z.string().optional(),
   type: z.enum(['GOODS', 'SERVICE']).default('GOODS'),
   unit: z.string().default('pcs'),
+  purchaseUnit: z.string().optional(),
+  keepingUnit: z.string().optional(),
+  sellingUnit: z.string().optional(),
+  purchaseToKeepingRate: z.number().min(0).optional(),
+  keepingToSellingRate: z.number().min(0).optional(),
   quantity: z.number().min(0).default(0),
   costPrice: z.number().min(0),
   sellingPrice: z.number().min(0),
@@ -107,6 +112,26 @@ export async function POST(req: NextRequest) {
       return apiError('Invalid subsidiary selected', 422)
     }
 
+    // Check for duplicate product name within this tenant
+    const existing = await prisma.product.findFirst({
+      where: {
+        tenantId: user.tenantId!,
+        name: { equals: data.name, mode: 'insensitive' },
+        archived: false,
+      },
+      select: { id: true, name: true, status: true },
+    })
+    if (existing) {
+      return NextResponse.json(
+        {
+          error: 'DUPLICATE_PRODUCT',
+          message: `"${data.name}" already exists in your inventory.`,
+          existingProduct: { id: existing.id, name: existing.name, status: existing.status },
+        },
+        { status: 409 },
+      )
+    }
+
     const product = await prisma.$transaction(async (tx) => {
       const created = await tx.product.create({
         data: {
@@ -152,6 +177,21 @@ export async function POST(req: NextRequest) {
       },
       req,
     })
+
+    // Sync to global product catalog for cross-tenant autocomplete
+    try {
+      await prisma.productCatalog.upsert({
+        where: { name: product.name },
+        update: { usageCount: { increment: 1 } },
+        create: {
+          name: product.name,
+          category: product.category,
+          unit: product.unit,
+        },
+      })
+    } catch {
+      // Non-critical — don't fail product creation if catalog sync fails
+    }
 
     return NextResponse.json({ data: product }, { status: 201 })
   } catch (err) {

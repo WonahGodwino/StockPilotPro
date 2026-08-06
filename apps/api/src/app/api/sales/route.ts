@@ -5,10 +5,15 @@ import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { isSuperAdmin, assertSubsidiaryAccess, requirePermission } from '@/lib/rbac'
 import { checkLowStockAlerts, generateReceiptNumber } from '@/lib/helpers'
 import { logAudit } from '@/lib/audit'
+import { assertTenantHasActiveSubscription } from '@/lib/subscription-enforcement'
+import { logger } from '@/lib/logger'
+
+const MAX_RECEIPT_RETRIES = 3
 
 const saleItemSchema = z.object({
   productId: z.string(),
   quantity: z.number().positive(),
+  unitSold: z.string().optional(),
   unitPrice: z.number().min(0),
   costPrice: z.number().min(0),
   discount: z.number().min(0).default(0),
@@ -32,6 +37,22 @@ export async function OPTIONS() {
   return handleOptions()
 }
 
+function corsHeaders(): Record<string, string> {
+  return {
+    'Access-Control-Allow-Origin': process.env.ALLOWED_ORIGIN || 'http://localhost:5173',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS,PATCH',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  }
+}
+
+function withCors(response: NextResponse): NextResponse {
+  const headers = corsHeaders()
+  for (const [key, value] of Object.entries(headers)) {
+    response.headers.set(key, value)
+  }
+  return response
+}
+
 export async function GET(req: NextRequest) {
   try {
     const user = authenticate(req)
@@ -49,7 +70,7 @@ export async function GET(req: NextRequest) {
       : user.tenantId!
 
     if (!tenantId) {
-      return apiError('No tenant context for this account. Provide tenantId.', 400)
+      return withCors(apiError('No tenant context for this account. Provide tenantId.', 400))
     }
 
     const where = {
@@ -89,11 +110,11 @@ export async function GET(req: NextRequest) {
       prisma.sale.count({ where }),
     ])
 
-    return NextResponse.json({ data: sales, total, page, limit })
+    return withCors(NextResponse.json({ data: sales, total, page, limit }))
   } catch (err) {
-    if ((err as Error).message?.includes('Forbidden')) return apiError((err as Error).message, 403)
+    if ((err as Error).message?.includes('Forbidden')) return withCors(apiError((err as Error).message, 403))
     console.error('[SALES GET]', err)
-    return apiError('Internal server error', 500)
+    return withCors(apiError('Internal server error', 500))
   }
 }
 
@@ -103,6 +124,12 @@ export async function POST(req: NextRequest) {
   try {
     const user = authenticate(req)
     tenantId = user.tenantId || undefined
+
+    // ── Subscription enforcement ────────────────────────────────────────
+    if (user.tenantId) {
+      await assertTenantHasActiveSubscription(user.tenantId)
+    }
+
     const body = await req.json()
     const data = createSaleSchema.parse(body)
     const syncRef = data.syncRef?.trim() || undefined
@@ -121,10 +148,10 @@ export async function POST(req: NextRequest) {
       select: { id: true },
     })
     if (!subsidiary) {
-      return apiError('Invalid subsidiary selected', 422)
+      return withCors(apiError('Invalid subsidiary selected', 422))
     }
 
-    // Strong idempotency guard: prefer transactionRef, fallback to syncRef.
+    // ── Idempotency guard ───────────────────────────────────────────────
     if (idempotencyRef) {
       const existing = await prisma.sale.findFirst({
         where: {
@@ -142,11 +169,11 @@ export async function POST(req: NextRequest) {
         },
       })
       if (existing) {
-        return NextResponse.json({ data: existing })
+        return withCors(NextResponse.json({ data: existing }))
       }
     }
 
-    // Validate products belong to tenant and calculate totals
+    // ── Pre-validate product existence (lightweight) ────────────────────
     const productIds = data.items.map((i) => i.productId)
     const products = await prisma.product.findMany({
       where: {
@@ -155,21 +182,27 @@ export async function POST(req: NextRequest) {
         archived: false,
         status: { in: ['ACTIVE', 'DRAFT'] },
       },
+      select: {
+        id: true,
+        type: true,
+        quantity: true,
+        unit: true,
+      },
     })
 
     if (products.length !== productIds.length) {
-      return apiError('One or more products not found or inactive', 400)
+      return withCors(apiError('One or more products not found or inactive', 400))
     }
 
-    // Check stock for GOODS type
-    for (const item of data.items) {
-      const product = products.find((p) => p.id === item.productId)!
-      if (product.type === 'GOODS' && Number(product.quantity) < item.quantity) {
-        return apiError(`Insufficient stock for "${product.name}". Available: ${product.quantity}`, 400)
-      }
-    }
+    // Map Decimal → number for the transaction helper
+    const productSnapshots = products.map((p) => ({
+      id: p.id,
+      type: p.type,
+      quantity: Number(p.quantity),
+      unit: p.unit,
+    }))
 
-    // Compute totals
+    // ── Compute subtotals and totals ────────────────────────────────────
     const subtotals = data.items.map((item) => {
       const itemSubtotal = item.quantity * item.unitPrice - item.discount
       return { ...item, subtotal: itemSubtotal }
@@ -177,6 +210,7 @@ export async function POST(req: NextRequest) {
     const grossTotal = subtotals.reduce((s, i) => s + i.subtotal, 0)
     const totalAmount = Math.max(0, grossTotal - data.discount)
 
+    // ── Pre-validate customer ───────────────────────────────────────────
     let resolvedCustomerId: string | undefined
     if (data.customerId) {
       const customer = await prisma.customer.findFirst({
@@ -184,28 +218,19 @@ export async function POST(req: NextRequest) {
         select: { id: true },
       })
       if (!customer) {
-        return apiError('Customer not found', 422)
+        return withCors(apiError('Customer not found', 422))
       }
       resolvedCustomerId = customer.id
     }
 
-    const sale = await prisma.$transaction(async (tx) => {
-      // Generate unique sequential receipt number inside the transaction
-      const receiptNumber = await generateReceiptNumber(tx, user.tenantId!)
+    // ── Transaction with retry for receipt number collision ─────────────
+    let retries = 0
+    let sale: Awaited<ReturnType<typeof executeSaleTransaction>> | undefined
 
-      // Deduct stock
-      for (const item of data.items) {
-        const product = products.find((p) => p.id === item.productId)!
-        if (product.type === 'GOODS') {
-          await tx.product.update({
-            where: { id: item.productId },
-            data: { quantity: { decrement: item.quantity } },
-          })
-        }
-      }
-
-      const createdSale = await tx.sale.create({
-        data: {
+    while (retries <= MAX_RECEIPT_RETRIES) {
+      try {
+        sale = await executeSaleTransaction({
+          tx: prisma,
           tenantId: user.tenantId!,
           subsidiaryId: data.subsidiaryId,
           userId: user.userId,
@@ -217,108 +242,67 @@ export async function POST(req: NextRequest) {
           fxRate: data.fxRate,
           syncRef,
           transactionRef,
-          receiptNumber,
           notes: data.notes,
-          createdBy: user.userId,
           customerId: resolvedCustomerId,
-          items: {
-            create: subtotals.map((item) => ({
-              productId: item.productId,
-              quantity: item.quantity,
-              unitPrice: item.unitPrice,
-              costPrice: item.costPrice,
-              discount: item.discount,
-              subtotal: item.subtotal,
-            })),
-          },
-        },
-        include: {
-          items: {
-            include: { product: { select: { name: true, unit: true } } },
-          },
-          user: { select: { firstName: true, lastName: true } },
-        },
-      })
-
-      // Loyalty accrual: 1 point per whole unit of the base-currency amount
-      if (resolvedCustomerId) {
-        const earnedPoints = Math.floor(totalAmount)
-        const customer = await tx.customer.findFirst({
-          where: { id: resolvedCustomerId },
-          select: { loyaltyPoints: true },
+          items: data.items,
+          subtotals,
+          products: productSnapshots,
         })
-        if (customer && earnedPoints > 0) {
-          const balanceBefore = customer.loyaltyPoints
-          const balanceAfter = balanceBefore + earnedPoints
-          await tx.customer.update({
-            where: { id: resolvedCustomerId },
-            data: {
-              loyaltyPoints: balanceAfter,
-              totalSpend: { increment: totalAmount },
-              visitCount: { increment: 1 },
-              lastVisitedAt: new Date(),
-            },
+        break
+      } catch (err) {
+        // P2002 = unique constraint violation — only retry if it's receiptNumber collision
+        if ((err as { code?: string }).code === 'P2002' && retries < MAX_RECEIPT_RETRIES) {
+          retries++
+          logger.warn('Receipt number collision, retrying', {
+            tenantId: user.tenantId!,
+            attempt: retries,
+            maxRetries: MAX_RECEIPT_RETRIES,
           })
-          await tx.loyaltyLedger.create({
-            data: {
-              tenantId: user.tenantId!,
-              customerId: resolvedCustomerId,
-              saleId: createdSale.id,
-              type: 'EARN',
-              points: earnedPoints,
-              balanceBefore,
-              balanceAfter,
-              note: `Earned from sale ${receiptNumber}`,
-              createdByUserId: user.userId,
-            },
-          })
-        } else if (customer) {
-          // Zero-value sale: still count the visit
-          await tx.customer.update({
-            where: { id: resolvedCustomerId },
-            data: {
-              totalSpend: { increment: totalAmount },
-              visitCount: { increment: 1 },
-              lastVisitedAt: new Date(),
-            },
-          })
+          continue
         }
+        throw err
       }
+    }
 
-      return createdSale
+    // ── Post-sale async tasks ───────────────────────────────────────────
+    checkLowStockAlerts(user.tenantId!, data.subsidiaryId).catch((err) => {
+      logger.error('Low stock alert failed', {
+        tenantId: user.tenantId!,
+        subsidiaryId: data.subsidiaryId,
+        err,
+      })
     })
 
-    // Trigger low stock checks asynchronously
-    checkLowStockAlerts(user.tenantId!, data.subsidiaryId).catch(console.error)
-
     await logAudit({
-      tenantId: sale.tenantId,
+      tenantId: sale!.tenantId,
       userId: user.userId,
       action: 'CREATE',
       entity: 'sale',
-      entityId: sale.id,
+      entityId: sale!.id,
       newValues: {
-        totalAmount: sale.totalAmount,
-        discount: sale.discount,
-        amountPaid: sale.amountPaid,
-        paymentMethod: sale.paymentMethod,
-        receiptNumber: sale.receiptNumber,
-        currency: sale.currency,
-        fxRate: sale.fxRate,
-        syncRef: sale.syncRef,
-        transactionRef: sale.transactionRef,
-        subsidiaryId: sale.subsidiaryId,
-        itemsCount: sale.items.length,
+        totalAmount: sale!.totalAmount,
+        discount: sale!.discount,
+        amountPaid: sale!.amountPaid,
+        paymentMethod: sale!.paymentMethod,
+        receiptNumber: sale!.receiptNumber,
+        currency: sale!.currency,
+        fxRate: sale!.fxRate,
+        syncRef: sale!.syncRef,
+        transactionRef: sale!.transactionRef,
+        subsidiaryId: sale!.subsidiaryId,
+        itemsCount: sale!.items.length,
       },
       req,
     })
 
-    return NextResponse.json({ data: sale }, { status: 201 })
+    return withCors(NextResponse.json({ data: sale }, { status: 201 }))
   } catch (err) {
-    if (err instanceof z.ZodError) return NextResponse.json({ error: err.errors }, { status: 422 })
-    if ((err as Error).message?.includes('Forbidden')) return apiError((err as Error).message, 403)
-    if ((err as { code?: string }).code === 'P2003') return apiError('Invalid subsidiary selected', 422)
+    if (err instanceof z.ZodError) return withCors(NextResponse.json({ error: err.errors }, { status: 422 }))
+    if ((err as Error).message?.includes('Forbidden')) return withCors(apiError((err as Error).message, 403))
+    if ((err as Error).message?.includes('Subscription')) return withCors(apiError((err as Error).message, 402))
+    if ((err as { code?: string }).code === 'P2003') return withCors(apiError('Invalid subsidiary selected', 422))
     if ((err as { code?: string }).code === 'P2002') {
+      // If we exhausted retries for receiptNumber or it's an idempotency collision
       if (idempotencyRef && tenantId) {
         const existing = await prisma.sale.findFirst({
           where: {
@@ -335,10 +319,165 @@ export async function POST(req: NextRequest) {
             user: { select: { firstName: true, lastName: true } },
           },
         })
-        if (existing) return NextResponse.json({ data: existing })
+        if (existing) return withCors(NextResponse.json({ data: existing }))
+      }
+      return withCors(apiError('A duplicate record was detected. Please retry.', 409))
+    }
+    // Re-throw stock insufficiency errors from inside the transaction
+    if ((err as Error).message?.startsWith('Insufficient stock')) {
+      return withCors(apiError((err as Error).message, 400))
+    }
+    logger.error('Sale creation failed', {
+      tenantId: tenantId ?? 'unknown',
+      err,
+    })
+    console.error('[SALES POST]', err)
+    return withCors(apiError('Internal server error', 500))
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Transaction helper — runs stock validation + deduction atomically
+// ──────────────────────────────────────────────────────────────────────────────
+
+interface SaleTransactionParams {
+  tx: typeof prisma
+  tenantId: string
+  subsidiaryId: string
+  userId: string
+  totalAmount: number
+  discount: number
+  amountPaid: number
+  paymentMethod: 'CASH' | 'TRANSFER' | 'POS'
+  currency: string
+  fxRate: number
+  syncRef?: string
+  transactionRef?: string
+  notes?: string
+  customerId?: string
+  items: { productId: string; quantity: number; unitSold?: string; unitPrice: number; costPrice: number; discount: number }[]
+  subtotals: { productId: string; quantity: number; unitSold?: string; unitPrice: number; costPrice: number; discount: number; subtotal: number }[]
+  products: { id: string; type: string; quantity: number; unit: string }[]
+}
+
+async function executeSaleTransaction(params: SaleTransactionParams) {
+  const {
+    tenantId, subsidiaryId, userId, totalAmount, discount, amountPaid,
+    paymentMethod, currency, fxRate, syncRef, transactionRef, notes,
+    customerId, items, subtotals, products,
+  } = params
+
+  return prisma.$transaction(async (tx) => {
+    // ── Stock validation + deduction (atomic, inside transaction) ──────
+    for (const item of items) {
+      const product = products.find((p) => p.id === item.productId)!
+      if (product.type === 'GOODS') {
+        // Re-read current quantity inside transaction to prevent race conditions
+        const current = await tx.product.findUnique({
+          where: { id: item.productId },
+          select: { quantity: true, unit: true },
+        })
+        const currentQty = current ? Number(current.quantity) : 0
+        const currentUnit = current?.unit || product.unit
+        if (currentQty < item.quantity) {
+          throw new Error(
+            `Insufficient stock for "${product.type === 'GOODS' ? 'product' : 'item'}". ` +
+            `Available: ${currentQty} ${currentUnit}`
+          )
+        }
+
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { quantity: { decrement: item.quantity } },
+        })
       }
     }
-    console.error('[SALES POST]', err)
-    return apiError('Internal server error', 500)
-  }
+
+    // ── Generate receipt number ────────────────────────────────────────
+    const receiptNumber = await generateReceiptNumber(tx, tenantId)
+
+    // ── Create sale with items ─────────────────────────────────────────
+    const createdSale = await tx.sale.create({
+      data: {
+        tenantId,
+        subsidiaryId,
+        userId,
+        totalAmount,
+        discount,
+        amountPaid,
+        paymentMethod,
+        currency,
+        fxRate,
+        syncRef,
+        transactionRef,
+        receiptNumber,
+        notes,
+        createdBy: userId,
+        customerId,
+        items: {
+          create: subtotals.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            unitSold: item.unitSold,
+            unitPrice: item.unitPrice,
+            costPrice: item.costPrice,
+            discount: item.discount,
+            subtotal: item.subtotal,
+          })),
+        },
+      },
+      include: {
+        items: {
+          include: { product: { select: { name: true, unit: true } } },
+        },
+        user: { select: { firstName: true, lastName: true } },
+      },
+    })
+
+    // ── Loyalty accrual ────────────────────────────────────────────────
+    if (customerId) {
+      const earnedPoints = Math.floor(totalAmount)
+      const customer = await tx.customer.findFirst({
+        where: { id: customerId },
+        select: { loyaltyPoints: true },
+      })
+      if (customer && earnedPoints > 0) {
+        const balanceBefore = customer.loyaltyPoints
+        const balanceAfter = balanceBefore + earnedPoints
+        await tx.customer.update({
+          where: { id: customerId },
+          data: {
+            loyaltyPoints: balanceAfter,
+            totalSpend: { increment: totalAmount },
+            visitCount: { increment: 1 },
+            lastVisitedAt: new Date(),
+          },
+        })
+        await tx.loyaltyLedger.create({
+          data: {
+            tenantId,
+            customerId,
+            saleId: createdSale.id,
+            type: 'EARN',
+            points: earnedPoints,
+            balanceBefore,
+            balanceAfter,
+            note: `Earned from sale ${receiptNumber}`,
+            createdByUserId: userId,
+          },
+        })
+      } else if (customer) {
+        await tx.customer.update({
+          where: { id: customerId },
+          data: {
+            totalSpend: { increment: totalAmount },
+            visitCount: { increment: 1 },
+            lastVisitedAt: new Date(),
+          },
+        })
+      }
+    }
+
+    return createdSale
+  })
 }

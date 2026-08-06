@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { randomUUID } from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { authenticate, apiError, handleOptions } from '@/lib/auth'
 import { isAgent } from '@/lib/agent-access'
@@ -13,7 +14,7 @@ function normalizeBatchId(input?: string | null): string | null {
 
 function makeBatchId(prefix: 'MANUAL' | 'UPLOAD'): string {
   const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)
-  const token = Math.random().toString(36).slice(2, 8).toUpperCase()
+  const token = randomUUID().slice(0, 8).toUpperCase()
   return `${prefix}-${stamp}-${token}`
 }
 

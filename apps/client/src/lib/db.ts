@@ -166,7 +166,7 @@ export async function getProductByBarcode(barcode: string): Promise<Product | un
 }
 
 export async function addPendingSale(data: SaleCheckoutPayload) {
-  const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2)}`
+  const localId = `local_${crypto.randomUUID()}`
   const dedupeRef = data.transactionRef || data.syncRef || localId
   const payload: SaleCheckoutPayload = {
     ...data,
@@ -190,7 +190,7 @@ export async function getPendingSaleRecords() {
 }
 
 export async function addPendingExpense(data: ExpensePayload) {
-  const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2)}`
+  const localId = `local_${crypto.randomUUID()}`
   const dedupeRef = data.transactionRef || data.syncRef || localId
   const payload: ExpensePayload = {
     ...data,
@@ -209,7 +209,7 @@ export async function addPendingExpense(data: ExpensePayload) {
 }
 
 export async function addPendingTrustedCustomerOperation(data: TrustedCustomerPendingPayload) {
-  const localId = `local_${Date.now()}_${Math.random().toString(36).slice(2)}`
+  const localId = `local_${crypto.randomUUID()}`
   await db.pendingRecords.add({
     localId,
     type: 'trustedCustomer',

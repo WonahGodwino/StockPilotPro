@@ -12,6 +12,11 @@ const updateSchema = z.object({
   description: z.string().optional(),
   type: z.enum(['GOODS', 'SERVICE']).optional(),
   unit: z.string().optional(),
+  purchaseUnit: z.string().nullable().optional(),
+  keepingUnit: z.string().nullable().optional(),
+  sellingUnit: z.string().nullable().optional(),
+  purchaseToKeepingRate: z.number().min(0).nullable().optional(),
+  keepingToSellingRate: z.number().min(0).nullable().optional(),
   quantity: z.number().min(0).optional(),
   costPrice: z.number().min(0).optional(),
   sellingPrice: z.number().min(0).optional(),
@@ -138,6 +143,21 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       },
       req,
     })
+
+    // Sync name change to global product catalog
+    if (updated.name !== product.name) {
+      try {
+        await prisma.productCatalog.upsert({
+          where: { name: updated.name },
+          update: { usageCount: { increment: 1 } },
+          create: {
+            name: updated.name,
+            category: updated.category,
+            unit: updated.unit,
+          },
+        })
+      } catch { /* non-critical */ }
+    }
 
     return NextResponse.json({ data: updated })
   } catch (err) {

@@ -47,6 +47,11 @@ export interface Product {
   description?: string
   type: ProductType
   unit: string
+  purchaseUnit?: string | null
+  keepingUnit?: string | null
+  sellingUnit?: string | null
+  purchaseToKeepingRate?: number | null
+  keepingToSellingRate?: number | null
   quantity: number
   costPrice: number
   sellingPrice: number
@@ -82,11 +87,12 @@ export interface SaleItem {
   id: string
   productId: string
   quantity: number
+  unitSold?: string | null
   unitPrice: number
   costPrice: number
   discount: number
   subtotal: number
-  product?: { name: string; unit: string }
+  product?: { name: string; unit: string; sellingUnit?: string | null; keepingUnit?: string | null; keepingToSellingRate?: number | null }
 }
 
 export interface Sale {
@@ -116,6 +122,7 @@ export interface CartItem {
   quantity: number
   unitPrice: number
   discount: number
+  unitSold?: string
 }
 
 // Checkout payload sent to POST /sales (and stored for offline sync)
@@ -133,6 +140,7 @@ export interface SaleCheckoutPayload {
   items: {
     productId: string
     quantity: number
+    unitSold?: string
     unitPrice: number
     costPrice: number
     discount: number

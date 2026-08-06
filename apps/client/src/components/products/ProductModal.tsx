@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import api from '@/lib/api'
 import type { Product, ProductSalesUnit, SalesUnitLabel } from '@/types'
 import toast from 'react-hot-toast'
@@ -6,12 +6,22 @@ import { useAuthStore } from '@/store/auth.store'
 import { useAppStore } from '@/store/app.store'
 import { getApiErrorMessage } from '@/lib/apiError'
 import { makeCurrencyFormatter, SUPPORTED_CURRENCIES } from '@/lib/currency'
-import { X, Loader2, Plus, Trash2, Tag, Package, Check, ChevronDown, Minus } from 'lucide-react'
+import { X, Loader2, Plus, Trash2, Tag, Package, Check, ChevronDown, Minus, Building2, Ruler, Layers, Palette, Sparkles } from 'lucide-react'
+
+interface CatalogSuggestion {
+  id: string
+  name: string
+  category: string
+  unit: string
+  purchaseUnit?: string | null
+  keepingUnit?: string | null
+  sellingUnit?: string | null
+}
 
 interface Props {
   product: Product | null
   onClose: () => void
-  onSaved: () => void
+  onSaved: (opts?: { editProductId?: string }) => void
 }
 
 const SALES_UNIT_PRESETS: Array<{ label: SalesUnitLabel; abbreviation: string; description: string }> = [
@@ -316,6 +326,7 @@ function SearchableSelect({
   placeholder,
   defaultOption,
   defaultLabel,
+  freeText = false,
 }: {
   value: string
   onChange: (val: string) => void
@@ -323,10 +334,13 @@ function SearchableSelect({
   placeholder?: string
   defaultOption?: string
   defaultLabel?: string
+  freeText?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState(value)
+  const [highlightIdx, setHighlightIdx] = useState(-1)
   const containerRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setSearch(value)
@@ -336,11 +350,14 @@ function SearchableSelect({
     const handleClickOutside = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpen(false)
+        if (freeText && search && search !== value) {
+          onChange(search)
+        }
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
+  }, [freeText, search, value, onChange])
 
   const filtered = options.filter((opt) =>
     opt.name.toLowerCase().includes(search.toLowerCase())
@@ -350,7 +367,40 @@ function SearchableSelect({
     onChange(name)
     setSearch(name)
     setOpen(false)
+    setHighlightIdx(-1)
   }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!open) { setOpen(true); return }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setHighlightIdx((prev) => Math.min(prev + 1, filtered.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setHighlightIdx((prev) => Math.max(prev - 1, -1))
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      if (highlightIdx >= 0 && highlightIdx < filtered.length) {
+        e.preventDefault()
+        selectOption(filtered[highlightIdx].name)
+      } else if (freeText && search) {
+        setOpen(false)
+        onChange(search)
+      }
+    } else if (e.key === 'Escape') {
+      setOpen(false)
+      setHighlightIdx(-1)
+    }
+  }
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (highlightIdx >= 0 && listRef.current) {
+      const items = listRef.current.children
+      if (items[highlightIdx]) {
+        (items[highlightIdx] as HTMLElement).scrollIntoView({ block: 'nearest' })
+      }
+    }
+  }, [highlightIdx])
 
   return (
     <div ref={containerRef} className="relative">
@@ -361,11 +411,21 @@ function SearchableSelect({
           onChange={(e) => {
             setSearch(e.target.value)
             setOpen(true)
+            setHighlightIdx(-1)
             if (e.target.value === '') {
               onChange(defaultOption ?? '')
             }
           }}
           onFocus={() => setOpen(true)}
+          onBlur={() => {
+            // Delay to allow click on dropdown items
+            setTimeout(() => {
+              if (freeText && search && search !== value) {
+                onChange(search)
+              }
+            }, 150)
+          }}
+          onKeyDown={handleKeyDown}
           placeholder={placeholder || 'Type to search...'}
         />
         {value && value !== defaultOption && (
@@ -377,35 +437,38 @@ function SearchableSelect({
             <X className="w-3.5 h-3.5" />
           </button>
         )}
-        {open && !search && (
+        {open && !search && !value && (
           <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
         )}
       </div>
-      {open && (
-        <div className="absolute z-10 mt-1 w-full bg-white rounded-lg border border-gray-200 shadow-lg max-h-52 overflow-y-auto">
+      {open && (filtered.length > 0 || defaultLabel) && (
+        <div ref={listRef} className="absolute z-10 mt-1 w-full bg-white rounded-lg border border-gray-200 shadow-lg max-h-52 overflow-y-auto">
           {defaultLabel && (
             <button
               type="button"
-              className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 transition-colors ${value === defaultOption ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600'}`}
+              className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 transition-colors ${value === defaultOption ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600'} ${highlightIdx === -1 ? 'ring-1 ring-inset ring-indigo-200' : ''}`}
               onClick={() => selectOption(defaultOption ?? '')}
             >
               {defaultLabel}
             </button>
           )}
-          {filtered.length === 0 && (!defaultLabel || search) ? (
-            <p className="px-3 py-2 text-sm text-gray-400 italic">No matches found</p>
-          ) : (
-            filtered.map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 transition-colors ${value === opt.name ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-700'}`}
-                onClick={() => selectOption(opt.name)}
-              >
-                {opt.name}
-              </button>
-            ))
-          )}
+          {filtered.map((opt, idx) => (
+            <button
+              key={opt.id}
+              type="button"
+              className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                idx === highlightIdx
+                  ? 'bg-indigo-50 text-indigo-700 font-medium'
+                  : value === opt.name
+                  ? 'bg-indigo-50/50 text-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              onClick={() => selectOption(opt.name)}
+              onMouseEnter={() => setHighlightIdx(idx)}
+            >
+              {opt.name}
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -429,16 +492,64 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
   const [fxLoading, setFxLoading] = useState(false)
   const [fxError, setFxError] = useState<string | null>(null)
   // Raw amounts as entered by the user in priceCurrency
+  // Convert stored per-keeping-unit prices back to per-purchase/selling unit for display
+  const initPkRate = product?.purchaseToKeepingRate != null ? Number(product.purchaseToKeepingRate) : 1
+  const initKsRate = product?.keepingToSellingRate != null ? Number(product.keepingToSellingRate) : 1
   const [rawCostPrice, setRawCostPrice] = useState(
-    product?.originalCostPrice != null ? Number(product.originalCostPrice) : Number(product?.costPrice ?? 0)
+    product?.originalCostPrice != null
+      ? Number(product.originalCostPrice)
+      : product?.costPrice != null
+        ? Number(product.costPrice) * (initPkRate > 0 ? initPkRate : 1) // per-keeping → per-purchase
+        : 0
   )
   const [rawSellingPrice, setRawSellingPrice] = useState(
-    product?.originalSellingPrice != null ? Number(product.originalSellingPrice) : Number(product?.sellingPrice ?? 0)
+    product?.originalSellingPrice != null
+      ? Number(product.originalSellingPrice)
+      : product?.sellingPrice != null
+        ? Number(product.sellingPrice) / (initKsRate > 0 ? initKsRate : 1) // per-keeping → per-selling
+        : 0
   )
 
   const [salesUnits, setSalesUnits] = useState<ProductSalesUnit[]>(product?.salesUnits || [])
   const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([])
   const [brand, setBrand] = useState('')
+
+  // Unit hierarchy state
+  const [purchaseUnit, setPurchaseUnit] = useState(product?.purchaseUnit || '')
+  const [keepingUnit, setKeepingUnit] = useState(product?.keepingUnit || '')
+  const [sellingUnit, setSellingUnit] = useState(product?.sellingUnit || '')
+  const [purchaseToKeepingRate, setPurchaseToKeepingRate] = useState<number | ''>(
+    product?.purchaseToKeepingRate != null ? Number(product.purchaseToKeepingRate) : ''
+  )
+  const [keepingToSellingRate, setKeepingToSellingRate] = useState<number | ''>(
+    product?.keepingToSellingRate != null ? Number(product.keepingToSellingRate) : ''
+  )
+
+  // Catalog suggestions
+  const [catalogSuggestions, setCatalogSuggestions] = useState<CatalogSuggestion[]>([])
+  const [catalogOpen, setCatalogOpen] = useState(false)
+  const [catalogLoading, setCatalogLoading] = useState(false)
+  const catalogTimer = useRef<ReturnType<typeof setTimeout>>()
+
+  const fetchCatalog = useCallback(async (q: string) => {
+    if (q.length < 2) { setCatalogSuggestions([]); setCatalogOpen(false); return }
+    setCatalogLoading(true)
+    try {
+      const { data } = await api.get<{ data: CatalogSuggestion[] }>('/product-catalog', { params: { search: q, limit: 8 } })
+      setCatalogSuggestions(data.data || [])
+      setCatalogOpen((data.data || []).length > 0)
+    } catch { setCatalogSuggestions([]) }
+    finally { setCatalogLoading(false) }
+  }, [])
+
+  const applySuggestion = (s: CatalogSuggestion) => {
+    setForm((prev) => ({ ...prev, name: s.name, category: s.category || prev.category }))
+    setCatalogOpen(false)
+    setCatalogSuggestions([])
+    if (s.purchaseUnit && !purchaseUnit) setPurchaseUnit(s.purchaseUnit)
+    if (s.keepingUnit && !keepingUnit) setKeepingUnit(s.keepingUnit)
+    if (s.sellingUnit && !sellingUnit) setSellingUnit(s.sellingUnit)
+  }
 
   const isConverting = priceCurrency !== baseCurrency
 
@@ -543,15 +654,28 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
 
     setLoading(true)
     try {
+      // Convert prices to per-keeping-unit for storage
+      const pkRate = purchaseToKeepingRate !== '' ? Number(purchaseToKeepingRate) : 1
+      const ksRate = keepingToSellingRate !== '' ? Number(keepingToSellingRate) : 1
+      // Cost: entered per purchase unit → divide by pkRate to get per keeping unit
+      const costPerKeeping = pkRate > 0 ? baseCostPrice / pkRate : baseCostPrice
+      // Sell: entered per selling unit → multiply by ksRate to get per keeping unit
+      const sellPerKeeping = ksRate > 0 ? baseSellingPrice * ksRate : baseSellingPrice
+
       const payload = {
         ...form,
-        costPrice: baseCostPrice,
-        sellingPrice: baseSellingPrice,
+        costPrice: costPerKeeping,
+        sellingPrice: sellPerKeeping,
         originalCurrency: isConverting ? priceCurrency : undefined,
         originalCostPrice: isConverting ? rawCostPrice : undefined,
         originalSellingPrice: isConverting ? rawSellingPrice : undefined,
         salesUnits: salesUnits.length > 0 ? salesUnits : undefined,
         subsidiaryId: resolvedSubsidiaryId,
+        purchaseUnit: purchaseUnit || undefined,
+        keepingUnit: keepingUnit || undefined,
+        sellingUnit: sellingUnit || undefined,
+        purchaseToKeepingRate: purchaseToKeepingRate !== '' ? Number(purchaseToKeepingRate) : undefined,
+        keepingToSellingRate: keepingToSellingRate !== '' ? Number(keepingToSellingRate) : undefined,
       }
 
       if (product) {
@@ -563,10 +687,27 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
       }
       onSaved()
     } catch (err: unknown) {
-      const msg = getApiErrorMessage(err, 'Failed to save')
-      toast.error(msg)
+      const axiosErr = err as { response?: { status?: number; data?: { error?: string; message?: string; existingProduct?: { id: string; name: string } } } }
+      if (axiosErr.response?.status === 409 && axiosErr.response?.data?.error === 'DUPLICATE_PRODUCT') {
+        setDuplicateProduct(axiosErr.response.data.existingProduct || null)
+      } else {
+        const msg = getApiErrorMessage(err, 'Failed to save')
+        toast.error(msg)
+      }
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleEditExisting = async () => {
+    if (!duplicateProduct) return
+    setDuplicateProduct(null)
+    try {
+      // Close create modal and tell parent to open edit mode for existing product
+      onSaved({ editProductId: duplicateProduct.id })
+      toast.success(`Opening "${duplicateProduct.name}" for editing`)
+    } catch {
+      toast.error('Could not load the existing product')
     }
   }
 
@@ -575,6 +716,9 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
   const [newBrandName, setNewBrandName] = useState('')
   const [brands, setBrands] = useState<Array<{ id: string; name: string }>>([])
   const [setupSaving, setSetupSaving] = useState(false)
+
+  // Duplicate product prompt state
+  const [duplicateProduct, setDuplicateProduct] = useState<{ id: string; name: string } | null>(null)
 
   const loadCategories = () => {
     let cancelled = false
@@ -627,11 +771,11 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-gradient-to-br from-slate-50 via-gray-50 to-indigo-50 flex flex-col">
+    <div className="fixed inset-0 z-50 bg-gradient-to-br from-slate-100 via-indigo-50/40 to-slate-200 flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between px-8 py-5 bg-white/95 backdrop-blur-sm border-b border-gray-200/80 shadow-sm">
+      <div className="flex items-center justify-between px-8 py-5 bg-white border-b border-indigo-100 shadow-sm">
         <div className="flex items-center gap-4">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-md shadow-indigo-200">
+          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-200/60">
             <Package className="w-5 h-5 text-white" />
           </div>
           <div>
@@ -640,11 +784,11 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button type="button" onClick={onClose} className="px-4 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 hover:border-gray-300 transition-all duration-200 shadow-sm">
+          <button type="button" onClick={onClose} className="px-5 py-2.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-50 hover:border-gray-300 transition-all duration-200 shadow-sm">
             Cancel
           </button>
           <button type="button" onClick={handleSubmit} disabled={loading}
-            className="px-6 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl hover:from-indigo-700 hover:to-indigo-800 transition-all duration-200 shadow-md shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+            className="px-6 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl hover:from-indigo-700 hover:to-indigo-800 transition-all duration-200 shadow-md shadow-indigo-200/60 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
             {product ? 'Save Changes' : 'Create Product'}
           </button>
@@ -652,7 +796,7 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex border-b border-gray-200/80 bg-white/90 backdrop-blur-sm px-8 gap-0">
+      <div className="flex border-b border-indigo-100 bg-white shadow-sm px-8 gap-0">
         {(['details', 'categories', 'brands'] as const).map((tab) => (
           <button
             key={tab}
@@ -660,14 +804,14 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
             onClick={() => setActiveTab(tab)}
             className={`relative px-6 py-3.5 text-sm font-semibold transition-all duration-200 border-b-2 ${
               activeTab === tab
-                ? 'border-indigo-600 text-indigo-700 bg-indigo-50/30'
+                ? 'border-indigo-600 text-indigo-700 bg-gradient-to-b from-indigo-50/80 to-transparent'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 hover:bg-gray-50/50'
             }`}
           >
             <span className="flex items-center gap-2">
               {tab === 'details' && <Package className="w-4 h-4" />}
-              {tab === 'categories' && <Tag className="w-4 h-4" />}
-              {tab === 'brands' && '🏷'}
+              {tab === 'categories' && <Layers className="w-4 h-4" />}
+              {tab === 'brands' && <Palette className="w-4 h-4" />}
               {tab === 'details' && 'Product Details'}
               {tab === 'categories' && 'Categories'}
               {tab === 'brands' && 'Brands'}
@@ -684,21 +828,93 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
       </div>
 
       {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto p-8">
+      <div className="flex-1 overflow-y-auto p-8 bg-gradient-to-b from-slate-50/80 via-white/50 to-slate-100/50">
         {activeTab === 'details' && (
           <form onSubmit={handleSubmit} className="max-w-3xl mx-auto space-y-6">
+            {/* Duplicate Product Warning */}
+            {duplicateProduct && !product && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+                <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <span className="text-amber-600 text-lg font-bold">!</span>
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-amber-800">Duplicate Product Detected</p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    <strong>"{duplicateProduct.name}"</strong> already exists in your inventory. Products cannot be added twice.
+                  </p>
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      type="button"
+                      onClick={() => setDuplicateProduct(null)}
+                      className="text-xs font-medium text-amber-700 bg-white border border-amber-300 rounded-lg px-3 py-1.5 hover:bg-amber-100 transition-colors"
+                    >
+                      Change Name
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleEditExisting}
+                      className="text-xs font-medium text-white bg-amber-600 rounded-lg px-3 py-1.5 hover:bg-amber-700 transition-colors flex items-center gap-1"
+                      disabled={loading}
+                    >
+                      {loading && <Loader2 className="w-3 h-3 animate-spin" />}
+                      Edit Existing Product
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Basic Info Section */}
-            <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
-              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
-                <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
-                  <Package className="w-4 h-4 text-indigo-600" />
+            <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-md hover:shadow-lg transition-shadow duration-300 border-l-4 border-l-indigo-500">
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-indigo-100">
+                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center shadow-md shadow-indigo-200/40">
+                  <Package className="w-4 h-4 text-white" />
                 </div>
                 <h3 className="text-base font-semibold text-gray-900">Basic Information</h3>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-                  <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+                  <div className="relative">
+                    <input
+                      className="input pr-8"
+                      value={form.name}
+                      onChange={(e) => {
+                        setForm({ ...form, name: e.target.value })
+                        clearTimeout(catalogTimer.current)
+                        catalogTimer.current = setTimeout(() => fetchCatalog(e.target.value), 250)
+                      }}
+                      onFocus={() => { if (catalogSuggestions.length > 0) setCatalogOpen(true) }}
+                      onBlur={() => setTimeout(() => setCatalogOpen(false), 200)}
+                      required
+                      placeholder="Product name — suggestions from global catalog appear below"
+                    />
+                    {catalogLoading && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 animate-spin text-indigo-400" />}
+                    {!catalogLoading && catalogSuggestions.length > 0 && !catalogOpen && (
+                      <Sparkles className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-indigo-400" />
+                    )}
+                    {catalogOpen && catalogSuggestions.length > 0 && (
+                      <div className="absolute z-20 mt-1 w-full bg-white rounded-lg border border-gray-200 shadow-xl max-h-52 overflow-y-auto">
+                        <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-400 uppercase tracking-wider bg-gray-50 border-b border-gray-100">
+                          <Sparkles className="w-3 h-3 inline mr-1" /> Global Catalog Suggestions
+                        </div>
+                        {catalogSuggestions.map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            className="w-full text-left px-3 py-2.5 text-sm hover:bg-indigo-50 transition-colors border-b border-gray-50 last:border-0 flex items-center justify-between group"
+                            onMouseDown={(e) => { e.preventDefault(); applySuggestion(s) }}
+                          >
+                            <div>
+                              <span className="font-medium text-gray-800 group-hover:text-indigo-700">{s.name}</span>
+                              <span className="ml-2 text-xs text-gray-400">{s.category}</span>
+                            </div>
+                            <span className="text-[10px] text-gray-400">{s.unit}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
@@ -709,57 +925,25 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                  <div className="relative">
-                    <input
-                      className="input pr-8"
-                      list="category-options"
-                      value={form.category}
-                      onChange={(e) => setForm({ ...form, category: e.target.value })}
-                      placeholder="Search or select..."
-                    />
-                    {form.category && form.category !== 'Uncategorized' && (
-                      <button
-                        type="button"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                        onClick={() => setForm({ ...form, category: 'Uncategorized' })}
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                  <datalist id="category-options">
-                    <option value="Uncategorized" />
-                    {categories.map((cat) => (
-                      <option key={cat.id} value={cat.name} />
-                    ))}
-                  </datalist>
+                  <SearchableSelect
+                    value={form.category}
+                    onChange={(v) => setForm({ ...form, category: v })}
+                    options={categories}
+                    placeholder="Search or type new category..."
+                    defaultOption="Uncategorized"
+                    defaultLabel="Uncategorized"
+                    freeText
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
-                  <div className="relative">
-                    <input
-                      className="input pr-8"
-                      list="brand-options"
-                      value={brand}
-                      onChange={(e) => setBrand(e.target.value)}
-                      placeholder="Search or select..."
-                    />
-                    {brand && (
-                      <button
-                        type="button"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                        onClick={() => setBrand('')}
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                  <datalist id="brand-options">
-                    <option value="" />
-                    {brands.map((b) => (
-                      <option key={b.id} value={b.name} />
-                    ))}
-                  </datalist>
+                  <SearchableSelect
+                    value={brand}
+                    onChange={(v) => setBrand(v)}
+                    options={brands}
+                    placeholder="Search or type new brand..."
+                    freeText
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
@@ -768,11 +952,129 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
               </div>
             </div>
 
+            {/* Unit Hierarchy Section (GOODS only) */}
+            {form.type === 'GOODS' && (
+              <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-md hover:shadow-lg transition-shadow duration-300 border-l-4 border-l-violet-500">
+                <div className="flex items-center gap-3 mb-6 pb-4 border-b border-violet-100">
+                  <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-md shadow-violet-200/40">
+                    <Package className="w-4 h-4 text-white" />
+                  </div>
+                  <h3 className="text-base font-semibold text-gray-900">Unit Hierarchy (Purchase → Store → Sell)</h3>
+                </div>
+                <p className="text-xs text-gray-500 -mt-3 mb-4">
+                  Configure how products are bought, stored, and sold. Stock quantity is always tracked in the <strong>keeping unit</strong>.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <span className="inline-block w-2 h-2 rounded-full bg-purple-500 mr-1.5"></span>
+                      Purchase Unit
+                    </label>
+                    <input
+                      className="input"
+                      value={purchaseUnit}
+                      onChange={(e) => setPurchaseUnit(e.target.value)}
+                      placeholder="e.g. Carton"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-0.5">How you buy this product</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <span className="inline-block w-2 h-2 rounded-full bg-blue-500 mr-1.5"></span>
+                      Keeping Unit
+                    </label>
+                    <input
+                      className="input"
+                      value={keepingUnit}
+                      onChange={(e) => setKeepingUnit(e.target.value)}
+                      placeholder="e.g. Box"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-0.5">How you track stock ({form.unit} if empty)</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-1.5"></span>
+                      Selling Unit
+                    </label>
+                    <input
+                      className="input"
+                      value={sellingUnit}
+                      onChange={(e) => setSellingUnit(e.target.value)}
+                      placeholder="e.g. Pcs"
+                    />
+                    <p className="text-[11px] text-gray-400 mt-0.5">How you sell to customers</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Purchase → Keeping Rate
+                    </label>
+                    <input
+                      className="input"
+                      type="number"
+                      step="0.001"
+                      min="0"
+                      value={purchaseToKeepingRate}
+                      onChange={(e) => setPurchaseToKeepingRate(e.target.value === '' ? '' : Number(e.target.value))}
+                      placeholder="e.g. 12"
+                    />
+                    {purchaseUnit && keepingUnit && purchaseToKeepingRate !== '' && Number(purchaseToKeepingRate) > 0 && (
+                      <p className="text-xs text-violet-600 mt-1 font-medium">
+                        1 {purchaseUnit} = {Number(purchaseToKeepingRate)} {keepingUnit}
+                      </p>
+                    )}
+                    {!purchaseToKeepingRate && (
+                      <p className="text-[11px] text-gray-400 mt-0.5">e.g. 1 Carton = 12 Boxes</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Keeping → Selling Rate
+                    </label>
+                    <input
+                      className="input"
+                      type="number"
+                      step="0.001"
+                      min="0"
+                      value={keepingToSellingRate}
+                      onChange={(e) => setKeepingToSellingRate(e.target.value === '' ? '' : Number(e.target.value))}
+                      placeholder="e.g. 24"
+                    />
+                    {(keepingUnit || form.unit) && sellingUnit && keepingToSellingRate !== '' && Number(keepingToSellingRate) > 0 && (
+                      <p className="text-xs text-green-600 mt-1 font-medium">
+                        1 {keepingUnit || form.unit} = {Number(keepingToSellingRate)} {sellingUnit}
+                      </p>
+                    )}
+                    {!keepingToSellingRate && (
+                      <p className="text-[11px] text-gray-400 mt-0.5">e.g. 1 Box = 24 Pcs</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Stock summary if quantity and rates are set */}
+                {form.quantity > 0 && (
+                  <div className="mt-4 p-3 rounded-lg bg-blue-50 border border-blue-100">
+                    <p className="text-sm text-blue-800">
+                      <strong>Current Stock:</strong> {form.quantity.toLocaleString()} {keepingUnit || form.unit}
+                      {keepingToSellingRate !== '' && Number(keepingToSellingRate) > 0 && (
+                        <span className="text-blue-600 ml-2">
+                          ≈ {(form.quantity * Number(keepingToSellingRate)).toLocaleString()} {sellingUnit || form.unit}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Pricing Section */}
-            <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
-              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
-                <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center">
-                  <Tag className="w-4 h-4 text-emerald-600" />
+            <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-md hover:shadow-lg transition-shadow duration-300 border-l-4 border-l-emerald-500">
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-emerald-100">
+                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-md shadow-emerald-200/40">
+                  <Tag className="w-4 h-4 text-white" />
                 </div>
                 <h3 className="text-base font-semibold text-gray-900">Pricing & Currency</h3>
               </div>
@@ -794,40 +1096,73 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Cost Price *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Cost Price *
+                      <span className="ml-1 text-xs font-normal text-gray-400">per {purchaseUnit || form.unit}</span>
+                    </label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">{priceCurrency === baseCurrency ? baseCurrency : priceCurrency}</span>
                       <input className="input pl-16" type="number" step="1" min="0" value={rawCostPrice}
                         onChange={(e) => { const v = parseFloat(e.target.value) || 0; setRawCostPrice(v); if (!isConverting) setForm({ ...form, costPrice: v }) }} required />
                     </div>
+                    {purchaseUnit && purchaseToKeepingRate !== '' && Number(purchaseToKeepingRate) > 0 && (
+                      <p className="mt-1 text-xs text-purple-600 font-medium">
+                        1 {purchaseUnit} = {Number(purchaseToKeepingRate)} {keepingUnit || form.unit}
+                        {rawCostPrice > 0 && <> → <span className="text-gray-500">{fmt(baseCostPrice / Number(purchaseToKeepingRate))} / {keepingUnit || form.unit}</span></>}
+                      </p>
+                    )}
                     {isConverting && !fxError && rawCostPrice > 0 && <p className="mt-1.5 text-xs text-gray-500">≈ {fmt(baseCostPrice)}</p>}
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Selling Price *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      Selling Price *
+                      <span className="ml-1 text-xs font-normal text-gray-400">per {sellingUnit || form.unit}</span>
+                    </label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400">{priceCurrency === baseCurrency ? baseCurrency : priceCurrency}</span>
                       <input className="input pl-16" type="number" step="1" min="0" value={rawSellingPrice}
                         onChange={(e) => { const v = parseFloat(e.target.value) || 0; setRawSellingPrice(v); if (!isConverting) setForm({ ...form, sellingPrice: v }) }} required />
                     </div>
+                    {sellingUnit && keepingToSellingRate !== '' && Number(keepingToSellingRate) > 0 && (
+                      <p className="mt-1 text-xs text-green-600 font-medium">
+                        1 {keepingUnit || form.unit} = {Number(keepingToSellingRate)} {sellingUnit}
+                        {rawSellingPrice > 0 && <> → <span className="text-gray-500">{fmt(baseSellingPrice)} / {keepingUnit || form.unit}</span></>}
+                      </p>
+                    )}
                     {isConverting && !fxError && rawSellingPrice > 0 && <p className="mt-1.5 text-xs text-gray-500">≈ {fmt(baseSellingPrice)}</p>}
                   </div>
                 </div>
-                {baseCostPrice > 0 && baseSellingPrice > 0 && (() => {
-                  const marginPct = ((baseSellingPrice - baseCostPrice) / baseCostPrice) * 100
+                {/* Profit Margin */}
+                {(() => {
+                  // Calculate per-keeping-unit prices for margin
+                  const costPerKeeping = purchaseToKeepingRate !== '' && Number(purchaseToKeepingRate) > 0
+                    ? baseCostPrice / Number(purchaseToKeepingRate)
+                    : baseCostPrice
+                  const sellPerKeeping = keepingToSellingRate !== '' && Number(keepingToSellingRate) > 0
+                    ? baseSellingPrice * Number(keepingToSellingRate)
+                    : baseSellingPrice
+                  const marginPct = costPerKeeping > 0 ? ((sellPerKeeping - costPerKeeping) / costPerKeeping) * 100 : 0
+                  const profit = sellPerKeeping - costPerKeeping
+                  if (costPerKeeping <= 0 || sellPerKeeping <= 0) return null
                   const bgColor = marginPct >= 30 ? 'bg-emerald-50 border-emerald-200' : marginPct >= 15 ? 'bg-amber-50 border-amber-200' : 'bg-rose-50 border-rose-200'
                   const textColor = marginPct >= 30 ? 'text-emerald-700' : marginPct >= 15 ? 'text-amber-700' : 'text-rose-700'
-                  const profit = baseSellingPrice - baseCostPrice
                   return (
                     <div className={`rounded-xl border ${bgColor} p-4`}>
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1">Profit Margin</p>
+                          <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-1">
+                            Profit Margin <span className="font-normal normal-case">(per {keepingUnit || form.unit})</span>
+                          </p>
                           <p className={`text-xl font-bold ${textColor}`}>{fmt(profit)}</p>
                         </div>
                         <div className={`text-3xl font-bold ${textColor} tabular-nums`}>{marginPct.toFixed(1)}%</div>
                       </div>
                       <div className="mt-2 h-2 bg-white/60 rounded-full overflow-hidden">
                         <div className={`h-full rounded-full transition-all duration-500 ${marginPct >= 30 ? 'bg-emerald-500' : marginPct >= 15 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ width: `${Math.min(100, Math.max(0, marginPct))}%` }} />
+                      </div>
+                      <div className="flex justify-between mt-2 text-xs text-gray-500">
+                        <span>Cost: {fmt(costPerKeeping)}/{keepingUnit || form.unit}</span>
+                        <span>Sell: {fmt(sellPerKeeping)}/{keepingUnit || form.unit}</span>
                       </div>
                     </div>
                   )
@@ -836,10 +1171,10 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
             </div>
 
             {/* Inventory & Sales Units Section */}
-            <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
-              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
-                <div className="w-8 h-8 rounded-lg bg-cyan-100 flex items-center justify-center">
-                  <Package className="w-4 h-4 text-cyan-600" />
+            <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-md hover:shadow-lg transition-shadow duration-300 border-l-4 border-l-cyan-500">
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-cyan-100">
+                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-md shadow-cyan-200/40">
+                  <Package className="w-4 h-4 text-white" />
                 </div>
                 <h3 className="text-base font-semibold text-gray-900">Inventory & Tracking</h3>
               </div>
@@ -876,24 +1211,30 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
                 </div>
               </div>
 
-              {/* Sales Units (GOODS only) — inside Inventory section */}              {form.type === 'GOODS' && (
+              {/* Alternative Sales Units (GOODS only) */}
+              {form.type === 'GOODS' && (
                 <div className="mt-6 pt-6 border-t border-gray-100">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center">
-                      <span className="text-lg">📐</span>
+                  <div className="flex items-center gap-3 mb-1">
+                    <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-md shadow-amber-200/40">
+                      <Layers className="w-4 h-4 text-white" />
                     </div>
-                    <h3 className="text-base font-semibold text-gray-900">Sales Units (Retail & Wholesale)</h3>
+                    <div>
+                      <h3 className="text-base font-semibold text-gray-900">Alternative Sales Units</h3>
+                      <p className="text-xs text-gray-400">Define additional bundle sizes beyond your default selling unit</p>
+                    </div>
                   </div>
-                  <SalesUnitsEditor value={salesUnits} baseUnit={form.unit} basePrice={baseSellingPrice} onChange={(units) => setSalesUnits(units)} />
+                  <div className="ml-11">
+                    <SalesUnitsEditor value={salesUnits} baseUnit={form.unit} basePrice={baseSellingPrice} onChange={(units) => setSalesUnits(units)} />
+                  </div>
                 </div>
               )}
             </div>
 
             {/* Organization Section */}
-            <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-sm hover:shadow-md transition-shadow duration-300">
-              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
-                <div className="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center">
-                  <span className="text-lg">🏢</span>
+            <div className="bg-white rounded-2xl border border-gray-200/80 p-6 shadow-md hover:shadow-lg transition-shadow duration-300 border-l-4 border-l-slate-400">
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-200">
+                <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-slate-400 to-slate-600 flex items-center justify-center shadow-md shadow-slate-200/40">
+                  <Building2 className="w-4 h-4 text-white" />
                 </div>
                 <h3 className="text-base font-semibold text-gray-900">Organization</h3>
               </div>
@@ -921,7 +1262,12 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
         {activeTab === 'categories' && (
           <div className="max-w-2xl mx-auto space-y-6">
             <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h3 className="text-sm font-semibold text-gray-900 mb-4">📁 Product Categories</h3>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-7 h-7 rounded-md bg-indigo-100 flex items-center justify-center">
+                  <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                </div>
+                <h3 className="text-sm font-semibold text-gray-900">Product Categories</h3>
+              </div>
               <p className="text-xs text-gray-500 mb-4">Manage categories for organizing your products. Each business manages its own categories.</p>
               <div className="flex gap-2 mb-4">
                 <input className="input flex-1" value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)}
@@ -948,7 +1294,12 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
         {activeTab === 'brands' && (
           <div className="max-w-2xl mx-auto space-y-6">
             <div className="bg-white rounded-xl border border-gray-200 p-6">
-              <h3 className="text-sm font-semibold text-gray-900 mb-4">🏷 Product Brands</h3>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-7 h-7 rounded-md bg-violet-100 flex items-center justify-center">
+                  <Palette className="w-3.5 h-3.5 text-violet-600" />
+                </div>
+                <h3 className="text-sm font-semibold text-gray-900">Product Brands</h3>
+              </div>
               <p className="text-xs text-gray-500 mb-4">Manage brands for your products. Each business manages its own brands independently.</p>
               <div className="flex gap-2 mb-4">
                 <input className="input flex-1" value={newBrandName} onChange={(e) => setNewBrandName(e.target.value)}

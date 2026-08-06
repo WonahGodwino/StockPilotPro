@@ -329,12 +329,44 @@ export default function Products() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-gray-600">{p.type}</td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-3">
                         <span className={`font-medium ${isLow ? 'text-danger-600' : 'text-gray-900'}`}>
-                          {p.quantity} {p.unit}
+                          {p.quantity} {p.keepingUnit || p.unit}
                         </span>
+                        {p.sellingUnit && p.keepingToSellingRate != null && Number(p.keepingToSellingRate) > 0 && (
+                          <span className="text-xs text-gray-400 ml-1">
+                            (≈{(p.quantity * Number(p.keepingToSellingRate)).toLocaleString()} {p.sellingUnit})
+                          </span>
+                        )}
                         {isLow && (
                           <span className="ml-1.5 badge bg-danger-50 text-danger-600">Low</span>
+                        )}
+                        {(p.purchaseUnit || p.keepingUnit || p.sellingUnit) && (
+                          <div className="flex flex-wrap items-center gap-1 mt-1">
+                            {p.purchaseUnit && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 text-[10px] font-medium">
+                                Buy: {p.purchaseUnit}
+                              </span>
+                            )}
+                            {p.keepingUnit && <span className="text-gray-300 text-[10px]">→</span>}
+                            {p.keepingUnit && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-medium">
+                                Keep: {p.keepingUnit}
+                              </span>
+                            )}
+                            {p.sellingUnit && <span className="text-gray-300 text-[10px]">→</span>}
+                            {p.sellingUnit && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-green-50 text-green-700 text-[10px] font-medium">
+                                Sell: {p.sellingUnit}
+                              </span>
+                            )}
+                            {p.purchaseToKeepingRate != null && Number(p.purchaseToKeepingRate) > 0 && (
+                              <span className="text-[10px] text-gray-400 w-full">1 {p.purchaseUnit} = {Number(p.purchaseToKeepingRate)} {p.keepingUnit || p.unit}</span>
+                            )}
+                            {p.keepingToSellingRate != null && Number(p.keepingToSellingRate) > 0 && (
+                              <span className="text-[10px] text-gray-400 w-full">1 {p.keepingUnit || p.unit} = {Number(p.keepingToSellingRate)} {p.sellingUnit || p.unit}</span>
+                            )}
+                          </div>
                         )}
                       </td>
                       <td className="px-4 py-3 text-right text-gray-600">
@@ -403,7 +435,16 @@ export default function Products() {
         <ProductModal
           product={editing}
           onClose={() => { setModalOpen(false); setEditing(null) }}
-          onSaved={() => {
+          onSaved={(opts) => {
+            if (opts?.editProductId) {
+              // Duplicate resolved — open edit mode for existing product
+              const existing = products.find((p) => p.id === opts.editProductId)
+              if (existing) {
+                setEditing(existing)
+                // modal stays open — ProductModal re-renders with product prop set
+                return
+              }
+            }
             setModalOpen(false)
             setEditing(null)
             void load(page)

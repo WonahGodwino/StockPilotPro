@@ -99,6 +99,27 @@ export function getRoleSeatLimit(
   return isStarterPlan(plan) ? 1 : null
 }
 
+/**
+ * Throws if the tenant has no active subscription.
+ * Call this at the start of any write operation that requires an active plan.
+ */
+export async function assertTenantHasActiveSubscription(tenantId: string): Promise<void> {
+  const subscription = await prisma.subscription.findFirst({
+    where: {
+      tenantId,
+      status: 'ACTIVE',
+      expiryDate: { gt: new Date() },
+    },
+    select: { id: true },
+  })
+
+  if (!subscription) {
+    throw new Error(
+      'Subscription inactive or expired. Please renew your plan to continue recording sales.'
+    )
+  }
+}
+
 export async function getActiveSubscriptionForTenant(tenantId: string, now = new Date()): Promise<ActiveSubscription | null> {
   await prisma.subscription.updateMany({
     where: {

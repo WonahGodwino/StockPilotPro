@@ -507,6 +507,25 @@ model Product {
 }
 
 // ──────────────────────────────────────────────
+// PRODUCT CATALOG (Global repository for autocomplete)
+// ──────────────────────────────────────────────
+
+model ProductCatalog {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  category     String   @default("Uncategorized")
+  unit         String   @default("pcs")
+  purchaseUnit String?
+  keepingUnit  String?
+  sellingUnit  String?
+  usageCount   Int      @default(1)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([name])
+}
+
+// ──────────────────────────────────────────────
 // SALES
 // ──────────────────────────────────────────────
 

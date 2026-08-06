@@ -42,7 +42,9 @@ export const useCartStore = create<CartState>()(
 
       updateQuantity: (productId, qty) =>
         set((state) => ({
-          items: state.items.map((i) => (i.product.id === productId ? { ...i, quantity: Math.max(0, qty) } : i)),
+          items: state.items
+            .map((i) => (i.product.id === productId ? { ...i, quantity: Math.max(0, qty) } : i))
+            .filter((i) => i.quantity > 0),
         })),
 
       updateDiscount: (productId, discount) =>

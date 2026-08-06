@@ -379,7 +379,8 @@ export default function SalesPage() {
     }
   }, [cart])
 
-  const total = cart.items.reduce((s, i) => s + i.quantity * i.unitPrice - i.discount, 0) - discount
+  const cartSubtotal = cart.total
+  const total = cartSubtotal - discount
   const totalInSaleCurrency = Math.max(0, convertBaseToSaleCurrency(total))
   const change = amountPaid - totalInSaleCurrency
 
@@ -404,6 +405,7 @@ export default function SalesPage() {
         items: cart.items.map((i) => ({
           productId: i.product.id,
           quantity: i.quantity,
+          unitSold: i.product.sellingUnit || i.product.unit,
           unitPrice: convertBaseToSaleCurrency(i.unitPrice),
           costPrice: convertBaseToSaleCurrency(Number(i.product.costPrice)),
           discount: convertBaseToSaleCurrency(i.discount),
@@ -684,7 +686,17 @@ export default function SalesPage() {
               cart.items.map((item) => (
                 <div key={item.product.id} className="bg-gray-50 rounded-lg p-3">
                   <div className="flex items-start justify-between gap-2">
-                    <p className="text-sm font-medium text-gray-900 flex-1 truncate">{item.product.name}</p>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{item.product.name}</p>
+                      {(item.product.sellingUnit || item.product.keepingUnit) && (
+                        <p className="text-[10px] text-gray-400 mt-0.5">
+                          {item.product.sellingUnit && `Sold in: ${item.product.sellingUnit}`}
+                          {item.product.keepingUnit && item.product.keepingToSellingRate != null && Number(item.product.keepingToSellingRate) > 0 && (
+                            <span className="ml-2">1 {item.product.keepingUnit} = {Number(item.product.keepingToSellingRate)} {item.product.sellingUnit}</span>
+                          )}
+                        </p>
+                      )}
+                    </div>
                     <button
                       onClick={() => cart.removeItem(item.product.id)}
                       className="text-gray-400 hover:text-danger-500 flex-shrink-0"
@@ -736,8 +748,8 @@ export default function SalesPage() {
               <span className="text-gray-500">Subtotal</span>
               <span>
                 {saleCurrency === baseCurrency
-                  ? fmt(cart.items.reduce((s, i) => s + i.quantity * i.unitPrice, 0))
-                  : `${getCurrencySymbol(saleCurrency)}${convertBaseToSaleCurrency(cart.items.reduce((s, i) => s + i.quantity * i.unitPrice, 0)).toFixed(2)}`}
+                  ? fmt(cart.total)
+                  : `${getCurrencySymbol(saleCurrency)}${convertBaseToSaleCurrency(cart.total).toFixed(2)}`}
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2">
