@@ -12,6 +12,7 @@ const createSchema = z.object({
   description: z.string().optional(),
   type: z.enum(['GOODS', 'SERVICE']).default('GOODS'),
   unit: z.string().default('pcs'),
+  imageUrl: z.string().optional(),
   purchaseUnit: z.string().optional(),
   keepingUnit: z.string().optional(),
   sellingUnit: z.string().optional(),

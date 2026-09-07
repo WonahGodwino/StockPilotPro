@@ -531,6 +531,21 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
   const [catalogLoading, setCatalogLoading] = useState(false)
   const catalogTimer = useRef<ReturnType<typeof setTimeout>>()
 
+  // Internet product lookup
+  const [lookupResult, setLookupResult] = useState<{ name: string; description: string | null; imageUrl: string | null; category: string | null; brand: string | null } | null>(null)
+  const [lookupLoading, setLookupLoading] = useState(false)
+  const lookupTimer = useRef<ReturnType<typeof setTimeout>>()
+
+  const fetchLookup = useCallback(async (q: string) => {
+    if (q.length < 3) { setLookupResult(null); return }
+    setLookupLoading(true)
+    try {
+      const { data } = await api.get<{ data: typeof lookupResult }>('/product-lookup', { params: { q } })
+      setLookupResult(data.data)
+    } catch { setLookupResult(null) }
+    finally { setLookupLoading(false) }
+  }, [])
+
   const fetchCatalog = useCallback(async (q: string) => {
     if (q.length < 2) { setCatalogSuggestions([]); setCatalogOpen(false); return }
     setCatalogLoading(true)
@@ -549,6 +564,21 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
     if (s.purchaseUnit && !purchaseUnit) setPurchaseUnit(s.purchaseUnit)
     if (s.keepingUnit && !keepingUnit) setKeepingUnit(s.keepingUnit)
     if (s.sellingUnit && !sellingUnit) setSellingUnit(s.sellingUnit)
+  }
+
+  const applyLookup = () => {
+    if (!lookupResult) return
+    setForm((prev) => ({
+      ...prev,
+      description: (!prev.description && lookupResult.description) ? lookupResult.description : prev.description,
+      category: (prev.category === 'Uncategorized' && lookupResult.category) ? lookupResult.category : prev.category,
+      imageUrl: (!prev.imageUrl && lookupResult.imageUrl) ? lookupResult.imageUrl : prev.imageUrl,
+    }))
+    if (lookupResult.brand && !brand) {
+      setBrand(lookupResult.brand)
+    }
+    toast.success('Product details auto-filled from web lookup')
+    setLookupResult(null)
   }
 
   const isConverting = priceCurrency !== baseCurrency
@@ -614,6 +644,7 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
     name: product?.name || '',
     category: product?.category || 'Uncategorized',
     description: product?.description || '',
+    imageUrl: product?.imageUrl || '',
     type: product?.type || 'GOODS',
     unit: product?.unit || 'pcs',
     quantity: Number(product?.quantity ?? 0),
@@ -664,6 +695,8 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
 
       const payload = {
         ...form,
+        expiryDate: form.expiryDate || undefined,
+        purchaseDate: form.purchaseDate || undefined,
         costPrice: costPerKeeping,
         sellingPrice: sellPerKeeping,
         originalCurrency: isConverting ? priceCurrency : undefined,
@@ -883,6 +916,8 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
                         setForm({ ...form, name: e.target.value })
                         clearTimeout(catalogTimer.current)
                         catalogTimer.current = setTimeout(() => fetchCatalog(e.target.value), 250)
+                        clearTimeout(lookupTimer.current)
+                        lookupTimer.current = setTimeout(() => fetchLookup(e.target.value), 400)
                       }}
                       onFocus={() => { if (catalogSuggestions.length > 0) setCatalogOpen(true) }}
                       onBlur={() => setTimeout(() => setCatalogOpen(false), 200)}
@@ -916,6 +951,65 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
                     )}
                   </div>
                 </div>
+                {/* Internet Product Lookup Card */}
+                {lookupResult && !product && (
+                  <div className="md:col-span-2">
+                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 flex gap-4">
+                      {lookupResult.imageUrl && (
+                        <div className="w-20 h-20 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 flex-shrink-0 flex items-center justify-center">
+                          <img
+                            src={lookupResult.imageUrl}
+                            alt={lookupResult.name}
+                            className="max-w-full max-h-full object-contain"
+                            onError={(e) => {
+                              const el = e.target as HTMLImageElement
+                              el.style.display = 'none'
+                              const parent = el.parentElement
+                              if (parent) {
+                                parent.innerHTML = '<svg class="w-8 h-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>'
+                              }
+                            }}
+                          />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Sparkles className="w-3.5 h-3.5 text-blue-500" />
+                          <span className="text-xs font-semibold text-blue-700">Found on the web</span>
+                          {lookupLoading && <Loader2 className="w-3 h-3 animate-spin text-blue-400 ml-1" />}
+                        </div>
+                        <p className="text-sm font-medium text-gray-800 truncate">{lookupResult.name}</p>
+                        {lookupResult.description && (
+                          <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{lookupResult.description}</p>
+                        )}
+                        <div className="flex items-center gap-2 mt-2">
+                          {lookupResult.category && (
+                            <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">{lookupResult.category}</span>
+                          )}
+                          {lookupResult.brand && (
+                            <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-medium">{lookupResult.brand}</span>
+                          )}
+                        </div>
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            type="button"
+                            onClick={applyLookup}
+                            className="text-xs font-medium text-white bg-blue-600 rounded-lg px-3 py-1.5 hover:bg-blue-700 transition-colors flex items-center gap-1"
+                          >
+                            <Sparkles className="w-3 h-3" /> Auto-fill Details
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setLookupResult(null)}
+                            className="text-xs font-medium text-gray-500 bg-white border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 transition-colors"
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
                   <select className="input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as 'GOODS' | 'SERVICE' })}>
@@ -948,6 +1042,65 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
                   <input className="input" value={form.unit} placeholder="pcs, kg, hr..." onChange={(e) => setForm({ ...form, unit: e.target.value })} />
+                </div>
+                {/* Product Image */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Product Image</label>
+                  {form.imageUrl ? (
+                    <div className="relative group">
+                      <div className="w-full h-32 rounded-lg overflow-hidden border border-gray-200 bg-gray-50 flex items-center justify-center">
+                        <img src={form.imageUrl} alt={form.name} className="max-w-full max-h-full object-contain"
+                          onError={(e) => {
+                            const el = e.target as HTMLImageElement
+                            el.style.display = 'none'
+                            const parent = el.parentElement
+                            if (parent) parent.innerHTML = '<svg class="w-8 h-8 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>'
+                          }}
+                        />
+                      </div>
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
+                        <label className="cursor-pointer px-3 py-1.5 bg-white text-xs font-medium text-gray-700 rounded-lg hover:bg-gray-100 transition-colors">
+                          Replace
+                          <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
+                            const file = e.target.files?.[0]
+                            if (!file) return
+                            const formData = new FormData(); formData.append('file', file)
+                            try {
+                              const { data } = await api.post('/upload', formData)
+                              setForm((prev) => ({ ...prev, imageUrl: data.url || data.data?.url }))
+                              toast.success('Image uploaded')
+                            } catch { toast.error('Upload failed') }
+                          }} />
+                        </label>
+                        <button type="button" onClick={() => setForm((prev) => ({ ...prev, imageUrl: '' }))}
+                          className="px-3 py-1.5 bg-white text-xs font-medium text-rose-600 rounded-lg hover:bg-rose-50 transition-colors">
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center w-full h-32 rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/30 transition-colors">
+                      <div className="flex flex-col items-center gap-1">
+                        <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                        <span className="text-xs text-gray-500">Upload or use web lookup</span>
+                      </div>
+                      <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
+                        const file = e.target.files?.[0]
+                        if (!file) return
+                        const formData = new FormData(); formData.append('file', file)
+                        try {
+                          const { data } = await api.post('/upload', formData)
+                          setForm((prev) => ({ ...prev, imageUrl: data.url || data.data?.url }))
+                          toast.success('Image uploaded')
+                        } catch { toast.error('Upload failed') }
+                      }} />
+                    </label>
+                  )}
+                </div>
+                {/* Description */}
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                  <textarea className="input resize-none" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Product description — auto-filled from web lookup if available" />
                 </div>
               </div>
             </div>
@@ -1197,7 +1350,7 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
                 </div>
                 {form.type === 'GOODS' && (
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Expiry Date</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Expiry Date <span className="text-xs font-normal text-gray-400">(optional)</span></label>
                     <input className="input" type="date" value={form.expiryDate} onChange={(e) => setForm({ ...form, expiryDate: e.target.value })} />
                   </div>
                 )}
@@ -1246,10 +1399,6 @@ export default function ProductModal({ product, onClose, onSaved }: Props) {
                     {subsidiaries.map((s) => (<option key={s.id} value={s.id}>{s.name}</option>))}
                   </select>
                   {isSalesperson && <p className="mt-1.5 text-xs text-gray-500">Products are created under your assigned subsidiary.</p>}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Description</label>
-                  <textarea className="input resize-none" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
                 </div>
               </div>
             </div>

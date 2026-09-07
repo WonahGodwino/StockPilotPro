@@ -12,6 +12,7 @@ const updateSchema = z.object({
   description: z.string().optional(),
   type: z.enum(['GOODS', 'SERVICE']).optional(),
   unit: z.string().optional(),
+  imageUrl: z.string().nullable().optional(),
   purchaseUnit: z.string().nullable().optional(),
   keepingUnit: z.string().nullable().optional(),
   sellingUnit: z.string().nullable().optional(),

@@ -29,6 +29,11 @@ const SubscriptionTransactionsPage = lazy(() => import('@/pages/superadmin/Subsc
 const SystemMaintenancePage = lazy(() => import('@/pages/superadmin/SystemMaintenance'))
 const SettingsPage = lazy(() => import('@/pages/Settings'))
 const EnterpriseAIPage = lazy(() => import('@/pages/EnterpriseAI'))
+const OrdersPage = lazy(() => import('@/pages/Orders'))
+const StorePage = lazy(() => import('@/pages/store/Store'))
+const StoreCartPage = lazy(() => import('@/pages/store/StoreCart'))
+const StoreCheckoutPage = lazy(() => import('@/pages/store/StoreCheckout'))
+const TrackOrderPage = lazy(() => import('@/pages/store/TrackOrder'))
 
 // Error boundary to catch crashes from lazy-loaded page components
 class RouteErrorBoundary extends Component<{ children: ReactNode; fallback?: ReactNode }, { hasError: boolean; error: Error | null }> {
@@ -184,8 +189,12 @@ export default function App() {
       />
       <Suspense fallback={<PageLoader />}>
         <Routes>
+          <Route path="/store/:slug" element={<StorePage />} />
+          <Route path="/store/:slug/cart" element={<StoreCartPage />} />
+          <Route path="/store/:slug/checkout" element={<StoreCheckoutPage />} />
+          <Route path="/track" element={<TrackOrderPage />} />
+          <Route path="/" element={<Navigate to="/store/demo-corp" replace />} />
           <Route path="/home" element={<Home />} />
-          <Route path="/" element={<Navigate to="/home" replace />} />
           <Route path="/login" element={<Login />} />
           <Route path="/sso-callback" element={<SsoCallback />} />
           <Route
@@ -200,6 +209,7 @@ export default function App() {
             <Route path="sales" element={<SalesPage />} />
             <Route path="customers" element={<CustomersPage />} />
             <Route path="expenses" element={<Expenses />} />
+            <Route path="orders" element={<OrdersPage />} />
             <Route path="reports" element={<Reports />} />
             <Route path="subsidiaries" element={<Subsidiaries />} />
             <Route path="users" element={<Users />} />
@@ -270,6 +280,7 @@ export default function App() {
             <Route path="sales" element={<SalesPage />} />
             <Route path="customers" element={<CustomersPage />} />
             <Route path="expenses" element={<Expenses />} />
+            <Route path="orders" element={<OrdersPage />} />
             <Route path="reports" element={<Reports />} />
             <Route path="subsidiaries" element={<Subsidiaries />} />
             <Route path="users" element={<Users />} />

@@ -45,6 +45,7 @@ export interface Product {
   name: string
   category?: string
   description?: string
+  imageUrl?: string | null
   type: ProductType
   unit: string
   purchaseUnit?: string | null

@@ -7,6 +7,7 @@ import { checkLowStockAlerts, generateReceiptNumber } from '@/lib/helpers'
 import { logAudit } from '@/lib/audit'
 import { assertTenantHasActiveSubscription } from '@/lib/subscription-enforcement'
 import { logger } from '@/lib/logger'
+import type { OrderStatus } from '@prisma/client'
 
 const MAX_RECEIPT_RETRIES = 3
 
@@ -23,7 +24,7 @@ const createSaleSchema = z.object({
   subsidiaryId: z.string(),
   items: z.array(saleItemSchema).min(1),
   discount: z.number().min(0).default(0),
-  paymentMethod: z.enum(['CASH', 'TRANSFER', 'POS']).default('CASH'),
+  paymentMethod: z.enum(['CASH', 'TRANSFER', 'POS', 'ONLINE']).default('CASH'),
   amountPaid: z.number().min(0),
   currency: z.string().length(3).transform((v) => v.toUpperCase()).default('USD'),
   fxRate: z.number().positive().default(1),
@@ -31,6 +32,19 @@ const createSaleSchema = z.object({
   transactionRef: z.string().min(6).max(180).optional(),
   notes: z.string().optional(),
   customerId: z.string().optional(),
+  // ── E-commerce fields ────────────────────────────────────────────────
+  source: z.enum(['POS', 'ONLINE']).default('POS'),
+  orderStatus: z.enum(['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'RETURNED']).optional(),
+  shippingAddress: z.object({
+    name: z.string(),
+    line1: z.string(),
+    line2: z.string().optional(),
+    city: z.string(),
+    state: z.string(),
+    zip: z.string().optional(),
+    country: z.string(),
+    phone: z.string().optional(),
+  }).nullable().optional(),
 })
 
 export async function OPTIONS() {
@@ -126,7 +140,8 @@ export async function POST(req: NextRequest) {
     tenantId = user.tenantId || undefined
 
     // ── Subscription enforcement ────────────────────────────────────────
-    if (user.tenantId) {
+    // Bypassed when SUBSCRIPTION_REQUIRED=false (proprietary/personal use)
+    if (user.tenantId && process.env.SUBSCRIPTION_REQUIRED !== 'false') {
       await assertTenantHasActiveSubscription(user.tenantId)
     }
 
@@ -244,6 +259,9 @@ export async function POST(req: NextRequest) {
           transactionRef,
           notes: data.notes,
           customerId: resolvedCustomerId,
+          source: data.source,
+          orderStatus: data.orderStatus,
+          shippingAddress: data.shippingAddress,
           items: data.items,
           subtotals,
           products: productSnapshots,
@@ -290,7 +308,7 @@ export async function POST(req: NextRequest) {
         syncRef: sale!.syncRef,
         transactionRef: sale!.transactionRef,
         subsidiaryId: sale!.subsidiaryId,
-        itemsCount: sale!.items.length,
+        itemsCount: ((sale! as unknown) as { items: { length: number } }).items.length,
       },
       req,
     })
@@ -348,13 +366,16 @@ interface SaleTransactionParams {
   totalAmount: number
   discount: number
   amountPaid: number
-  paymentMethod: 'CASH' | 'TRANSFER' | 'POS'
+  paymentMethod: 'CASH' | 'TRANSFER' | 'POS' | 'ONLINE'
   currency: string
   fxRate: number
   syncRef?: string
   transactionRef?: string
   notes?: string
   customerId?: string
+  source?: 'POS' | 'ONLINE'
+  orderStatus?: string
+  shippingAddress?: Record<string, unknown> | null
   items: { productId: string; quantity: number; unitSold?: string; unitPrice: number; costPrice: number; discount: number }[]
   subtotals: { productId: string; quantity: number; unitSold?: string; unitPrice: number; costPrice: number; discount: number; subtotal: number }[]
   products: { id: string; type: string; quantity: number; unit: string }[]
@@ -364,7 +385,7 @@ async function executeSaleTransaction(params: SaleTransactionParams) {
   const {
     tenantId, subsidiaryId, userId, totalAmount, discount, amountPaid,
     paymentMethod, currency, fxRate, syncRef, transactionRef, notes,
-    customerId, items, subtotals, products,
+    customerId, source, orderStatus, shippingAddress, items, subtotals, products,
   } = params
 
   return prisma.$transaction(async (tx) => {
@@ -414,6 +435,9 @@ async function executeSaleTransaction(params: SaleTransactionParams) {
         notes,
         createdBy: userId,
         customerId,
+        source: source || 'POS',
+        orderStatus: (orderStatus || (source === 'ONLINE' ? 'PENDING' : undefined)) as OrderStatus,
+        shippingAddress: (shippingAddress || undefined) as import('@prisma/client/runtime/library').InputJsonValue,
         items: {
           create: subtotals.map((item) => ({
             productId: item.productId,
